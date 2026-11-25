@@ -1,16 +1,12 @@
 "use client";
-
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 );
-
 export default function AddProductPage() {
   const [image, setImage] = useState(null);
-
   const [form, setForm] = useState({
     name: "",
     brand: "",
@@ -18,28 +14,22 @@ export default function AddProductPage() {
     price: "",
     barcode: "",
   });
-
   const [loading, setLoading] = useState(false);
-
   function updateField(field, value) {
     setForm((prev) => ({
       ...prev,
       [field]: value,
     }));
   }
-
   async function handleSubmit(e) {
     e.preventDefault();
-
     if (!form.name.trim()) {
       alert("اكتب اسم المنتج أولاً.");
       return;
     }
-
     setLoading(true);
-
     try {
-      // 1. إنشاء المنتج
+      // 1. إنشاء المنتج الأساسي
       const { data: createdProduct, error: insertError } =
         await supabase
           .from("products")
@@ -47,31 +37,24 @@ export default function AddProductPage() {
             name: form.name.trim(),
             brand: form.brand.trim() || null,
             category: form.category.trim() || null,
-            price: form.price
-              ? Number(form.price)
-              : null,
+            price: form.price ? Number(form.price) : null,
             barcode: form.barcode.trim() || null,
             ai_status: "pending",
             verification_status: "unverified",
           })
           .select()
           .single();
-
       if (insertError) {
-        console.error(insertError);
+        console.error("PRODUCT INSERT ERROR:", insertError);
         throw new Error("تعذر إنشاء المنتج.");
       }
-
       let imageUrl = null;
-
       // 2. رفع صورة المنتج
       if (image) {
         const extension =
           image.name.split(".").pop() || "jpg";
-
         const fileName =
           `${createdProduct.id}-${Date.now()}.${extension}`;
-
         const { error: uploadError } =
           await supabase.storage
             .from("product-images")
@@ -80,27 +63,35 @@ export default function AddProductPage() {
               upsert: true,
               contentType: image.type,
             });
-
         if (uploadError) {
-          console.error(uploadError);
+          console.error("IMAGE UPLOAD ERROR:", uploadError);
+          await supabase
+            .from("products")
+            .update({
+              ai_status: "failed",
+            })
+            .eq("id", createdProduct.id);
           throw new Error("تعذر رفع صورة المنتج.");
         }
-
         const { data: publicUrlData } =
           supabase.storage
             .from("product-images")
             .getPublicUrl(fileName);
-
         imageUrl = publicUrlData.publicUrl;
-
-        await supabase
-          .from("products")
-          .update({
-            image_url: imageUrl,
-          })
-          .eq("id", createdProduct.id);
+        const { error: imageUpdateError } =
+          await supabase
+            .from("products")
+            .update({
+              image_url: imageUrl,
+            })
+            .eq("id", createdProduct.id);
+        if (imageUpdateError) {
+          console.error(
+            "IMAGE URL SAVE ERROR:",
+            imageUpdateError
+          );
+        }
       }
-
       // 3. تشغيل ذكاء المنتج
       const response = await fetch(
         "/api/analyze-product",
@@ -117,26 +108,26 @@ export default function AddProductPage() {
           }),
         }
       );
-
       const analyzed = await response.json();
-
+      console.log("ANALYZE RESPONSE:", analyzed);
+      // 4. إذا فشل الذكاء
       if (!response.ok) {
-        console.error(analyzed);
-
+        console.error(
+          "ANALYZE PRODUCT ERROR:",
+          analyzed
+        );
         await supabase
           .from("products")
           .update({
             ai_status: "failed",
           })
           .eq("id", createdProduct.id);
-
         throw new Error(
           analyzed.error ||
             "تعذر تحليل المنتج."
         );
       }
-
-      // 4. حفظ نتيجة ذكاء المنتج كاملة
+      // 5. حفظ نتيجة ذكاء المنتج
       const { error: updateError } =
         await supabase
           .from("products")
@@ -144,87 +135,74 @@ export default function AddProductPage() {
             name:
               analyzed.product_name ||
               createdProduct.name,
-
             brand:
               analyzed.brand ||
               createdProduct.brand,
-
             category:
               analyzed.category ||
               createdProduct.category,
-
+            product_type:
+              analyzed.product_type ||
+              createdProduct.product_type ||
+              "local",
             description:
               analyzed.full_description ||
               analyzed.short_description ||
               null,
-
             specifications:
               analyzed.specifications ||
               null,
-
             features:
               analyzed.features ||
               null,
-
             uses:
               analyzed.uses ||
               null,
-
             target_audience:
               analyzed.target_audience ||
               null,
-
             manufacturer:
               analyzed.manufacturer ||
               null,
-
             country_of_origin:
               analyzed.country_of_origin ||
               null,
-
             size_or_volume:
               analyzed.size_or_volume ||
               null,
-
             ingredients:
               analyzed.ingredients ||
               null,
-
             warnings:
               analyzed.warnings ||
               null,
-
             storage:
               analyzed.storage ||
               null,
-
             warranty:
               analyzed.warranty ||
               null,
-
             verification_notes:
               analyzed.verification_notes ||
               null,
-
             confidence:
               analyzed.confidence ||
               null,
-
             ai_status: "completed",
-
             verification_status:
               "unverified",
           })
           .eq("id", createdProduct.id);
-
       if (updateError) {
-        console.error(updateError);
+        console.error(
+          "SAVE ANALYSIS ERROR:",
+          updateError
+        );
         throw new Error(
           "تم تحليل المنتج لكن تعذر حفظ النتيجة."
         );
       }
-
-      // 5. تصفير النموذج
+      // 6. تصفير النموذج
       setForm({
         name: "",
         brand: "",
@@ -232,20 +210,15 @@ export default function AddProductPage() {
         price: "",
         barcode: "",
       });
-
       setImage(null);
-
-      alert(
-        "✅ تم حفظ المنتج وتحليل معلوماته بنجاح"
-      );
-
-      // 6. الانتقال إلى ذكاء المنتج
+      // 7. الانتقال مباشرة إلى ذكاء المنتج
       window.location.href =
         `/product-intelligence/${createdProduct.id}`;
-
     } catch (error) {
-      console.error(error);
-
+      console.error(
+        "ADD PRODUCT ERROR:",
+        error
+      );
       alert(
         error.message ||
           "حدث خطأ أثناء إضافة المنتج."
@@ -254,7 +227,6 @@ export default function AddProductPage() {
       setLoading(false);
     }
   }
-
   return (
     <main
       style={{
@@ -288,7 +260,6 @@ export default function AddProductPage() {
           >
             🧠 ذكاء المنتج
           </h1>
-
           <p
             style={{
               color: "#666",
@@ -298,10 +269,8 @@ export default function AddProductPage() {
             أضف صورة المنتج والبيانات الأساسية فقط.
             سوق AI سيحاول تحليل المنتج وتجهيز معلوماته.
           </p>
-
           <form onSubmit={handleSubmit}>
             {/* الصورة */}
-
             <div
               style={{
                 marginTop: 25,
@@ -317,7 +286,6 @@ export default function AddProductPage() {
               >
                 📸 صورة المنتج
               </label>
-
               <input
                 type="file"
                 accept="image/*"
@@ -331,9 +299,7 @@ export default function AddProductPage() {
                 }}
               />
             </div>
-
             {/* الاسم */}
-
             <Field
               label="اسم المنتج *"
               value={form.name}
@@ -342,9 +308,7 @@ export default function AddProductPage() {
               }
               placeholder="مثال: Rosa Misl"
             />
-
             {/* العلامة */}
-
             <Field
               label="العلامة التجارية"
               value={form.brand}
@@ -353,9 +317,7 @@ export default function AddProductPage() {
               }
               placeholder="مثال: Ajmal"
             />
-
             {/* التصنيف */}
-
             <Field
               label="التصنيف"
               value={form.category}
@@ -364,9 +326,7 @@ export default function AddProductPage() {
               }
               placeholder="مثال: عطور"
             />
-
             {/* السعر */}
-
             <Field
               label="السعر"
               type="number"
@@ -376,9 +336,7 @@ export default function AddProductPage() {
               }
               placeholder="170"
             />
-
             {/* الباركود */}
-
             <Field
               label="الباركود"
               value={form.barcode}
@@ -387,7 +345,6 @@ export default function AddProductPage() {
               }
               placeholder="اختياري"
             />
-
             <div
               style={{
                 background: "#eef6ff",
@@ -399,17 +356,13 @@ export default function AddProductPage() {
               }}
             >
               💡 <strong>ملاحظة:</strong>
-
               <br />
-
               لا تحتاج إلى كتابة الوصف أو المواصفات
               أو المميزات بنفسك.
               <br />
-
               🧠 ذكاء المنتج سيحاول جمع المعلومات
               وتجهيزها للمراجعة.
             </div>
-
             <button
               type="submit"
               disabled={loading}
@@ -439,7 +392,6 @@ export default function AddProductPage() {
     </main>
   );
 }
-
 function Field({
   label,
   value,
@@ -462,7 +414,6 @@ function Field({
       >
         {label}
       </label>
-
       <input
         type={type}
         value={value}
