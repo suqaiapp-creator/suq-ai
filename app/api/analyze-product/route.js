@@ -10,9 +10,7 @@ export async function POST(request) {
 
     if (!product) {
       return Response.json(
-        {
-          error: "بيانات المنتج غير موجودة",
-        },
+        { error: "بيانات المنتج غير موجودة" },
         { status: 400 }
       );
     }
@@ -24,9 +22,7 @@ export async function POST(request) {
 
     if (!productName) {
       return Response.json(
-        {
-          error: "اسم المنتج مطلوب",
-        },
+        { error: "اسم المنتج مطلوب" },
         { status: 400 }
       );
     }
@@ -34,10 +30,9 @@ export async function POST(request) {
     const instructions = `
 أنت نظام "ذكاء المنتج" في منصة سوق AI.
 
-مهمتك:
-البحث عن المنتج الحقيقي الموجود في السوق، ثم استخراج معلومات موثوقة عنه.
+مهمتك البحث عن المنتج الحقيقي الموجود في السوق، ثم استخراج معلومات موثوقة عنه.
 
-بيانات المنتج التي أدخلها صاحب المتجر:
+بيانات المنتج:
 
 اسم المنتج:
 ${productName}
@@ -71,10 +66,8 @@ ${barcode || "غير متوفر"}
 16. لا تكتب إعلانًا تسويقيًا في هذه المرحلة.
 17. الهدف هو بناء بطاقة معلومات حقيقية للمنتج.
 
-مهم جدًا:
-يجب أن تكون النتيجة JSON فقط.
-لا تستخدم Markdown.
-لا تستخدم ```json.
+أعد النتيجة بصيغة JSON فقط.
+لا تضف شرحًا خارج JSON.
 `;
 
     const userQuery = `
@@ -95,19 +88,40 @@ ${barcode || "غير متوفر"}
 
 إذا وجدت صفحة رسمية للمنتج، اعتمد عليها أولًا.
 إذا لم توجد، استخدم مصادر موثوقة تعرض نفس المنتج.
+
+أعد JSON بهذا الشكل:
+
+{
+  "product_name": "",
+  "brand": "",
+  "category": "",
+  "short_description": "",
+  "full_description": "",
+  "specifications": "",
+  "features": "",
+  "uses": "",
+  "target_audience": "",
+  "manufacturer": "",
+  "country_of_origin": "",
+  "size_or_volume": "",
+  "ingredients": "",
+  "warnings": "",
+  "storage": "",
+  "warranty": "",
+  "verification_notes": "",
+  "confidence": "",
+  "sources": []
+}
 `;
 
     const response = await openai.responses.create({
       model: "gpt-5-mini",
-
       tools: [
         {
           type: "web_search",
         },
       ],
-
       instructions,
-
       input: userQuery,
     });
 
@@ -115,9 +129,7 @@ ${barcode || "غير متوفر"}
 
     if (!text) {
       return Response.json(
-        {
-          error: "لم يتم الحصول على نتيجة من البحث.",
-        },
+        { error: "لم يتم الحصول على نتيجة من البحث." },
         { status: 500 }
       );
     }
@@ -150,14 +162,9 @@ ${barcode || "غير متوفر"}
     }
 
     return Response.json({
-      product_name:
-        result.product_name || productName,
-
-      brand:
-        result.brand || brand || "غير متوفر",
-
-      category:
-        result.category || category || "غير متوفر",
+      product_name: result.product_name || productName,
+      brand: result.brand || brand || "غير متوفر",
+      category: result.category || category || "غير متوفر",
 
       short_description:
         result.short_description || "غير متوفر",
