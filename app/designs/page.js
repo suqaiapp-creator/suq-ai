@@ -15,6 +15,7 @@ export default function DesignsPage() {
   const [format, setFormat] = useState("1:1");
   const [designs, setDesigns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export default function DesignsPage() {
     loadDesigns(productId);
   }
 
-  async function createDesignRequest() {
+  async function createDesign() {
     if (!selectedProduct) {
       setMessage("❌ اختر منتجًا أولًا");
       return;
@@ -84,56 +85,73 @@ export default function DesignsPage() {
       return;
     }
 
-    const prompt = `
-إنشاء تصميم إعلاني احترافي لمنتج:
-${product.name}
+    setGenerating(true);
+    setMessage("⏳ جاري تجهيز التصميم...");
 
-العلامة التجارية:
-${product.brand || ""}
+    try {
+      // إنشاء سجل التصميم أولًا
+      const { data: design, error: insertError } =
+        await supabase
+          .from("ad_images")
+          .insert({
+            product_id: selectedProduct,
+            format,
+            status: "generating",
+          })
+          .select()
+          .single();
 
-التصنيف:
-${product.category || ""}
+      if (insertError) {
+        console.error(insertError);
+        throw new Error("تعذر إنشاء طلب التصميم");
+      }
 
-السعر:
-${product.price || ""} ${product.currency || "AED"}
+      // طلب إنشاء الصورة
+      const response = await fetch(
+        "/api/generate-ad-image",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            product,
+            format,
+            designId: design.id,
+          }),
+        }
+      );
 
-التصميم مخصص للسوق الإماراتي.
+      const result = await response.json();
 
-مهم:
-لا تخترع مواصفات غير موجودة.
-لا تضف معلومات غير موجودة عن المنتج.
+      if (!response.ok) {
+        await supabase
+          .from("ad_images")
+          .update({
+            status: "failed",
+          })
+          .eq("id", design.id);
 
-المقاس:
-${format}
-`;
+        throw new Error(
+          result.error || "تعذر إنشاء الصورة"
+        );
+      }
 
-    const { data, error } = await supabase
-      .from("ad_images")
-      .insert({
-        product_id: selectedProduct,
-        format,
-        prompt,
-        status: "pending",
-      })
-      .select()
-      .single();
+      setMessage("✅ تم إنشاء التصميم بنجاح.");
 
-    if (error) {
+      await loadDesigns(selectedProduct);
+    } catch (error) {
       console.error(error);
-      setMessage("❌ تعذر إنشاء طلب التصميم");
-      return;
+
+      setMessage(
+        `❌ ${error.message || "حدث خطأ أثناء إنشاء التصميم"}`
+      );
+
+      await loadDesigns(selectedProduct);
+    } finally {
+      setGenerating(false);
     }
-
-    setDesigns((prev) => [data, ...prev]);
-
-    setMessage(
-      "✅ تم تجهيز طلب التصميم. ربط توليد الصورة بالذكاء الاصطناعي سيكون في الخطوة التالية."
-    );
   }
-
-  const selectedProductData = products.find(
-    (item) => item.id === selectedProduct
-  );
 
   if (loading) {
     return (
@@ -150,6 +168,10 @@ ${format}
       </main>
     );
   }
+
+  const selectedProductData = products.find(
+    (item) => item.id === selectedProduct
+  );
 
   return (
     <main
@@ -173,8 +195,9 @@ ${format}
       >
         <div>
           <h1>🎨 التصاميم الإعلانية</h1>
+
           <p style={{ color: "#666" }}>
-            جهّز تصميمًا إعلانيًا احترافيًا لمنتجك.
+            أنشئ تصاميم إعلانية احترافية لمنتجاتك.
           </p>
         </div>
 
@@ -192,7 +215,6 @@ ${format}
         </Link>
       </div>
 
-      {/* اختيار المنتج */}
       <section
         style={{
           border: "1px solid #ddd",
@@ -220,15 +242,11 @@ ${format}
           {products.map((product) => (
             <option key={product.id} value={product.id}>
               {product.name}
-              {product.price
-                ? ` - ${product.price} ${product.currency || "AED"}`
-                : ""}
             </option>
           ))}
         </select>
       </section>
 
-      {/* معاينة المنتج */}
       {selectedProductData && (
         <section
           style={{
@@ -305,7 +323,6 @@ ${format}
         </section>
       )}
 
-      {/* المقاس */}
       <section
         style={{
           border: "1px solid #ddd",
@@ -326,7 +343,6 @@ ${format}
           }}
         >
           <FormatButton
-            value="1:1"
             label="⬛ 1:1"
             description="Instagram"
             selected={format === "1:1"}
@@ -334,7 +350,6 @@ ${format}
           />
 
           <FormatButton
-            value="9:16"
             label="📱 9:16"
             description="TikTok / Reels / Snapchat"
             selected={format === "9:16"}
@@ -342,7 +357,6 @@ ${format}
           />
 
           <FormatButton
-            value="16:9"
             label="🖥️ 16:9"
             description="YouTube / شاشة"
             selected={format === "16:9"}
@@ -351,7 +365,6 @@ ${format}
         </div>
       </section>
 
-      {/* إنشاء */}
       <section
         style={{
           border: "1px solid #ddd",
@@ -361,30 +374,36 @@ ${format}
           textAlign: "center",
         }}
       >
-        <h2>3️⃣ تجهيز التصميم</h2>
+        <h2>3️⃣ إنشاء التصميم</h2>
 
         <p style={{ color: "#666" }}>
-          سيتم إنشاء التصميم بالذكاء الاصطناعي في
-          المرحلة التالية.
+          سيتم إنشاء صورة إعلانية للمنتج بالمقاس
+          الذي اخترته.
         </p>
 
         <button
-          onClick={createDesignRequest}
+          onClick={createDesign}
+          disabled={generating}
           style={{
             padding: "15px 30px",
             borderRadius: 10,
             border: "none",
-            background: "#16a34a",
+            background: generating
+              ? "#999"
+              : "#16a34a",
             color: "#fff",
             fontSize: 18,
-            cursor: "pointer",
+            cursor: generating
+              ? "not-allowed"
+              : "pointer",
           }}
         >
-          🎨 إنشاء تصميم إعلاني
+          {generating
+            ? "⏳ جاري إنشاء التصميم..."
+            : "🎨 إنشاء تصميم إعلاني"}
         </button>
       </section>
 
-      {/* الرسالة */}
       {message && (
         <div
           style={{
@@ -399,7 +418,6 @@ ${format}
         </div>
       )}
 
-      {/* التصاميم */}
       {selectedProduct && (
         <section>
           <h2>🖼️ تصاميم المنتج</h2>
@@ -467,7 +485,11 @@ ${format}
                     <strong>الحالة:</strong>{" "}
                     {design.status === "pending"
                       ? "⏳ قيد الانتظار"
-                      : design.status}
+                      : design.status === "generating"
+                      ? "⏳ جاري الإنشاء"
+                      : design.status === "completed"
+                      ? "✅ مكتمل"
+                      : "❌ فشل"}
                   </p>
                 </div>
               ))}
@@ -480,7 +502,6 @@ ${format}
 }
 
 function FormatButton({
-  value,
   label,
   description,
   selected,
