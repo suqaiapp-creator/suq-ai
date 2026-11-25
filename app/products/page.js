@@ -18,11 +18,12 @@ export default function ProductsPage() {
 
   async function loadProducts() {
     const { data, error } = await supabase
-  .from("products")
-  .select("*");
+      .from("products")
+      .select("*");
 
-console.log("PRODUCTS:", data);
-console.log("PRODUCT ERROR:", error);
+    console.log("PRODUCTS:", data);
+    console.log("PRODUCT ERROR:", error);
+
     if (error) {
       console.error(error);
       setLoading(false);
@@ -198,22 +199,25 @@ console.log("PRODUCT ERROR:", error);
                   {product.verification_status || "غير متحقق"}
                 </div>
 
-                <button
+                <a
+                  href={`/marketing/${product.id}`}
                   style={{
+                    display: "block",
                     width: "100%",
+                    boxSizing: "border-box",
                     marginTop: "15px",
-                    border: "none",
+                    textAlign: "center",
+                    textDecoration: "none",
                     background: "#6246e5",
                     color: "#fff",
                     padding: "13px",
                     borderRadius: "12px",
                     fontSize: "16px",
                     fontWeight: "700",
-                    cursor: "pointer",
                   }}
                 >
                   🚀 سوّق المنتج
-                </button>
+                </a>
               </div>
             ))}
           </div>
