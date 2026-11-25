@@ -20,31 +20,45 @@ export default function MarketingPage({ params }) {
   }, []);
 
   async function loadData() {
-    const { data: productData, error: productError } =
-      await supabase
+    try {
+      const { id } = await params;
+
+      const { data: productData, error: productError } = await supabase
         .from("products")
         .select("*")
-        .eq("id", params.id)
+        .eq("id", id)
         .single();
 
-    if (productError) {
-      console.error(productError);
+      if (productError) {
+        console.error("PRODUCT ERROR:", productError);
+        setMessage("❌ لم يتم العثور على المنتج.");
+        setLoading(false);
+        return;
+      }
+
+      setProduct(productData);
+
+      const { data: marketingData, error: marketingError } = await supabase
+        .from("marketing_contents")
+        .select("*")
+        .eq("product_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (marketingError) {
+        console.error("MARKETING ERROR:", marketingError);
+      }
+
+      if (marketingData) {
+        setMarketing(marketingData);
+      }
+    } catch (error) {
+      console.error(error);
+      setMessage("❌ حدث خطأ أثناء تحميل البيانات.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setProduct(productData);
-
-    const { data: marketingData } = await supabase
-      .from("marketing_contents")
-      .select("*")
-      .eq("product_id", params.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    setMarketing(marketingData || null);
-    setLoading(false);
   }
 
   async function createMarketingContent() {
@@ -52,81 +66,86 @@ export default function MarketingPage({ params }) {
 
     setCreating(true);
     setMessage("");
+    setMarketing(null);
 
-    const { data, error } = await supabase
-      .from("marketing_contents")
-      .insert({
-        product_id: product.id,
+    try {
+      // إرسال بيانات المنتج إلى API الخاص بنا
+      const response = await fetch("/api/generate-marketing", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          product: {
+            name: product.name,
+            brand: product.brand,
+            category: product.category,
+            price: product.price,
+            currency: product.currency,
+            description: product.description,
+            specifications: product.specifications,
+            features: product.features,
+          },
+        }),
+      });
 
-        marketing_description:
-          `اكتشف ${product.name}${
-            product.brand ? ` من ${product.brand}` : ""
-          }، منتج مميز مناسب لعشاق ${
-            product.category || "المنتجات المميزة"
-          }.`,
+      const result = await response.json();
 
-        instagram:
-          `✨ ${product.name}\n\n` +
-          `${
-            product.description ||
-            "منتج مميز يستحق التجربة."
-          }\n\n` +
-          `💰 السعر: ${product.price || ""} ${
-            product.currency || "AED"
-          }\n\n` +
-          `📩 تواصل معنا الآن لمعرفة المزيد.`,
+      if (!response.ok) {
+        console.error("AI ERROR:", result);
+        throw new Error(
+          result.error || "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي."
+        );
+      }
 
-        whatsapp:
-          `مرحباً 👋\n\n` +
-          `متوفر لدينا: ${product.name}\n\n` +
-          `${
-            product.description ||
-            "منتج مميز."
-          }\n\n` +
-          `💰 السعر: ${product.price || ""} ${
-            product.currency || "AED"
-          }\n\n` +
-          `للطلب أو الاستفسار تواصل معنا.`,
+      // حفظ نتيجة الذكاء الاصطناعي في Supabase
+      const { data, error } = await supabase
+        .from("marketing_contents")
+        .insert({
+          product_id: product.id,
 
-        tiktok_snapchat:
-          `🔥 ${product.name}\n` +
-          `${
-            product.description ||
-            "منتج يستحق التجربة."
-          }\n` +
-          `💰 ${product.price || ""} ${
-            product.currency || "AED"
-          }`,
+          marketing_description:
+            result.marketing_description || null,
 
-        seo_title: product.name,
+          instagram:
+            result.instagram || null,
 
-        seo_description:
-          product.description ||
-          `تعرف على ${product.name} واحصل على معلومات المنتج والسعر.`,
+          whatsapp:
+            result.whatsapp || null,
 
-        seo_keywords:
-          `${product.name}, ${
-            product.brand || ""
-          }, ${product.category || ""}`,
+          tiktok_snapchat:
+            result.tiktok_snapchat || null,
 
-        call_to_action:
-          "اطلب منتجك الآن وتواصل معنا لمعرفة التفاصيل.",
+          seo_title:
+            result.seo_title || null,
 
-        status: "draft",
-      })
-      .select()
-      .single();
+          seo_description:
+            result.seo_description || null,
 
-    if (error) {
-      console.error(error);
-      setMessage("❌ حدث خطأ أثناء حفظ المحتوى.");
+          seo_keywords:
+            result.seo_keywords || null,
+
+          call_to_action:
+            result.call_to_action || null,
+
+          status: "generated",
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("SAVE MARKETING ERROR:", error);
+        throw new Error("تم إنشاء المحتوى ولكن تعذر حفظه في قاعدة البيانات.");
+      }
+
+      setMarketing(data);
+      setMessage("✅ تم إنشاء المحتوى التسويقي بالذكاء الاصطناعي وحفظه بنجاح.");
+    } catch (error) {
+      console.error("CREATE MARKETING ERROR:", error);
+      setMessage(`❌ ${error.message}`);
+    } finally {
       setCreating(false);
-      return;
     }
-
-    setMarketing(data);
-    setMessage("✅ تم إنشاء وحفظ المحتوى التسويقي بنجاح.");
-    setCreating(false);
   }
 
   if (loading) {
@@ -135,21 +154,22 @@ export default function MarketingPage({ params }) {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f7f8fc",
           padding: "30px 18px",
           fontFamily: "Arial, sans-serif",
+          background: "#f7f7fb",
         }}
       >
         <div
           style={{
-            maxWidth: "1000px",
+            maxWidth: "850px",
             margin: "0 auto",
             background: "#fff",
             padding: "30px",
             borderRadius: "20px",
+            textAlign: "center",
           }}
         >
-          ⏳ جاري تحميل المنتج...
+          جاري تحميل المنتج...
         </div>
       </main>
     );
@@ -161,23 +181,37 @@ export default function MarketingPage({ params }) {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f7f8fc",
           padding: "30px 18px",
           fontFamily: "Arial, sans-serif",
+          background: "#f7f7fb",
         }}
       >
         <div
           style={{
-            maxWidth: "1000px",
+            maxWidth: "850px",
             margin: "0 auto",
             background: "#fff",
             padding: "30px",
             borderRadius: "20px",
+            textAlign: "center",
           }}
         >
-          <h1>المنتج غير موجود</h1>
-          <a href="/products">
-            ← العودة إلى المنتجات
+          <h2>المنتج غير موجود</h2>
+
+          <a
+            href="/products"
+            style={{
+              display: "inline-block",
+              marginTop: "20px",
+              padding: "12px 20px",
+              borderRadius: "12px",
+              background: "#6246e5",
+              color: "#fff",
+              textDecoration: "none",
+              fontWeight: "700",
+            }}
+          >
+            العودة إلى المنتجات
           </a>
         </div>
       </main>
@@ -189,379 +223,277 @@ export default function MarketingPage({ params }) {
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fc",
+        padding: "25px 18px 50px",
         fontFamily: "Arial, sans-serif",
-        color: "#171923",
-        padding: "25px 18px 60px",
+        background: "#f7f7fb",
       }}
     >
       <div
         style={{
-          maxWidth: "1000px",
+          maxWidth: "850px",
           margin: "0 auto",
         }}
       >
         <a
           href="/products"
           style={{
-            textDecoration: "none",
-            color: "#333",
             display: "inline-block",
-            marginBottom: "20px",
+            marginBottom: "18px",
+            textDecoration: "none",
+            color: "#6246e5",
+            fontWeight: "700",
           }}
         >
-          ← العودة إلى المنتجات
+          ← العودة إلى إدارة المنتجات
         </a>
 
         <div
           style={{
             background: "#fff",
-            border: "1px solid #e8e8ef",
-            borderRadius: "22px",
-            padding: "28px",
-            marginBottom: "20px",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "15px",
-              color: "#6246e5",
-              fontWeight: "700",
-            }}
-          >
-            🚀 سوق AI
-          </div>
-
-          <h1
-            style={{
-              fontSize: "34px",
-              margin: "8px 0",
-            }}
-          >
-            سوّق منتجك
-          </h1>
-
-          <p
-            style={{
-              color: "#666",
-              margin: 0,
-              lineHeight: "1.8",
-            }}
-          >
-            أنشئ جميع مواد التسويق الخاصة بمنتجك من مكان واحد.
-          </p>
-        </div>
-
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e8e8ef",
             borderRadius: "22px",
             padding: "25px",
-            marginBottom: "20px",
+            boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
           }}
         >
-          <h2 style={{ marginTop: 0 }}>
-            📦 {product.name}
-          </h2>
-
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: "12px",
-              marginTop: "20px",
+              marginBottom: "25px",
+              paddingBottom: "20px",
+              borderBottom: "1px solid #eee",
             }}
           >
-            {product.brand && (
-              <InfoBox
-                title="العلامة"
-                value={product.brand}
-              />
-            )}
+            <div
+              style={{
+                display: "inline-block",
+                background: "#eeeaff",
+                color: "#6246e5",
+                padding: "7px 12px",
+                borderRadius: "20px",
+                fontSize: "13px",
+                fontWeight: "700",
+                marginBottom: "12px",
+              }}
+            >
+              🤖 التسويق بالذكاء الاصطناعي
+            </div>
 
-            {product.category && (
-              <InfoBox
-                title="الفئة"
-                value={product.category}
-              />
-            )}
+            <h1
+              style={{
+                margin: "0 0 10px",
+                fontSize: "30px",
+              }}
+            >
+              {product.name}
+            </h1>
 
-            {product.price !== null && (
-              <InfoBox
-                title="السعر"
-                value={`${product.price} ${
-                  product.currency || "AED"
-                }`}
-              />
-            )}
+            <p
+              style={{
+                margin: "0",
+                color: "#666",
+                lineHeight: "1.8",
+              }}
+            >
+              {product.brand && `العلامة التجارية: ${product.brand}`}
+              {product.category && ` • ${product.category}`}
+            </p>
 
-            <InfoBox
-              title="حالة التحقق"
-              value={
-                product.verification_status ||
-                "غير متحقق"
-              }
-            />
+            {product.price !== null &&
+              product.price !== undefined &&
+              product.price !== "" && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    fontSize: "20px",
+                    fontWeight: "800",
+                  }}
+                >
+                  💰 {product.price} {product.currency || "AED"}
+                </div>
+              )}
           </div>
-        </div>
-
-        <div
-          style={{
-            background:
-              "linear-gradient(135deg, #6246e5, #7c5cff)",
-            color: "#fff",
-            borderRadius: "22px",
-            padding: "30px",
-            marginBottom: "20px",
-            textAlign: "center",
-          }}
-        >
-          <div style={{ fontSize: "42px" }}>🤖</div>
-
-          <h2
-            style={{
-              margin: "10px 0",
-              fontSize: "26px",
-            }}
-          >
-            أنشئ تسويق المنتج بالذكاء الاصطناعي
-          </h2>
-
-          <p
-            style={{
-              margin: "0 auto 20px",
-              maxWidth: "650px",
-              lineHeight: "1.8",
-              opacity: 0.9,
-            }}
-          >
-            إنشاء المحتوى التسويقي المناسب لمنتجك لجميع
-            المنصات من زر واحد.
-          </p>
 
           <button
             onClick={createMarketingContent}
             disabled={creating}
             style={{
+              width: "100%",
               border: "none",
-              background: "#fff",
-              color: "#6246e5",
-              padding: "14px 28px",
-              borderRadius: "12px",
-              fontSize: "17px",
-              fontWeight: "700",
-              cursor: creating ? "wait" : "pointer",
-              opacity: creating ? 0.7 : 1,
+              background: creating ? "#999" : "#6246e5",
+              color: "#fff",
+              padding: "16px",
+              borderRadius: "14px",
+              fontSize: "18px",
+              fontWeight: "800",
+              cursor: creating ? "default" : "pointer",
             }}
           >
             {creating
-              ? "⏳ جاري الإنشاء..."
-              : "🚀 إنشاء الكل"}
+              ? "🤖 جاري إنشاء المحتوى بالذكاء الاصطناعي..."
+              : "🚀 إنشاء الكل بالذكاء الاصطناعي"}
           </button>
 
           {message && (
             <div
               style={{
                 marginTop: "18px",
-                background: "#fff",
-                color: "#222",
-                padding: "12px",
+                padding: "14px",
                 borderRadius: "12px",
+                background: message.startsWith("❌")
+                  ? "#fff0f0"
+                  : "#eefbf3",
+                color: message.startsWith("❌")
+                  ? "#b42318"
+                  : "#16794c",
+                lineHeight: "1.7",
+                fontWeight: "700",
               }}
             >
               {message}
             </div>
           )}
-        </div>
 
-        {marketing && (
-          <>
-            <h2
+          {marketing && (
+            <div
               style={{
-                fontSize: "26px",
-                margin: "30px 0 15px",
+                marginTop: "25px",
+                display: "grid",
+                gap: "16px",
               }}
             >
-              ✨ المحتوى الذي تم إنشاؤه
-            </h2>
+              <MarketingCard
+                title="✍️ الوصف التسويقي"
+                content={marketing.marketing_description}
+              />
 
-            <ResultCard
-              icon="✍️"
-              title="الوصف التسويقي"
-              content={marketing.marketing_description}
-            />
+              <MarketingCard
+                title="📱 Instagram"
+                content={marketing.instagram}
+              />
 
-            <ResultCard
-              icon="📱"
-              title="Instagram"
-              content={marketing.instagram}
-            />
+              <MarketingCard
+                title="💬 WhatsApp"
+                content={marketing.whatsapp}
+              />
 
-            <ResultCard
-              icon="💬"
-              title="WhatsApp"
-              content={marketing.whatsapp}
-            />
+              <MarketingCard
+                title="🎵 TikTok / Snapchat"
+                content={marketing.tiktok_snapchat}
+              />
 
-            <ResultCard
-              icon="🎵"
-              title="TikTok / Snapchat"
-              content={marketing.tiktok_snapchat}
-            />
+              <MarketingCard
+                title="🔎 SEO"
+                content={
+                  <>
+                    <strong>العنوان:</strong>
+                    <div style={{ marginBottom: "12px" }}>
+                      {marketing.seo_title}
+                    </div>
 
-            <ResultCard
-              icon="🔎"
-              title="SEO"
-              content={
-                `العنوان: ${marketing.seo_title}\n\n` +
-                `الوصف: ${marketing.seo_description}\n\n` +
-                `الكلمات المفتاحية: ${marketing.seo_keywords}`
-              }
-            />
+                    <strong>الوصف:</strong>
+                    <div style={{ marginBottom: "12px" }}>
+                      {marketing.seo_description}
+                    </div>
 
-            <ResultCard
-              icon="🎯"
-              title="دعوة لاتخاذ إجراء"
-              content={marketing.call_to_action}
-            />
-          </>
-        )}
+                    <strong>الكلمات المفتاحية:</strong>
+                    <div>{marketing.seo_keywords}</div>
+                  </>
+                }
+              />
 
-        <h2
-          style={{
-            fontSize: "25px",
-            margin: "35px 0 15px",
-          }}
-        >
-          أدوات التسويق القادمة
-        </h2>
+              <MarketingCard
+                title="🎯 الدعوة لاتخاذ إجراء"
+                content={marketing.call_to_action}
+              />
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: "16px",
-          }}
-        >
-          <MarketingCard
-            icon="🖼️"
-            title="صورة إعلان"
-            text="تصميم إعلاني احترافي باستخدام صورة المنتج."
-          />
+              <div
+                style={{
+                  background: "#f5f5f5",
+                  borderRadius: "16px",
+                  padding: "20px",
+                }}
+              >
+                <h2
+                  style={{
+                    marginTop: 0,
+                    fontSize: "20px",
+                  }}
+                >
+                  🖼️ صورة الإعلان
+                </h2>
 
-          <MarketingCard
-            icon="🎬"
-            title="فيديو إعلان"
-            text="فيديو قصير مناسب لـ Reels وTikTok وSnapchat."
-          />
+                <p
+                  style={{
+                    color: "#666",
+                    marginBottom: 0,
+                  }}
+                >
+                  سيتم إضافة إنشاء صورة الإعلان بالذكاء الاصطناعي في الخطوة
+                  التالية.
+                </p>
+              </div>
+
+              <div
+                style={{
+                  background: "#f5f5f5",
+                  borderRadius: "16px",
+                  padding: "20px",
+                }}
+              >
+                <h2
+                  style={{
+                    marginTop: 0,
+                    fontSize: "20px",
+                  }}
+                >
+                  🎬 فيديو الإعلان
+                </h2>
+
+                <p
+                  style={{
+                    color: "#666",
+                    marginBottom: 0,
+                  }}
+                >
+                  سيتم إضافة إنشاء فيديو الإعلان في مرحلة لاحقة.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>
   );
 }
 
-function InfoBox({ title, value }) {
+function MarketingCard({ title, content }) {
   return (
     <div
       style={{
-        background: "#f7f8fc",
-        borderRadius: "14px",
-        padding: "15px",
+        background: "#fafafa",
+        border: "1px solid #eee",
+        borderRadius: "16px",
+        padding: "20px",
       }}
     >
-      <div
+      <h2
         style={{
-          color: "#777",
-          fontSize: "13px",
-          marginBottom: "5px",
-        }}
-      >
-        {title}
-      </div>
-
-      <div style={{ fontWeight: "700" }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function ResultCard({ icon, title, content }) {
-  return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #e8e8ef",
-        borderRadius: "20px",
-        padding: "22px",
-        marginBottom: "16px",
-      }}
-    >
-      <h3
-        style={{
-          margin: "0 0 14px",
+          marginTop: 0,
+          marginBottom: "14px",
           fontSize: "20px",
         }}
       >
-        {icon} {title}
-      </h3>
+        {title}
+      </h2>
 
       <div
         style={{
-          background: "#f7f8fc",
-          borderRadius: "14px",
-          padding: "16px",
           whiteSpace: "pre-wrap",
-          lineHeight: "1.8",
-          color: "#444",
+          lineHeight: "1.9",
+          color: "#333",
         }}
       >
         {content || "لا يوجد محتوى."}
       </div>
-    </div>
-  );
-}
-
-function MarketingCard({ icon, title, text }) {
-  return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #e8e8ef",
-        borderRadius: "20px",
-        padding: "22px",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "32px",
-          marginBottom: "12px",
-        }}
-      >
-        {icon}
-      </div>
-
-      <h3
-        style={{
-          margin: "0 0 8px",
-          fontSize: "19px",
-        }}
-      >
-        {title}
-      </h3>
-
-      <p
-        style={{
-          color: "#666",
-          lineHeight: "1.7",
-          margin: 0,
-        }}
-      >
-        {text}
-      </p>
     </div>
   );
 }
