@@ -13,6 +13,8 @@ export default function AdminReviewPage() {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [actionLoading, setActionLoading] = useState(null);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     loadReview();
@@ -31,11 +33,12 @@ export default function AdminReviewPage() {
         return;
       }
 
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
+      const { data: profile, error: profileError } =
+        await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
 
       if (
         profileError ||
@@ -47,13 +50,14 @@ export default function AdminReviewPage() {
         return;
       }
 
-      const { data: productData, error: productError } = await supabase
-        .from("products")
-        .select("*")
-        .or(
-          "safety_status.eq.review,safety_status.eq.violation,safety_status.eq.locked,verification_status.eq.review,verification_status.eq.locked"
-        )
-        .order("created_at", { ascending: false });
+      const { data: productData, error: productError } =
+        await supabase
+          .from("products")
+          .select("*")
+          .or(
+            "safety_status.eq.review,safety_status.eq.violation,safety_status.eq.locked,verification_status.eq.review,verification_status.eq.locked"
+          )
+          .order("created_at", { ascending: false });
 
       if (productError) {
         console.error(productError);
@@ -113,6 +117,7 @@ export default function AdminReviewPage() {
 
       const enriched = productList.map((product) => {
         const shop = shopMap[product.shop_id] || null;
+
         const owner = shop
           ? profileMap[shop.owner_id] || null
           : null;
@@ -144,9 +149,7 @@ export default function AdminReviewPage() {
       };
     }
 
-    if (
-      product.safety_status === "violation"
-    ) {
+    if (product.safety_status === "violation") {
       return {
         text: "مخالفة",
         background: "#ffedd5",
@@ -173,10 +176,7 @@ export default function AdminReviewPage() {
   }
 
   function getLevel(product) {
-    const level =
-      product.safety_level ||
-      product.confidence ||
-      "low";
+    const level = product.safety_level || "low";
 
     if (level === "critical") {
       return {
@@ -207,6 +207,147 @@ export default function AdminReviewPage() {
       background: "#dcfce7",
       color: "#166534",
     };
+  }
+
+  async function moderateProduct(product, action) {
+    if (actionLoading) return;
+
+    setActionLoading(product.id);
+    setMessage("");
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      let updateData = {};
+      let moderationStatus = "review";
+      let reason = "";
+      let description = "";
+
+      if (action === "approve") {
+        updateData = {
+          safety_status: "clear",
+          safety_level: "low",
+          verification_status: "verified",
+          locked_at: null,
+          locked_by: null,
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+          last_checked_at: new Date().toISOString(),
+        };
+
+        moderationStatus = "approved";
+        reason = "تم اعتماد المنتج من Super Admin";
+        description = `اعتماد المنتج: ${product.name}`;
+      }
+
+      if (action === "lock") {
+        updateData = {
+          safety_status: "locked",
+          safety_level:
+            product.safety_level === "low"
+              ? "medium"
+              : product.safety_level || "medium",
+          verification_status: "locked",
+          locked_at: new Date().toISOString(),
+          locked_by: user.id,
+          approved_by: null,
+          approved_at: null,
+          last_checked_at: new Date().toISOString(),
+        };
+
+        moderationStatus = "locked";
+        reason =
+          product.safety_reason ||
+          "تم قفل المنتج من Super Admin";
+        description = `قفل المنتج: ${product.name}`;
+      }
+
+      if (action === "unlock") {
+        updateData = {
+          safety_status: "review",
+          verification_status: "review",
+          locked_at: null,
+          locked_by: null,
+          last_checked_at: new Date().toISOString(),
+        };
+
+        moderationStatus = "unlocked";
+        reason = "تم فتح قفل المنتج وإعادته للمراجعة";
+        description = `فتح قفل المنتج: ${product.name}`;
+      }
+
+      const { error: updateError } = await supabase
+        .from("products")
+        .update(updateData)
+        .eq("id", product.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      const { error: moderationError } = await supabase
+        .from("product_moderation")
+        .insert({
+          product_id: product.id,
+          action,
+          status: moderationStatus,
+          reason,
+          level: updateData.safety_level || product.safety_level || "low",
+          notes: description,
+          admin_id: user.id,
+        });
+
+      if (moderationError) {
+        console.error(moderationError);
+      }
+
+      const { error: activityError } = await supabase
+        .from("activity_logs")
+        .insert({
+          user_id: user.id,
+          shop_id: product.shop_id || null,
+          action: `product_${action}`,
+          entity_type: "product",
+          entity_id: product.id,
+          description,
+          metadata: {
+            product_name: product.name,
+            action,
+            previous_safety_status:
+              product.safety_status,
+            new_safety_status:
+              updateData.safety_status,
+          },
+        });
+
+      if (activityError) {
+        console.error(activityError);
+      }
+
+      setMessage(
+        action === "approve"
+          ? "✅ تم اعتماد المنتج"
+          : action === "lock"
+          ? "🔒 تم قفل المنتج"
+          : "🔓 تم فتح قفل المنتج وإعادته للمراجعة"
+      );
+
+      await loadReview();
+    } catch (error) {
+      console.error(error);
+      setMessage(
+        "❌ حدث خطأ أثناء تنفيذ الإجراء"
+      );
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   const filteredProducts = products.filter((product) => {
@@ -241,7 +382,8 @@ export default function AdminReviewPage() {
     }
 
     if (filter === "review") {
-      matchesFilter = status.text === "يحتاج مراجعة";
+      matchesFilter =
+        status.text === "يحتاج مراجعة";
     }
 
     if (filter === "high") {
@@ -280,7 +422,7 @@ export default function AdminReviewPage() {
     >
       <div
         style={{
-          maxWidth: 1200,
+          maxWidth: 1300,
           margin: "0 auto",
         }}
       >
@@ -305,7 +447,7 @@ export default function AdminReviewPage() {
                 marginTop: 8,
               }}
             >
-              المنتجات التي تحتاج مراجعة أو عليها مخالفة
+              مراجعة واعتماد وقفل المنتجات
             </p>
           </div>
 
@@ -324,6 +466,20 @@ export default function AdminReviewPage() {
           </Link>
         </div>
 
+        {message && (
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 14,
+              padding: 14,
+              marginBottom: 15,
+              fontWeight: "bold",
+            }}
+          >
+            {message}
+          </div>
+        )}
+
         <div
           style={{
             display: "grid",
@@ -338,12 +494,10 @@ export default function AdminReviewPage() {
               background: "#fff",
               borderRadius: 16,
               padding: 18,
-              boxShadow:
-                "0 4px 18px rgba(0,0,0,0.05)",
             }}
           >
             <div style={{ color: "#777" }}>
-              إجمالي المراجعة
+              المنتجات للمراجعة
             </div>
 
             <strong
@@ -362,8 +516,6 @@ export default function AdminReviewPage() {
               background: "#fff",
               borderRadius: 16,
               padding: 18,
-              boxShadow:
-                "0 4px 18px rgba(0,0,0,0.05)",
             }}
           >
             <div style={{ color: "#777" }}>
@@ -391,8 +543,6 @@ export default function AdminReviewPage() {
               background: "#fff",
               borderRadius: 16,
               padding: 18,
-              boxShadow:
-                "0 4px 18px rgba(0,0,0,0.05)",
             }}
           >
             <div style={{ color: "#777" }}>
@@ -422,13 +572,13 @@ export default function AdminReviewPage() {
             borderRadius: 16,
             padding: 16,
             marginBottom: 18,
-            boxShadow:
-              "0 4px 18px rgba(0,0,0,0.05)",
           }}
         >
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) =>
+              setSearch(e.target.value)
+            }
             placeholder="ابحث باسم المنتج أو المحل أو المالك أو الباركود..."
             style={{
               width: "100%",
@@ -437,7 +587,6 @@ export default function AdminReviewPage() {
               border: "1px solid #ddd",
               borderRadius: 12,
               fontSize: 15,
-              outline: "none",
               marginBottom: 12,
             }}
           />
@@ -485,8 +634,6 @@ export default function AdminReviewPage() {
             background: "#fff",
             borderRadius: 18,
             overflow: "hidden",
-            boxShadow:
-              "0 4px 20px rgba(0,0,0,0.05)",
           }}
         >
           {filteredProducts.length === 0 ? (
@@ -509,16 +656,12 @@ export default function AdminReviewPage() {
               لا توجد منتجات تحتاج مراجعة حالياً.
             </div>
           ) : (
-            <div
-              style={{
-                overflowX: "auto",
-              }}
-            >
+            <div style={{ overflowX: "auto" }}>
               <table
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
-                  minWidth: 950,
+                  minWidth: 1150,
                 }}
               >
                 <thead>
@@ -534,14 +677,13 @@ export default function AdminReviewPage() {
                       "الحالة",
                       "الخطورة",
                       "سبب المراجعة",
-                      "التاريخ",
+                      "الإجراءات",
                     ].map((title) => (
                       <th
                         key={title}
                         style={{
                           padding: 14,
                           textAlign: "right",
-                          fontSize: 14,
                           whiteSpace: "nowrap",
                           borderBottom:
                             "1px solid #eee",
@@ -561,6 +703,13 @@ export default function AdminReviewPage() {
 
                       const level =
                         getLevel(product);
+
+                      const busy =
+                        actionLoading ===
+                        product.id;
+
+                      const isLocked =
+                        status.text === "مقفل";
 
                       return (
                         <tr
@@ -592,6 +741,18 @@ export default function AdminReviewPage() {
                                 {product.brand}
                               </div>
                             )}
+
+                            {product.barcode && (
+                              <div
+                                style={{
+                                  color: "#999",
+                                  fontSize: 12,
+                                  marginTop: 4,
+                                }}
+                              >
+                                {product.barcode}
+                              </div>
+                            )}
                           </td>
 
                           <td
@@ -620,8 +781,6 @@ export default function AdminReviewPage() {
                           >
                             <span
                               style={{
-                                display:
-                                  "inline-block",
                                 background:
                                   status.background,
                                 color:
@@ -645,8 +804,6 @@ export default function AdminReviewPage() {
                           >
                             <span
                               style={{
-                                display:
-                                  "inline-block",
                                 background:
                                   level.background,
                                 color:
@@ -677,18 +834,108 @@ export default function AdminReviewPage() {
                           <td
                             style={{
                               padding: 14,
-                              whiteSpace:
-                                "nowrap",
-                              color: "#666",
                             }}
                           >
-                            {product.created_at
-                              ? new Date(
-                                  product.created_at
-                                ).toLocaleDateString(
-                                  "ar-AE"
-                                )
-                              : "-"}
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 7,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {!isLocked && (
+                                <button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    moderateProduct(
+                                      product,
+                                      "approve"
+                                    )
+                                  }
+                                  style={{
+                                    border: "none",
+                                    borderRadius: 9,
+                                    padding:
+                                      "8px 11px",
+                                    background:
+                                      "#166534",
+                                    color: "#fff",
+                                    cursor:
+                                      busy
+                                        ? "wait"
+                                        : "pointer",
+                                    fontWeight:
+                                      "bold",
+                                  }}
+                                >
+                                  {busy
+                                    ? "..."
+                                    : "✅ اعتماد"}
+                                </button>
+                              )}
+
+                              {!isLocked && (
+                                <button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    moderateProduct(
+                                      product,
+                                      "lock"
+                                    )
+                                  }
+                                  style={{
+                                    border: "none",
+                                    borderRadius: 9,
+                                    padding:
+                                      "8px 11px",
+                                    background:
+                                      "#991b1b",
+                                    color: "#fff",
+                                    cursor:
+                                      busy
+                                        ? "wait"
+                                        : "pointer",
+                                    fontWeight:
+                                      "bold",
+                                  }}
+                                >
+                                  {busy
+                                    ? "..."
+                                    : "🔒 قفل"}
+                                </button>
+                              )}
+
+                              {isLocked && (
+                                <button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    moderateProduct(
+                                      product,
+                                      "unlock"
+                                    )
+                                  }
+                                  style={{
+                                    border: "none",
+                                    borderRadius: 9,
+                                    padding:
+                                      "8px 11px",
+                                    background:
+                                      "#2563eb",
+                                    color: "#fff",
+                                    cursor:
+                                      busy
+                                        ? "wait"
+                                        : "pointer",
+                                    fontWeight:
+                                      "bold",
+                                  }}
+                                >
+                                  {busy
+                                    ? "..."
+                                    : "🔓 فتح القفل"}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
