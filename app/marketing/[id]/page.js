@@ -11,6 +11,8 @@ const supabase = createClient(
 export default function MarketingPage({ params }) {
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     loadProduct();
@@ -34,6 +36,85 @@ export default function MarketingPage({ params }) {
 
     setProduct(data);
     setLoading(false);
+  }
+
+  async function createMarketingContent() {
+    if (!product) return;
+
+    setCreating(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("marketing_contents")
+      .insert({
+        product_id: product.id,
+
+        marketing_description:
+          `اكتشف ${product.name}${
+            product.brand ? ` من ${product.brand}` : ""
+          }، منتج مميز مناسب لعشاق ${
+            product.category || "المنتجات المميزة"
+          }.`,
+
+        instagram:
+          `✨ ${product.name}\n\n` +
+          `${
+            product.description ||
+            "منتج مميز يستحق التجربة."
+          }\n\n` +
+          `💰 السعر: ${product.price || ""} ${
+            product.currency || "AED"
+          }\n\n` +
+          `📩 تواصل معنا الآن لمعرفة المزيد.`,
+
+        whatsapp:
+          `مرحباً 👋\n\n` +
+          `متوفر لدينا: ${product.name}\n\n` +
+          `${
+            product.description ||
+            "منتج مميز."
+          }\n\n` +
+          `💰 السعر: ${product.price || ""} ${
+            product.currency || "AED"
+          }\n\n` +
+          `للطلب أو الاستفسار تواصل معنا.`,
+
+        tiktok_snapchat:
+          `🔥 ${product.name}\n` +
+          `${
+            product.description ||
+            "منتج يستحق التجربة."
+          }\n` +
+          `💰 ${product.price || ""} ${
+            product.currency || "AED"
+          }`,
+
+        seo_title: product.name,
+
+        seo_description:
+          product.description ||
+          `تعرف على ${product.name} واحصل على معلومات المنتج والسعر.`,
+
+        seo_keywords:
+          `${product.name}, ${
+            product.brand || ""
+          }, ${product.category || ""}`,
+
+        call_to_action:
+          "اطلب منتجك الآن وتواصل معنا لمعرفة التفاصيل.",
+
+        status: "draft",
+      });
+
+    if (error) {
+      console.error(error);
+      setMessage("❌ حدث خطأ أثناء حفظ المحتوى.");
+      setCreating(false);
+      return;
+    }
+
+    setMessage("✅ تم إنشاء وحفظ المحتوى التسويقي بنجاح.");
+    setCreating(false);
   }
 
   if (loading) {
@@ -121,7 +202,6 @@ export default function MarketingPage({ params }) {
           ← العودة إلى المنتجات
         </a>
 
-        {/* عنوان الصفحة */}
         <div
           style={{
             background: "#fff",
@@ -161,7 +241,6 @@ export default function MarketingPage({ params }) {
           </p>
         </div>
 
-        {/* معلومات المنتج */}
         <div
           style={{
             background: "#fff",
@@ -222,7 +301,6 @@ export default function MarketingPage({ params }) {
           </div>
         </div>
 
-        {/* زر إنشاء كل شيء */}
         <div
           style={{
             background:
@@ -258,6 +336,8 @@ export default function MarketingPage({ params }) {
           </p>
 
           <button
+            onClick={createMarketingContent}
+            disabled={creating}
             style={{
               border: "none",
               background: "#fff",
@@ -266,14 +346,30 @@ export default function MarketingPage({ params }) {
               borderRadius: "12px",
               fontSize: "17px",
               fontWeight: "700",
-              cursor: "pointer",
+              cursor: creating ? "wait" : "pointer",
+              opacity: creating ? 0.7 : 1,
             }}
           >
-            🚀 إنشاء الكل
+            {creating
+              ? "⏳ جاري الإنشاء..."
+              : "🚀 إنشاء الكل"}
           </button>
+
+          {message && (
+            <div
+              style={{
+                marginTop: "18px",
+                background: "#fff",
+                color: "#222",
+                padding: "12px",
+                borderRadius: "12px",
+              }}
+            >
+              {message}
+            </div>
+          )}
         </div>
 
-        {/* أدوات التسويق */}
         <h2
           style={{
             fontSize: "25px",
