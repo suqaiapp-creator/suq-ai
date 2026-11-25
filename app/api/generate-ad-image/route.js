@@ -16,13 +16,21 @@ export async function POST(request) {
 
     if (!product) {
       return Response.json(
-        { error: "بيانات المنتج غير موجودة" },
-        { status: 400 }
+        {
+          error: "بيانات المنتج غير موجودة",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
+    const selectedFormat = format || "1:1";
+
     const prompt = `
 Create a professional commercial advertising image for this product.
+
+PRODUCT INFORMATION:
 
 Product name:
 ${product.name || ""}
@@ -43,29 +51,37 @@ Features:
 ${product.features || ""}
 
 Design format:
-${format || "1:1"}
+${selectedFormat}
 
 Target market:
 United Arab Emirates.
 
-Important rules:
+IMPORTANT RULES:
+
 - Keep the product appearance accurate.
 - Do not invent product specifications.
-- Do not add fake certifications or claims.
+- Do not invent certifications.
+- Do not invent guarantees or warranties.
+- Do not add technical claims that are not provided.
+- Do not change the product identity.
+- Make the product the main visual focus.
 - Create a premium commercial advertising composition.
-- Make the product the main focus.
-- Use clean professional lighting.
-- Leave suitable space for Arabic advertising text.
+- Use professional studio lighting.
+- Use a clean and attractive background.
+- Leave suitable visual space for Arabic advertising text.
 - Do not generate fake logos.
+- Do not create fake brands.
+- Make the design suitable for an Emirati/UAE market.
+- Make the advertisement look professional and ready for social media.
 `;
 
     const response = await openai.images.generate({
-      model: "gpt-image-1",
+      model: "gpt-image-2",
       prompt,
       size:
-        format === "9:16"
+        selectedFormat === "9:16"
           ? "1024x1536"
-          : format === "16:9"
+          : selectedFormat === "16:9"
           ? "1536x1024"
           : "1024x1024",
     });
@@ -73,7 +89,7 @@ Important rules:
     const imageBase64 = response.data?.[0]?.b64_json;
 
     if (!imageBase64) {
-      throw new Error("لم يتم الحصول على الصورة");
+      throw new Error("لم يتم الحصول على الصورة من OpenAI");
     }
 
     const imageBuffer = Buffer.from(
@@ -92,25 +108,50 @@ Important rules:
       });
 
     if (uploadError) {
-      console.error(uploadError);
-      throw new Error("تعذر حفظ الصورة");
+      console.error(
+        "SUPABASE STORAGE ERROR:",
+        uploadError
+      );
+
+      throw new Error("تعذر حفظ الصورة في التخزين");
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from("ad-images")
-      .getPublicUrl(filePath);
+    const { data: publicUrlData } =
+      supabase.storage
+        .from("ad-images")
+        .getPublicUrl(filePath);
 
-    const imageUrl = publicUrlData.publicUrl;
+    const imageUrl =
+      publicUrlData?.publicUrl;
+
+    if (!imageUrl) {
+      throw new Error(
+        "تعذر الحصول على رابط الصورة"
+      );
+    }
 
     if (designId) {
-      await supabase
-        .from("ad_images")
-        .update({
-          image_url: imageUrl,
-          status: "completed",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", designId);
+      const { error: updateError } =
+        await supabase
+          .from("ad_images")
+          .update({
+            image_url: imageUrl,
+            status: "completed",
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", designId);
+
+      if (updateError) {
+        console.error(
+          "DATABASE UPDATE ERROR:",
+          updateError
+        );
+
+        throw new Error(
+          "تم إنشاء الصورة لكن تعذر تحديث حالة التصميم"
+        );
+      }
     }
 
     return Response.json({
@@ -118,15 +159,20 @@ Important rules:
       image_url: imageUrl,
     });
   } catch (error) {
-    console.error("IMAGE GENERATION ERROR:", error);
+    console.error(
+      "IMAGE GENERATION ERROR:",
+      error
+    );
 
     return Response.json(
       {
         error:
-          error.message ||
+          error?.message ||
           "حدث خطأ أثناء إنشاء الصورة",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
