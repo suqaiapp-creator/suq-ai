@@ -1,23 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-import Link from "next/link";
-import { useParams } from "next/navigation";
+import { createClient } from "../../../lib/supabase/client";
+import { useParams, useRouter } from "next/navigation";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-);
+const supabase = createClient();
 
 export default function ProductIntelligencePage() {
   const params = useParams();
+  const router = useRouter();
+
   const id = params.id;
 
-  const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+
+  const [user, setUser] = useState(null);
+  const [shop, setShop] = useState(null);
+  const [product, setProduct] = useState(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -40,137 +41,235 @@ export default function ProductIntelligencePage() {
     confidence: "",
   });
 
+  const [message, setMessage] = useState("");
+
   useEffect(() => {
     loadProduct();
   }, [id]);
 
   async function loadProduct() {
-    if (!id) return;
-
     setLoading(true);
+    setMessage("");
 
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", id)
-      .single();
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    if (error) {
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      setUser(user);
+
+      const { data: shopData, error: shopError } = await supabase
+        .from("shops")
+        .select("*")
+        .eq("owner_id", user.id)
+        .maybeSingle();
+
+      if (shopError) {
+        throw shopError;
+      }
+
+      if (!shopData) {
+        router.replace("/setup-shop");
+        return;
+      }
+
+      setShop(shopData);
+
+      const { data: productData, error: productError } =
+        await supabase
+          .from("products")
+          .select("*")
+          .eq("id", id)
+          .eq("shop_id", shopData.id)
+          .maybeSingle();
+
+      if (productError) {
+        throw productError;
+      }
+
+      if (!productData) {
+        router.replace("/products");
+        return;
+      }
+
+      setProduct(productData);
+
+      setForm({
+        name: productData.name || "",
+        brand: productData.brand || "",
+        category: productData.category || "",
+        price:
+          productData.price !== null &&
+          productData.price !== undefined
+            ? productData.price
+            : "",
+        description: productData.description || "",
+        specifications: productData.specifications || "",
+        features: productData.features || "",
+        uses: productData.uses || "",
+        target_audience:
+          productData.target_audience || "",
+        manufacturer:
+          productData.manufacturer || "",
+        country_of_origin:
+          productData.country_of_origin || "",
+        size_or_volume:
+          productData.size_or_volume || "",
+        ingredients:
+          productData.ingredients || "",
+        warnings: productData.warnings || "",
+        storage: productData.storage || "",
+        warranty: productData.warranty || "",
+        verification_notes:
+          productData.verification_notes || "",
+        confidence:
+          productData.confidence || "",
+      });
+    } catch (error) {
       console.error(error);
+      setMessage(
+        error?.message ||
+          "حدث خطأ أثناء تحميل معلومات المنتج."
+      );
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setProduct(data);
-
-    setForm({
-      name: data.name || "",
-      brand: data.brand || "",
-      category: data.category || "",
-      price: data.price ?? "",
-      description: data.description || "",
-      specifications: data.specifications || "",
-      features: data.features || "",
-      uses: data.uses || "",
-      target_audience: data.target_audience || "",
-      manufacturer: data.manufacturer || "",
-      country_of_origin: data.country_of_origin || "",
-      size_or_volume: data.size_or_volume || "",
-      ingredients: data.ingredients || "",
-      warnings: data.warnings || "",
-      storage: data.storage || "",
-      warranty: data.warranty || "",
-      verification_notes:
-        data.verification_notes || "",
-      confidence: data.confidence || "",
-    });
-
-    setLoading(false);
   }
 
   function updateField(field, value) {
-    setForm((prev) => ({
-      ...prev,
+    setForm((current) => ({
+      ...current,
       [field]: value,
     }));
   }
 
   async function saveProduct() {
-    setSaving(true);
+    if (!product || !shop || saving) return;
 
-    const { data, error } = await supabase
-      .from("products")
-      .update({
-        name: form.name,
-        brand: form.brand,
-        category: form.category,
-        price: form.price
-          ? Number(form.price)
-          : null,
-        description: form.description,
-        specifications: form.specifications,
-        features: form.features,
-        uses: form.uses,
-        target_audience: form.target_audience,
-        manufacturer: form.manufacturer,
-        country_of_origin: form.country_of_origin,
-        size_or_volume: form.size_or_volume,
-        ingredients: form.ingredients,
-        warnings: form.warnings,
-        storage: form.storage,
-        warranty: form.warranty,
-        verification_notes:
-          form.verification_notes,
-        confidence: form.confidence,
-
-        verification_status: "verified",
-        ai_status: "completed",
-
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error(error);
-      alert("حدث خطأ أثناء حفظ المعلومات.");
-      setSaving(false);
+    if (!form.name.trim()) {
+      setMessage("اسم المنتج مطلوب.");
       return;
     }
 
-    setProduct(data);
+    setSaving(true);
+    setMessage("");
 
-    alert("✅ تم اعتماد معلومات المنتج بنجاح");
+    try {
+      const updateData = {
+        name: form.name.trim(),
+        brand: form.brand.trim() || null,
+        category: form.category.trim() || null,
 
-    setSaving(false);
+        price:
+          form.price === ""
+            ? null
+            : Number(form.price),
+
+        description:
+          form.description.trim() || null,
+
+        specifications:
+          form.specifications.trim() || null,
+
+        features:
+          form.features.trim() || null,
+
+        uses:
+          form.uses.trim() || null,
+
+        target_audience:
+          form.target_audience.trim() || null,
+
+        manufacturer:
+          form.manufacturer.trim() || null,
+
+        country_of_origin:
+          form.country_of_origin.trim() || null,
+
+        size_or_volume:
+          form.size_or_volume.trim() || null,
+
+        ingredients:
+          form.ingredients.trim() || null,
+
+        warnings:
+          form.warnings.trim() || null,
+
+        storage:
+          form.storage.trim() || null,
+
+        warranty:
+          form.warranty.trim() || null,
+
+        verification_notes:
+          form.verification_notes.trim() || null,
+
+        confidence:
+          form.confidence.trim() || null,
+
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase
+        .from("products")
+        .update(updateData)
+        .eq("id", product.id)
+        .eq("shop_id", shop.id)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      setProduct(data);
+
+      setMessage(
+        "تم حفظ معلومات المنتج بنجاح."
+      );
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        error?.message ||
+          "حدث خطأ أثناء حفظ معلومات المنتج."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function reanalyzeProduct() {
-    if (reanalyzing) return;
+    if (!product || !shop || reanalyzing) return;
+
+    const isLocked =
+      product.verification_status === "locked" ||
+      product.safety_status === "locked";
+
+    if (isLocked) {
+      setMessage(
+        "🔒 المنتج مقفول ولا يمكن إعادة تحليله حاليًا."
+      );
+      return;
+    }
 
     const confirmed = window.confirm(
-      "🔄 سيتم إعادة تحليل المنتج باستخدام الذكاء الاصطناعي.\n\nقد يؤدي ذلك إلى استهلاك جزء من رصيد OpenAI.\n\nهل تريد المتابعة؟"
+      "إعادة التحليل ستستخدم رصيد OpenAI. هل تريد المتابعة؟"
     );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     setReanalyzing(true);
+    setMessage("");
 
     try {
-      // نستخدم آخر بيانات موجودة في الصفحة
-      // حتى يستطيع الذكاء الاصطناعي البحث بشكل أدق
-      const productForAnalysis = {
-        ...product,
-
-        name: form.name,
-        brand: form.brand,
-        category: form.category,
-        price: form.price,
-        image_url: product.image_url,
-        barcode: product.barcode,
-      };
-
       const response = await fetch(
         "/api/analyze-product",
         {
@@ -179,116 +278,130 @@ export default function ProductIntelligencePage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            product: productForAnalysis,
+            product_name: product.name,
+            brand: product.brand,
+            category: product.category,
+            barcode: product.barcode,
+            image_url: product.image_url,
           }),
         }
       );
 
-      const analyzed = await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
-        console.error(analyzed);
-
         throw new Error(
-          analyzed.error ||
-            "تعذر إعادة تحليل المنتج."
+          result?.error ||
+            "فشل إعادة تحليل المنتج."
         );
       }
 
-      // تحديث كل معلومات الذكاء في قاعدة البيانات
+      const analyzed =
+        result.product ||
+        result.data ||
+        result;
+
+      const updateData = {
+        name:
+          analyzed.product_name ||
+          product.name,
+
+        brand:
+          analyzed.brand ||
+          product.brand ||
+          null,
+
+        category:
+          analyzed.category ||
+          product.category ||
+          null,
+
+        description:
+          analyzed.full_description ||
+          analyzed.short_description ||
+          product.description ||
+          null,
+
+        specifications:
+          analyzed.specifications ||
+          product.specifications ||
+          null,
+
+        features:
+          analyzed.features ||
+          product.features ||
+          null,
+
+        uses:
+          analyzed.uses ||
+          product.uses ||
+          null,
+
+        target_audience:
+          analyzed.target_audience ||
+          product.target_audience ||
+          null,
+
+        manufacturer:
+          analyzed.manufacturer ||
+          product.manufacturer ||
+          null,
+
+        country_of_origin:
+          analyzed.country_of_origin ||
+          product.country_of_origin ||
+          null,
+
+        size_or_volume:
+          analyzed.size_or_volume ||
+          product.size_or_volume ||
+          null,
+
+        ingredients:
+          analyzed.ingredients ||
+          product.ingredients ||
+          null,
+
+        warnings:
+          analyzed.warnings ||
+          product.warnings ||
+          null,
+
+        storage:
+          analyzed.storage ||
+          product.storage ||
+          null,
+
+        warranty:
+          analyzed.warranty ||
+          product.warranty ||
+          null,
+
+        verification_notes:
+          analyzed.verification_notes ||
+          product.verification_notes ||
+          null,
+
+        confidence:
+          analyzed.confidence ||
+          product.confidence ||
+          null,
+
+        ai_status: "completed",
+
+        updated_at: new Date().toISOString(),
+      };
+
       const { data, error } = await supabase
         .from("products")
-        .update({
-          name:
-            analyzed.product_name ||
-            form.name,
-
-          brand:
-            analyzed.brand ||
-            form.brand,
-
-          category:
-            analyzed.category ||
-            form.category,
-
-          description:
-            analyzed.full_description ||
-            analyzed.short_description ||
-            form.description ||
-            null,
-
-          specifications:
-            analyzed.specifications ||
-            null,
-
-          features:
-            analyzed.features ||
-            null,
-
-          uses:
-            analyzed.uses ||
-            null,
-
-          target_audience:
-            analyzed.target_audience ||
-            null,
-
-          manufacturer:
-            analyzed.manufacturer ||
-            null,
-
-          country_of_origin:
-            analyzed.country_of_origin ||
-            null,
-
-          size_or_volume:
-            analyzed.size_or_volume ||
-            null,
-
-          ingredients:
-            analyzed.ingredients ||
-            null,
-
-          warnings:
-            analyzed.warnings ||
-            null,
-
-          storage:
-            analyzed.storage ||
-            null,
-
-          warranty:
-            analyzed.warranty ||
-            null,
-
-          verification_notes:
-            analyzed.verification_notes ||
-            null,
-
-          confidence:
-            analyzed.confidence ||
-            null,
-
-          // مهم:
-          // التحليل الجديد يحتاج مراجعة بشرية
-          verification_status:
-            "unverified",
-
-          ai_status:
-            "completed",
-
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq("id", id)
+        .update(updateData)
+        .eq("id", product.id)
+        .eq("shop_id", shop.id)
         .select()
         .single();
 
       if (error) {
-        console.error(error);
-        throw new Error(
-          "تم التحليل لكن تعذر حفظ النتيجة."
-        );
+        throw error;
       }
 
       setProduct(data);
@@ -297,12 +410,19 @@ export default function ProductIntelligencePage() {
         name: data.name || "",
         brand: data.brand || "",
         category: data.category || "",
-        price: data.price ?? "",
-        description: data.description || "",
+        price:
+          data.price !== null &&
+          data.price !== undefined
+            ? data.price
+            : "",
+        description:
+          data.description || "",
         specifications:
           data.specifications || "",
-        features: data.features || "",
-        uses: data.uses || "",
+        features:
+          data.features || "",
+        uses:
+          data.uses || "",
         target_audience:
           data.target_audience || "",
         manufacturer:
@@ -325,14 +445,14 @@ export default function ProductIntelligencePage() {
           data.confidence || "",
       });
 
-      alert(
-        "✅ تمت إعادة تحليل المنتج وحفظ النتائج.\n\n⚠️ راجع المعلومات قبل اعتمادها."
+      setMessage(
+        "تم إعادة تحليل المنتج وحفظ المعلومات الجديدة."
       );
     } catch (error) {
       console.error(error);
 
-      alert(
-        error.message ||
+      setMessage(
+        error?.message ||
           "حدث خطأ أثناء إعادة تحليل المنتج."
       );
     } finally {
@@ -342,224 +462,177 @@ export default function ProductIntelligencePage() {
 
   if (loading) {
     return (
-      <main style={pageStyle}>
-        <div style={cardStyle}>
-          <div style={centerStyle}>
-            جاري تحميل معلومات المنتج...
-          </div>
-        </div>
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          padding: 30,
+          textAlign: "center",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        جاري تحميل معلومات المنتج...
       </main>
     );
   }
 
   if (!product) {
-    return (
-      <main style={pageStyle}>
-        <div style={cardStyle}>
-          <div style={centerStyle}>
-            <h2>المنتج غير موجود</h2>
-
-            <Link href="/products">
-              العودة إلى المنتجات
-            </Link>
-          </div>
-        </div>
-      </main>
-    );
+    return null;
   }
 
+  const isLocked =
+    product.verification_status === "locked" ||
+    product.safety_status === "locked";
+
   return (
-    <main style={pageStyle}>
-      <div style={containerStyle}>
+    <main
+      dir="rtl"
+      style={{
+        minHeight: "100vh",
+        background: "#f7f8fa",
+        padding: "24px 14px 60px",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 950,
+          margin: "0 auto",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() =>
+            router.push("/products")
+          }
+          style={{
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            fontSize: 15,
+            marginBottom: 15,
+          }}
+        >
+          ← العودة للمنتجات
+        </button>
 
-        {/* HEADER */}
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: 22,
+            boxShadow:
+              "0 5px 25px rgba(0,0,0,0.06)",
+          }}
+        >
+          <h1 style={{ marginTop: 0 }}>
+            🧠 معلومات المنتج الذكية
+          </h1>
 
-        <div style={cardStyle}>
-          <div style={headerStyle}>
-            <div>
-              <h1 style={titleStyle}>
-                🧠 ذكاء المنتج
-              </h1>
+          <p style={{ color: "#666" }}>
+            المنتج:{" "}
+            <strong>{product.name}</strong>
+          </p>
 
-              <p style={subtitleStyle}>
-                تحليل ومراجعة معلومات المنتج قبل
-                استخدامها في التسويق.
-              </p>
-            </div>
-
+          {isLocked && (
             <div
               style={{
-                ...statusStyle,
-                background:
-                  product.verification_status ===
-                  "verified"
-                    ? "#e8f7ed"
-                    : "#fff4d6",
-                color:
-                  product.verification_status ===
-                  "verified"
-                    ? "#16803c"
-                    : "#9a6700",
+                background: "#fff3cd",
+                border:
+                  "1px solid #ffe08a",
+                borderRadius: 14,
+                padding: 15,
+                marginBottom: 20,
+                lineHeight: 1.8,
               }}
             >
-              {product.verification_status ===
-              "verified"
-                ? "✅ المعلومات معتمدة"
-                : "⚠️ يحتاج مراجعة"}
+              🔒 <strong>المنتج مقفول</strong>
+              <br />
+              يمكن مراجعة المعلومات، لكن حالة
+              القفل لن تتغير من هذه الصفحة.
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* PRODUCT IMAGE */}
-
-        {product.image_url && (
-          <div style={cardStyle}>
+          {product.image_url && (
             <div
               style={{
                 textAlign: "center",
+                marginBottom: 25,
               }}
             >
               <img
                 src={product.image_url}
                 alt={product.name}
                 style={{
-                  width: 280,
-                  maxWidth: "100%",
-                  maxHeight: 350,
+                  width: "100%",
+                  maxWidth: 300,
+                  height: 300,
                   objectFit: "contain",
-                  borderRadius: 15,
+                  borderRadius: 18,
+                  border: "1px solid #eee",
+                  background: "#fafafa",
                 }}
               />
             </div>
-          </div>
-        )}
-
-        {/* REANALYZE */}
-
-        <div
-          style={{
-            ...cardStyle,
-            background: "#f8fbff",
-            border:
-              "1px solid #dcecff",
-          }}
-        >
-          <h2
-            style={{
-              marginTop: 0,
-              fontSize: 20,
-            }}
-          >
-            🔎 تحليل المنتج
-          </h2>
-
-          <p
-            style={{
-              color: "#666",
-              lineHeight: 1.8,
-              marginBottom: 15,
-            }}
-          >
-            إذا كانت المعلومات الحالية ناقصة،
-            يمكنك إعادة تحليل المنتج ليحاول الذكاء
-            الاصطناعي البحث عن معلومات أكثر دقة.
-          </p>
-
-          <button
-            onClick={reanalyzeProduct}
-            disabled={reanalyzing}
-            style={{
-              width: "100%",
-              padding: 16,
-              border: "none",
-              borderRadius: 14,
-              background: reanalyzing
-                ? "#999"
-                : "#1769aa",
-              color: "#fff",
-              fontSize: 17,
-              fontWeight: "bold",
-              cursor: reanalyzing
-                ? "not-allowed"
-                : "pointer",
-            }}
-          >
-            {reanalyzing
-              ? "🔎 جاري البحث والتحليل..."
-              : "🔄 إعادة تحليل المنتج"}
-          </button>
+          )}
 
           <div
             style={{
-              marginTop: 12,
-              fontSize: 13,
-              color: "#777",
-              textAlign: "center",
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: 14,
             }}
           >
-            ⚠️ إعادة التحليل تستخدم الذكاء الاصطناعي
-            وقد تستهلك رصيدًا.
+            <Field
+              label="اسم المنتج"
+              value={form.name}
+              onChange={(value) =>
+                updateField("name", value)
+              }
+            />
+
+            <Field
+              label="العلامة التجارية"
+              value={form.brand}
+              onChange={(value) =>
+                updateField("brand", value)
+              }
+            />
+
+            <Field
+              label="التصنيف"
+              value={form.category}
+              onChange={(value) =>
+                updateField("category", value)
+              }
+            />
+
+            <Field
+              label="السعر"
+              type="number"
+              value={form.price}
+              onChange={(value) =>
+                updateField("price", value)
+              }
+            />
           </div>
-        </div>
-
-        {/* BASIC */}
-
-        <Section title="📦 المعلومات الأساسية">
-
-          <Field
-            label="اسم المنتج"
-            value={form.name}
-            onChange={(v) =>
-              updateField("name", v)
-            }
-          />
-
-          <Field
-            label="العلامة التجارية"
-            value={form.brand}
-            onChange={(v) =>
-              updateField("brand", v)
-            }
-          />
-
-          <Field
-            label="التصنيف"
-            value={form.category}
-            onChange={(v) =>
-              updateField("category", v)
-            }
-          />
-
-          <Field
-            label="السعر"
-            type="number"
-            value={form.price}
-            onChange={(v) =>
-              updateField("price", v)
-            }
-          />
-
-        </Section>
-
-        {/* DESCRIPTION */}
-
-        <Section title="📝 وصف المنتج">
 
           <TextArea
             label="الوصف"
             value={form.description}
-            onChange={(v) =>
-              updateField("description", v)
+            onChange={(value) =>
+              updateField("description", value)
             }
           />
 
           <TextArea
             label="المواصفات"
             value={form.specifications}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "specifications",
-                v
+                value
               )
             }
           />
@@ -567,66 +640,59 @@ export default function ProductIntelligencePage() {
           <TextArea
             label="المميزات"
             value={form.features}
-            onChange={(v) =>
-              updateField("features", v)
+            onChange={(value) =>
+              updateField("features", value)
             }
           />
-
-        </Section>
-
-        {/* INTELLIGENCE */}
-
-        <Section title="🔎 معلومات إضافية">
 
           <TextArea
             label="الاستخدامات"
             value={form.uses}
-            onChange={(v) =>
-              updateField("uses", v)
+            onChange={(value) =>
+              updateField("uses", value)
             }
-            placeholder="غير متوفر إذا لم يتم العثور على معلومات موثوقة"
           />
 
           <TextArea
             label="الجمهور المستهدف"
             value={form.target_audience}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "target_audience",
-                v
+                value
               )
             }
           />
 
-          <Field
+          <TextArea
             label="الشركة المصنعة"
             value={form.manufacturer}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "manufacturer",
-                v
+                value
               )
             }
           />
 
-          <Field
+          <TextArea
             label="بلد المنشأ"
             value={form.country_of_origin}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "country_of_origin",
-                v
+                value
               )
             }
           />
 
-          <Field
+          <TextArea
             label="الحجم / السعة"
             value={form.size_or_volume}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "size_or_volume",
-                v
+                value
               )
             }
           />
@@ -634,10 +700,10 @@ export default function ProductIntelligencePage() {
           <TextArea
             label="المكونات"
             value={form.ingredients}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "ingredients",
-                v
+                value
               )
             }
           />
@@ -645,10 +711,10 @@ export default function ProductIntelligencePage() {
           <TextArea
             label="التحذيرات"
             value={form.warnings}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "warnings",
-                v
+                value
               )
             }
           />
@@ -656,10 +722,10 @@ export default function ProductIntelligencePage() {
           <TextArea
             label="طريقة التخزين"
             value={form.storage}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "storage",
-                v
+                value
               )
             }
           />
@@ -667,200 +733,120 @@ export default function ProductIntelligencePage() {
           <TextArea
             label="الضمان"
             value={form.warranty}
-            onChange={(v) =>
+            onChange={(value) =>
               updateField(
                 "warranty",
-                v
+                value
               )
             }
           />
 
-        </Section>
+          <TextArea
+            label="ملاحظات التحقق"
+            value={form.verification_notes}
+            onChange={(value) =>
+              updateField(
+                "verification_notes",
+                value
+              )
+            }
+          />
 
-        {/* VERIFICATION */}
+          <Field
+            label="درجة الثقة"
+            value={form.confidence}
+            onChange={(value) =>
+              updateField(
+                "confidence",
+                value
+              )
+            }
+          />
 
-        <Section title="🛡️ التحقق">
-
-          <div
-            style={{
-              background: "#f8f9fa",
-              padding: 16,
-              borderRadius: 14,
-              marginBottom: 15,
-            }}
-          >
-            <strong>
-              ملاحظات التحقق
-            </strong>
-
-            <textarea
-              value={form.verification_notes}
-              onChange={(e) =>
-                updateField(
-                  "verification_notes",
-                  e.target.value
-                )
-              }
-              placeholder="ملاحظات حول المعلومات والمصادر..."
-              style={{
-                width: "100%",
-                minHeight: 110,
-                marginTop: 10,
-                padding: 12,
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                resize: "vertical",
-                boxSizing: "border-box",
-                fontFamily: "inherit",
-                lineHeight: 1.7,
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              background: "#eef6ff",
-              padding: 16,
-              borderRadius: 14,
-            }}
-          >
-            <strong>
-              📊 درجة الثقة
-            </strong>
-
+          {message && (
             <div
               style={{
-                marginTop: 8,
-                fontWeight: "bold",
-                fontSize: 18,
+                marginTop: 20,
+                padding: 14,
+                borderRadius: 12,
+                background: "#eef7ee",
+                lineHeight: 1.7,
               }}
             >
-              {form.confidence ||
-                "غير محددة"}
+              {message}
             </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              marginTop: 25,
+            }}
+          >
+            <button
+              type="button"
+              onClick={saveProduct}
+              disabled={saving}
+              style={{
+                ...primaryButton,
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving
+                ? "جاري الحفظ..."
+                : "💾 حفظ المعلومات"}
+            </button>
+
+            <button
+              type="button"
+              onClick={reanalyzeProduct}
+              disabled={
+                reanalyzing || isLocked
+              }
+              style={{
+                ...secondaryButton,
+                opacity:
+                  reanalyzing || isLocked
+                    ? 0.5
+                    : 1,
+              }}
+            >
+              {reanalyzing
+                ? "جاري التحليل..."
+                : "🔄 إعادة تحليل المنتج"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  `/edit-product/${product.id}`
+                )
+              }
+              style={secondaryButton}
+            >
+              ✏️ تعديل المنتج
+            </button>
+
+            {!isLocked && (
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(
+                    `/marketing/${product.id}`
+                  )
+                }
+                style={secondaryButton}
+              >
+                🚀 التسويق
+              </button>
+            )}
           </div>
-
-        </Section>
-
-        {/* ACTIONS */}
-
-        <div style={cardStyle}>
-
-          <button
-            onClick={saveProduct}
-            disabled={saving}
-            style={{
-              width: "100%",
-              padding: 17,
-              border: "none",
-              borderRadius: 14,
-              background: saving
-                ? "#999"
-                : "#111",
-              color: "#fff",
-              fontSize: 17,
-              fontWeight: "bold",
-              cursor: saving
-                ? "not-allowed"
-                : "pointer",
-            }}
-          >
-            {saving
-              ? "جاري الحفظ..."
-              : "✅ اعتماد معلومات المنتج"}
-          </button>
-
-          <Link
-            href={`/marketing/${id}`}
-            style={{
-              display: "block",
-              marginTop: 12,
-              textAlign: "center",
-              padding: 15,
-              borderRadius: 14,
-              background: "#f0f0f0",
-              color: "#111",
-              textDecoration: "none",
-              fontWeight: "bold",
-            }}
-          >
-            🚀 الانتقال إلى التسويق
-          </Link>
-
         </div>
-
       </div>
     </main>
-  );
-}
-
-const pageStyle = {
-  minHeight: "100vh",
-  background: "#f7f7f7",
-  padding: "25px 16px 50px",
-  direction: "rtl",
-  fontFamily: "Arial, sans-serif",
-};
-
-const containerStyle = {
-  maxWidth: 950,
-  margin: "auto",
-};
-
-const cardStyle = {
-  background: "#fff",
-  borderRadius: 22,
-  padding: 22,
-  marginBottom: 18,
-  boxShadow:
-    "0 4px 18px rgba(0,0,0,0.05)",
-};
-
-const headerStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 15,
-  flexWrap: "wrap",
-};
-
-const titleStyle = {
-  margin: 0,
-  fontSize: 28,
-};
-
-const subtitleStyle = {
-  marginTop: 8,
-  color: "#666",
-  lineHeight: 1.7,
-};
-
-const statusStyle = {
-  padding: "10px 15px",
-  borderRadius: 12,
-  fontWeight: "bold",
-};
-
-const centerStyle = {
-  textAlign: "center",
-  padding: 30,
-};
-
-function Section({ title, children }) {
-  return (
-    <section style={cardStyle}>
-      <h2
-        style={{
-          marginTop: 0,
-          marginBottom: 20,
-          fontSize: 21,
-        }}
-      >
-        {title}
-      </h2>
-
-      {children}
-    </section>
   );
 }
 
@@ -871,12 +857,12 @@ function Field({
   type = "text",
 }) {
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div>
       <label
         style={{
           display: "block",
-          marginBottom: 7,
           fontWeight: "bold",
+          marginBottom: 7,
         }}
       >
         {label}
@@ -890,12 +876,11 @@ function Field({
         }
         style={{
           width: "100%",
-          padding: 13,
-          borderRadius: 11,
-          border: "1px solid #ddd",
-          fontSize: 16,
           boxSizing: "border-box",
-          fontFamily: "inherit",
+          padding: "12px 13px",
+          border: "1px solid #ddd",
+          borderRadius: 12,
+          fontSize: 15,
         }}
       />
     </div>
@@ -906,15 +891,14 @@ function TextArea({
   label,
   value,
   onChange,
-  placeholder = "",
 }) {
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ marginTop: 16 }}>
       <label
         style={{
           display: "block",
-          marginBottom: 7,
           fontWeight: "bold",
+          marginBottom: 7,
         }}
       >
         {label}
@@ -925,20 +909,38 @@ function TextArea({
         onChange={(e) =>
           onChange(e.target.value)
         }
-        placeholder={placeholder}
+        rows={4}
         style={{
           width: "100%",
-          minHeight: 110,
-          padding: 13,
-          borderRadius: 11,
-          border: "1px solid #ddd",
-          fontSize: 16,
           boxSizing: "border-box",
+          padding: "12px 13px",
+          border: "1px solid #ddd",
+          borderRadius: 12,
+          fontSize: 15,
           resize: "vertical",
-          fontFamily: "inherit",
-          lineHeight: 1.7,
         }}
       />
     </div>
   );
 }
+
+const primaryButton = {
+  border: "none",
+  background: "#111",
+  color: "#fff",
+  padding: "13px 17px",
+  borderRadius: 12,
+  fontSize: 15,
+  fontWeight: "bold",
+  cursor: "pointer",
+};
+
+const secondaryButton = {
+  border: "1px solid #ddd",
+  background: "#fff",
+  color: "#111",
+  padding: "13px 17px",
+  borderRadius: 12,
+  fontSize: 15,
+  cursor: "pointer",
+};
