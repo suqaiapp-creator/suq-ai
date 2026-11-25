@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 
 export default function AddProduct() {
-  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
 
   const [image, setImage] = useState(null);
   const [mode, setMode] = useState(null);
@@ -16,6 +17,8 @@ export default function AddProduct() {
     const imageUrl = URL.createObjectURL(file);
     setImage(imageUrl);
     setMode("photo");
+
+    event.target.value = "";
   }
 
   return (
@@ -29,12 +32,7 @@ export default function AddProduct() {
         padding: "25px 18px",
       }}
     >
-      <div
-        style={{
-          maxWidth: "850px",
-          margin: "0 auto",
-        }}
-      >
+      <div style={{ maxWidth: "850px", margin: "0 auto" }}>
         <a
           href="/"
           style={{
@@ -72,12 +70,13 @@ export default function AddProduct() {
               marginBottom: "30px",
             }}
           >
-            أضف صورة المنتج أو استخدم الباركود أو أدخل معلومات المنتج
-            بنفسك.
+            صوّر منتجك أو اختر صورة من الألبوم، وبعدها سوق AI يحلل
+            المنتج ويجهزه للتسويق.
           </p>
 
+          {/* ملفات الإدخال */}
           <input
-            ref={fileInputRef}
+            ref={cameraInputRef}
             type="file"
             accept="image/*"
             capture="environment"
@@ -85,44 +84,96 @@ export default function AddProduct() {
             style={{ display: "none" }}
           />
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImage}
+            style={{ display: "none" }}
+          />
+
+          {/* الكاميرا والألبوم */}
+          <div
             style={{
-              width: "100%",
-              border: "2px dashed #6246e5",
-              background: "#f7f4ff",
-              borderRadius: "20px",
-              padding: "30px 20px",
-              cursor: "pointer",
-              marginBottom: "15px",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "12px",
             }}
           >
-            <div style={{ fontSize: "45px" }}>📷</div>
-
-            <div
+            <button
+              onClick={() => cameraInputRef.current?.click()}
               style={{
-                fontSize: "20px",
-                fontWeight: "700",
-                marginTop: "10px",
+                border: "none",
+                background: "#6246e5",
+                color: "#fff",
+                borderRadius: "18px",
+                padding: "25px 15px",
+                cursor: "pointer",
               }}
             >
-              تصوير أو رفع صورة المنتج
-            </div>
+              <div style={{ fontSize: "38px" }}>📷</div>
 
-            <div
+              <div
+                style={{
+                  fontSize: "18px",
+                  fontWeight: "700",
+                  marginTop: "8px",
+                }}
+              >
+                تصوير المنتج
+              </div>
+
+              <div
+                style={{
+                  fontSize: "13px",
+                  marginTop: "6px",
+                  opacity: 0.9,
+                }}
+              >
+                افتح الكاميرا
+              </div>
+            </button>
+
+            <button
+              onClick={() => galleryInputRef.current?.click()}
               style={{
-                color: "#777",
-                marginTop: "8px",
+                border: "1px solid #dedee8",
+                background: "#fff",
+                color: "#171923",
+                borderRadius: "18px",
+                padding: "25px 15px",
+                cursor: "pointer",
               }}
             >
-              اضغط هنا لفتح الكاميرا أو اختيار صورة
-            </div>
-          </button>
+              <div style={{ fontSize: "38px" }}>🖼️</div>
 
+              <div
+                style={{
+                  fontSize: "18px",
+                  fontWeight: "700",
+                  marginTop: "8px",
+                }}
+              >
+                اختيار صورة
+              </div>
+
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "#777",
+                  marginTop: "6px",
+                }}
+              >
+                من ألبوم الصور
+              </div>
+            </button>
+          </div>
+
+          {/* معاينة الصورة */}
           {image && (
             <div
               style={{
-                marginTop: "20px",
+                marginTop: "25px",
                 background: "#fafafa",
                 borderRadius: "20px",
                 padding: "15px",
@@ -135,7 +186,7 @@ export default function AddProduct() {
                   marginBottom: "12px",
                 }}
               >
-                معاينة المنتج
+                ✅ تم اختيار صورة المنتج
               </div>
 
               <img
@@ -151,7 +202,7 @@ export default function AddProduct() {
               />
 
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => galleryInputRef.current?.click()}
                 style={{
                   width: "100%",
                   marginTop: "12px",
@@ -168,87 +219,85 @@ export default function AddProduct() {
             </div>
           )}
 
-          <div
+          {/* الباركود */}
+          <button
+            onClick={() => setMode("barcode")}
             style={{
-              display: "grid",
-              gap: "15px",
+              width: "100%",
+              textAlign: "right",
+              border:
+                mode === "barcode"
+                  ? "2px solid #6246e5"
+                  : "1px solid #e3e3ea",
+              background: "#fff",
+              borderRadius: "18px",
+              padding: "20px",
+              cursor: "pointer",
               marginTop: "25px",
             }}
           >
-            <button
-              onClick={() => setMode("barcode")}
+            <div style={{ fontSize: "32px" }}>📦</div>
+
+            <strong
               style={{
-                textAlign: "right",
-                border:
-                  mode === "barcode"
-                    ? "2px solid #6246e5"
-                    : "1px solid #e3e3ea",
-                background: "#fff",
-                borderRadius: "18px",
-                padding: "20px",
-                cursor: "pointer",
+                display: "block",
+                fontSize: "18px",
+                marginTop: "8px",
               }}
             >
-              <div style={{ fontSize: "32px" }}>📦</div>
+              مسح الباركود
+            </strong>
 
-              <strong
-                style={{
-                  display: "block",
-                  fontSize: "18px",
-                  marginTop: "8px",
-                }}
-              >
-                مسح الباركود
-              </strong>
-
-              <span
-                style={{
-                  display: "block",
-                  color: "#777",
-                  marginTop: "6px",
-                }}
-              >
-                ابحث عن المنتج عن طريق الباركود
-              </span>
-            </button>
-
-            <button
-              onClick={() => setMode("local")}
+            <span
               style={{
-                textAlign: "right",
-                border:
-                  mode === "local"
-                    ? "2px solid #6246e5"
-                    : "1px solid #e3e3ea",
-                background: "#fff",
-                borderRadius: "18px",
-                padding: "20px",
-                cursor: "pointer",
+                display: "block",
+                color: "#777",
+                marginTop: "6px",
               }}
             >
-              <div style={{ fontSize: "32px" }}>✍️</div>
+              ابحث عن المنتج عن طريق الباركود
+            </span>
+          </button>
 
-              <strong
-                style={{
-                  display: "block",
-                  fontSize: "18px",
-                  marginTop: "8px",
-                }}
-              >
-                منتج محلي / غير موجود
-              </strong>
+          {/* المنتج المحلي */}
+          <button
+            onClick={() => setMode("local")}
+            style={{
+              width: "100%",
+              textAlign: "right",
+              border:
+                mode === "local"
+                  ? "2px solid #6246e5"
+                  : "1px solid #e3e3ea",
+              background: "#fff",
+              borderRadius: "18px",
+              padding: "20px",
+              cursor: "pointer",
+              marginTop: "15px",
+            }}
+          >
+            <div style={{ fontSize: "32px" }}>✍️</div>
 
-              <span
-                style={{
-                  display: "block",
-                  color: "#777",
-                  marginTop: "6px",
-                }}
-              >
-                أدخل معلومات المنتج بنفسك
-              </span>
-            </button>
-          </div>
+            <strong
+              style={{
+                display: "block",
+                fontSize: "18px",
+                marginTop: "8px",
+              }}
+            >
+              منتج محلي / غير موجود
+            </strong>
+
+            <span
+              style={{
+                display: "block",
+                color: "#777",
+                marginTop: "6px",
+              }}
+            >
+              أدخل معلومات المنتج بنفسك
+            </span>
+          </button>
 
           {mode === "barcode" && (
             <div
@@ -262,7 +311,7 @@ export default function AddProduct() {
               <strong>📦 قارئ الباركود</strong>
 
               <p style={{ color: "#666", lineHeight: "1.7" }}>
-                سنضيف هنا قارئ الباركود الحقيقي وربطه بقاعدة بيانات
+                سنربط هذه الصفحة لاحقًا بقارئ باركود وقاعدة بيانات
                 المنتجات.
               </p>
             </div>
@@ -280,8 +329,8 @@ export default function AddProduct() {
               <strong>✍️ منتج محلي</strong>
 
               <p style={{ color: "#666", lineHeight: "1.7" }}>
-                سنضيف هنا نموذجًا لإدخال اسم المنتج ومعلوماته وصوره
-                ومواصفاته.
+                سنضيف هنا نموذجًا كاملًا لاسم المنتج ومواصفاته
+                وصوره ومعلوماته.
               </p>
             </div>
           )}
