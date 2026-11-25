@@ -1,86 +1,167 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { createClient } from "../../lib/supabase/client";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-);
+export default function DashboardPage() {
+  const router = useRouter();
+  const supabase = createClient();
 
-export default function Dashboard() {
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [shop, setShop] = useState(null);
+  const [products, setProducts] = useState([]);
 
-  async function loadProducts() {
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (!error) {
-      setProducts(data || []);
-    }
-
-    setLoading(false);
-  }
+  const [stats, setStats] = useState({
+    total: 0,
+    completed: 0,
+    pending: 0,
+    locked: 0,
+  });
 
   useEffect(() => {
-    loadProducts();
+    loadDashboard();
   }, []);
 
-  const totalProducts = products.length;
+  async function loadDashboard() {
+    try {
+      setLoading(true);
 
-  const completedProducts = products.filter(
-    (product) =>
-      product.ai_status === "completed"
-  ).length;
+      const {
+        data: { user: currentUser },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-  const pendingProducts = products.filter(
-    (product) =>
-      product.ai_status !== "completed"
-  ).length;
+      if (userError || !currentUser) {
+        router.replace("/login");
+        return;
+      }
+
+      setUser(currentUser);
+
+      const { data: currentShop, error: shopError } =
+        await supabase
+          .from("shops")
+          .select("*")
+          .eq("owner_id", currentUser.id)
+          .maybeSingle();
+
+      if (shopError) {
+        console.error(shopError);
+      }
+
+      if (!currentShop) {
+        router.replace("/setup-shop");
+        return;
+      }
+
+      setShop(currentShop);
+
+      const { data: productData, error: productError } =
+        await supabase
+          .from("products")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+      if (productError) {
+        console.error(productError);
+        setProducts([]);
+        setStats({
+          total: 0,
+          completed: 0,
+          pending: 0,
+          locked: 0,
+        });
+        return;
+      }
+
+      const list = productData || [];
+
+      setProducts(list.slice(0, 5));
+
+      const completed = list.filter(
+        (product) => product.ai_status === "completed"
+      ).length;
+
+      const locked = list.filter(
+        (product) =>
+          product.verification_status === "locked" ||
+          product.safety_status === "locked"
+      ).length;
+
+      setStats({
+        total: list.length,
+        completed,
+        pending: list.length - completed,
+        locked,
+      });
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
+  if (loading) {
+    return (
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          background: "#f7f8fa",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "Arial, sans-serif",
+          color: "#374151",
+        }}
+      >
+        جاري تحميل لوحة التحكم...
+      </main>
+    );
+  }
 
   return (
     <main
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fc",
+        background: "#f7f8fa",
         fontFamily: "Arial, sans-serif",
-        color: "#171923",
+        paddingBottom: "40px",
       }}
     >
       {/* Header */}
-
       <header
         style={{
-          background: "#fff",
-          borderBottom:
-            "1px solid #e8e8ef",
-          padding: "18px 20px",
+          background: "#ffffff",
+          borderBottom: "1px solid #e5e7eb",
+          padding: "16px 20px",
         }}
       >
         <div
           style={{
-            maxWidth: "1200px",
+            maxWidth: "1100px",
             margin: "0 auto",
             display: "flex",
-            justifyContent:
-              "space-between",
             alignItems: "center",
-            gap: "15px",
+            justifyContent: "space-between",
+            gap: "16px",
           }}
         >
           <div>
             <div
               style={{
-                fontSize: "25px",
-                fontWeight: "800",
+                fontSize: "22px",
+                fontWeight: "bold",
+                color: "#111827",
               }}
             >
               سوق AI
@@ -88,258 +169,237 @@ export default function Dashboard() {
 
             <div
               style={{
+                marginTop: "3px",
                 fontSize: "13px",
-                color: "#777",
-                marginTop: "4px",
+                color: "#6b7280",
               }}
             >
               لوحة التحكم
             </div>
           </div>
 
-          <a
-            href="/add-product"
+          <button
+            onClick={handleLogout}
             style={{
-              background: "#6246e5",
-              color: "#fff",
-              textDecoration: "none",
-              padding:
-                "11px 17px",
-              borderRadius: "12px",
-              fontWeight: "700",
+              border: "1px solid #e5e7eb",
+              background: "#ffffff",
+              color: "#374151",
+              borderRadius: "10px",
+              padding: "9px 14px",
+              cursor: "pointer",
               fontSize: "14px",
             }}
           >
-            ➕ إضافة منتج
-          </a>
+            تسجيل الخروج
+          </button>
         </div>
       </header>
 
-      <section
+      <div
         style={{
-          maxWidth: "1200px",
+          maxWidth: "1100px",
           margin: "0 auto",
-          padding: "35px 20px 60px",
+          padding: "24px 20px",
         }}
       >
         {/* Welcome */}
-
-        <div
+        <section
           style={{
-            marginBottom: "25px",
+            background: "#111827",
+            color: "#ffffff",
+            borderRadius: "22px",
+            padding: "26px",
+            marginBottom: "22px",
           }}
         >
+          <div
+            style={{
+              fontSize: "14px",
+              opacity: 0.75,
+              marginBottom: "7px",
+            }}
+          >
+            أهلاً بك 👋
+          </div>
+
           <h1
             style={{
               margin: 0,
-              fontSize:
-                "clamp(28px, 5vw, 42px)",
+              fontSize: "28px",
             }}
           >
-            أهلاً بك في سوق AI 👋
+            {shop?.name || "متجرك"}
           </h1>
 
           <p
             style={{
-              color: "#707070",
-              fontSize: "16px",
-              marginTop: "10px",
+              margin: "10px 0 0",
+              color: "#d1d5db",
+              lineHeight: "1.7",
             }}
           >
-            من هنا تدير منتجاتك
-            وتسويقك وتصاميمك.
+            من هنا تدير منتجاتك وتسويقك وتصاميمك بالذكاء الاصطناعي.
           </p>
-        </div>
 
-        {/* Statistics */}
+          {user?.email && (
+            <div
+              style={{
+                marginTop: "12px",
+                fontSize: "13px",
+                color: "#9ca3af",
+              }}
+            >
+              {user.email}
+            </div>
+          )}
+        </section>
 
-        <div
+        {/* Stats */}
+        <section
           style={{
             display: "grid",
             gridTemplateColumns:
-              "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "16px",
-            marginBottom: "30px",
+              "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "14px",
+            marginBottom: "24px",
           }}
         >
           <StatCard
             icon="📦"
             title="إجمالي المنتجات"
-            value={totalProducts}
+            value={stats.total}
           />
 
           <StatCard
             icon="✅"
             title="منتجات مكتملة"
-            value={completedProducts}
+            value={stats.completed}
           />
 
           <StatCard
             icon="⏳"
             title="تحتاج معالجة"
-            value={pendingProducts}
+            value={stats.pending}
           />
-        </div>
 
-        {/* Main Actions */}
+          <StatCard
+            icon="🔒"
+            title="منتجات مقفلة"
+            value={stats.locked}
+          />
+        </section>
 
-        <h2
+        {/* Actions */}
+        <section
           style={{
-            fontSize: "24px",
-            marginBottom: "18px",
+            background: "#ffffff",
+            borderRadius: "20px",
+            padding: "22px",
+            marginBottom: "24px",
+            border: "1px solid #e5e7eb",
           }}
         >
-          ماذا تريد أن تفعل؟
-        </h2>
+          <h2
+            style={{
+              margin: "0 0 16px",
+              fontSize: "20px",
+              color: "#111827",
+            }}
+          >
+            ماذا تريد أن تفعل؟
+          </h2>
 
-        <div
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(190px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            <ActionLink
+              href="/add-product"
+              icon="➕"
+              title="إضافة منتج"
+              description="أضف منتجاً جديداً"
+            />
+
+            <ActionLink
+              href="/products"
+              icon="📦"
+              title="إدارة المنتجات"
+              description="عرض وتعديل منتجاتك"
+            />
+
+            <ActionLink
+              href="/designs"
+              icon="🎨"
+              title="تصاميم الإعلانات"
+              description="إنشاء تصاميم تسويقية"
+            />
+
+            <ActionLink
+              href="/setup-shop"
+              icon="🏪"
+              title="بيانات المحل"
+              description="تعديل معلومات متجرك"
+            />
+          </div>
+        </section>
+
+        {/* Latest products */}
+        <section
           style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "16px",
-            marginBottom: "40px",
-          }}
-        >
-          <DashboardAction
-            href="/add-product"
-            icon="➕"
-            title="إضافة منتج"
-            text="أضف منتجًا جديدًا إلى مكتبتك."
-          />
-
-          <DashboardAction
-            href="/products"
-            icon="📦"
-            title="إدارة المنتجات"
-            text="عرض وتعديل جميع منتجاتك."
-          />
-
-          <DashboardAction
-            href="/designs"
-            icon="🎨"
-            title="تصاميم الإعلانات"
-            text="إنشاء وإدارة تصاميم المنتجات."
-          />
-
-          <DashboardAction
-            href="/products"
-            icon="🚀"
-            title="سوّق منتج"
-            text="اختر منتجًا وابدأ التسويق."
-          />
-        </div>
-
-        {/* Recent Products */}
-
-        <div
-          style={{
-            background: "#fff",
-            border:
-              "1px solid #e8e8ef",
-            borderRadius: "22px",
-            padding: "25px",
+            background: "#ffffff",
+            borderRadius: "20px",
+            padding: "22px",
+            border: "1px solid #e5e7eb",
           }}
         >
           <div
             style={{
               display: "flex",
-              justifyContent:
-                "space-between",
               alignItems: "center",
+              justifyContent: "space-between",
               gap: "10px",
-              marginBottom: "20px",
+              marginBottom: "16px",
             }}
           >
             <h2
               style={{
                 margin: 0,
-                fontSize: "22px",
+                fontSize: "20px",
+                color: "#111827",
               }}
             >
               آخر المنتجات
             </h2>
 
-            <a
+            <Link
               href="/products"
               style={{
-                color: "#6246e5",
-                textDecoration:
-                  "none",
-                fontWeight: "700",
+                color: "#374151",
                 fontSize: "14px",
+                textDecoration: "none",
+                fontWeight: "bold",
               }}
             >
               عرض الكل
-            </a>
+            </Link>
           </div>
 
-          {loading ? (
+          {products.length === 0 ? (
             <div
               style={{
-                padding: "25px",
+                padding: "30px 10px",
                 textAlign: "center",
-                color: "#777",
+                color: "#6b7280",
+                lineHeight: "1.8",
               }}
             >
-              جاري تحميل المنتجات...
-            </div>
-          ) : products.length === 0 ? (
-            <div
-              style={{
-                padding: "35px",
-                textAlign: "center",
-                color: "#777",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "45px",
-                  marginBottom: "10px",
-                }}
-              >
-                📦
-              </div>
-
-              <div
-                style={{
-                  fontWeight: "700",
-                  marginBottom: "8px",
-                }}
-              >
-                لا توجد منتجات بعد
-              </div>
-
-              <div
-                style={{
-                  fontSize: "14px",
-                  marginBottom: "18px",
-                }}
-              >
-                أضف أول منتج وابدأ
-                التسويق.
-              </div>
-
-              <a
-                href="/add-product"
-                style={{
-                  display:
-                    "inline-block",
-                  background:
-                    "#6246e5",
-                  color: "#fff",
-                  textDecoration:
-                    "none",
-                  padding:
-                    "12px 20px",
-                  borderRadius:
-                    "12px",
-                  fontWeight:
-                    "700",
-                }}
-              >
-                ➕ إضافة منتج
-              </a>
+              لا توجد منتجات حتى الآن.
+              <br />
+              ابدأ بإضافة أول منتج لمتجرك.
             </div>
           ) : (
             <div
@@ -348,186 +408,128 @@ export default function Dashboard() {
                 gap: "12px",
               }}
             >
-              {products
-                .slice(0, 5)
-                .map((product) => (
-                  <div
-                    key={
-                      product.id
-                    }
-                    style={{
-                      display:
-                        "flex",
-                      alignItems:
-                        "center",
-                      justifyContent:
-                        "space-between",
-                      gap: "15px",
-                      border:
-                        "1px solid #eee",
-                      borderRadius:
-                        "16px",
-                      padding:
-                        "12px",
-                    }}
-                  >
+              {products.map((product) => (
+                <div
+                  key={product.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "14px",
+                    padding: "12px",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "16px",
+                  }}
+                >
+                  {product.image_url ? (
+                    <img
+                      src={product.image_url}
+                      alt={product.name || "منتج"}
+                      style={{
+                        width: "68px",
+                        height: "68px",
+                        objectFit: "cover",
+                        borderRadius: "12px",
+                        background: "#f3f4f6",
+                      }}
+                    />
+                  ) : (
                     <div
                       style={{
-                        display:
-                          "flex",
-                        alignItems:
-                          "center",
-                        gap: "12px",
-                        minWidth: 0,
+                        width: "68px",
+                        height: "68px",
+                        borderRadius: "12px",
+                        background: "#f3f4f6",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "25px",
                       }}
                     >
-                      {product.image_url ? (
-                        <img
-                          src={
-                            product.image_url
-                          }
-                          alt={
-                            product.name
-                          }
-                          style={{
-                            width:
-                              "58px",
-                            height:
-                              "58px",
-                            objectFit:
-                              "cover",
-                            borderRadius:
-                              "12px",
-                            border:
-                              "1px solid #eee",
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width:
-                              "58px",
-                            height:
-                              "58px",
-                            borderRadius:
-                              "12px",
-                            background:
-                              "#f2f2f5",
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            justifyContent:
-                              "center",
-                            fontSize:
-                              "25px",
-                          }}
-                        >
-                          📦
-                        </div>
-                      )}
+                      📦
+                    </div>
+                  )}
 
-                      <div
-                        style={{
-                          minWidth: 0,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight:
-                              "700",
-                            overflow:
-                              "hidden",
-                            textOverflow:
-                              "ellipsis",
-                            whiteSpace:
-                              "nowrap",
-                          }}
-                        >
-                          {
-                            product.name
-                          }
-                        </div>
-
-                        <div
-                          style={{
-                            color:
-                              "#777",
-                            fontSize:
-                              "13px",
-                            marginTop:
-                              "4px",
-                          }}
-                        >
-                          {
-                            product.brand ||
-                            "بدون علامة"
-                          }
-                        </div>
-                      </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: "bold",
+                        color: "#111827",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      {product.name || "منتج بدون اسم"}
                     </div>
 
-                    <a
-                      href={`/marketing/${product.id}`}
+                    {product.brand && (
+                      <div
+                        style={{
+                          color: "#6b7280",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {product.brand}
+                      </div>
+                    )}
+
+                    <div
                       style={{
-                        flexShrink: 0,
-                        background:
-                          "#f0edff",
+                        marginTop: "6px",
+                        fontSize: "12px",
                         color:
-                          "#6246e5",
-                        textDecoration:
-                          "none",
-                        padding:
-                          "9px 13px",
-                        borderRadius:
-                          "10px",
-                        fontWeight:
-                          "700",
-                        fontSize:
-                          "13px",
+                          product.ai_status === "completed"
+                            ? "#047857"
+                            : "#b45309",
                       }}
                     >
-                      🚀 سوّق
-                    </a>
+                      {product.ai_status === "completed"
+                        ? "✓ مكتمل"
+                        : "⏳ يحتاج معالجة"}
+                    </div>
                   </div>
-                ))}
+
+                  <Link
+                    href={`/marketing/${product.id}`}
+                    style={{
+                      textDecoration: "none",
+                      background: "#111827",
+                      color: "#ffffff",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      fontSize: "13px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    🚀 سوّق
+                  </Link>
+                </div>
+              ))}
             </div>
           )}
-        </div>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }
 
-function StatCard({
-  icon,
-  title,
-  value,
-}) {
+function StatCard({ icon, title, value }) {
   return (
     <div
       style={{
-        background: "#fff",
-        border:
-          "1px solid #e8e8ef",
-        borderRadius: "20px",
-        padding: "22px",
+        background: "#ffffff",
+        borderRadius: "18px",
+        padding: "20px",
+        border: "1px solid #e5e7eb",
       }}
     >
-      <div
-        style={{
-          fontSize: "30px",
-          marginBottom: "12px",
-        }}
-      >
+      <div style={{ fontSize: "26px", marginBottom: "10px" }}>
         {icon}
       </div>
 
       <div
         style={{
-          color: "#777",
+          color: "#6b7280",
           fontSize: "14px",
-          marginBottom: "7px",
+          marginBottom: "5px",
         }}
       >
         {title}
@@ -535,8 +537,9 @@ function StatCard({
 
       <div
         style={{
-          fontSize: "30px",
-          fontWeight: "800",
+          fontSize: "28px",
+          fontWeight: "bold",
+          color: "#111827",
         }}
       >
         {value}
@@ -545,62 +548,41 @@ function StatCard({
   );
 }
 
-function DashboardAction({
-  href,
-  icon,
-  title,
-  text,
-}) {
+function ActionLink({ href, icon, title, description }) {
   return (
-    <a
+    <Link
       href={href}
       style={{
         textDecoration: "none",
         color: "inherit",
+        border: "1px solid #e5e7eb",
+        borderRadius: "16px",
+        padding: "16px",
+        background: "#ffffff",
       }}
     >
+      <div style={{ fontSize: "25px", marginBottom: "8px" }}>
+        {icon}
+      </div>
+
       <div
         style={{
-          background: "#fff",
-          border:
-            "1px solid #e8e8ef",
-          borderRadius: "20px",
-          padding: "22px",
-          height: "100%",
-          boxSizing:
-            "border-box",
+          fontWeight: "bold",
+          color: "#111827",
+          marginBottom: "4px",
         }}
       >
-        <div
-          style={{
-            fontSize: "32px",
-            marginBottom: "12px",
-          }}
-        >
-          {icon}
-        </div>
-
-        <h3
-          style={{
-            margin:
-              "0 0 8px",
-            fontSize: "18px",
-          }}
-        >
-          {title}
-        </h3>
-
-        <p
-          style={{
-            margin: 0,
-            color: "#707070",
-            fontSize: "14px",
-            lineHeight: "1.7",
-          }}
-        >
-          {text}
-        </p>
+        {title}
       </div>
-    </a>
+
+      <div
+        style={{
+          fontSize: "13px",
+          color: "#6b7280",
+        }}
+      >
+        {description}
+      </div>
+    </Link>
   );
 }
