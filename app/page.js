@@ -150,11 +150,20 @@ export default function Home() {
             gap: "18px",
           }}
         >
-          <Feature
-            icon="📦"
-            title="إدارة المنتجات"
-            text="أضف منتجاتك واحفظ معلوماتها في مكتبتك."
-          />
+          <a
+  href="/products"
+  style={{
+    textDecoration: "none",
+    color: "inherit",
+    display: "block",
+  }}
+>
+  <Feature
+    icon="📦"
+    title="إدارة المنتجات"
+    text="أضف منتجاتك واحفظ معلوماتها في مكتبتك."
+  />
+</a>
 
           <Feature
             icon="🔎"
