@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -8,11 +9,14 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 );
 
-export default function MarketingPage({ params }) {
+export default function MarketingPage() {
+  const params = useParams();
+  const productId = params.id;
+
   const [product, setProduct] = useState(null);
   const [marketing, setMarketing] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -20,72 +24,60 @@ export default function MarketingPage({ params }) {
   }, []);
 
   async function loadData() {
-    try {
-      const { id } = await params;
+    setLoading(true);
 
-      // جلب المنتج
-      const { data: productData, error: productError } = await supabase
+    const { data: productData, error: productError } =
+      await supabase
         .from("products")
         .select("*")
-        .eq("id", id)
+        .eq("id", productId)
         .single();
 
-      if (productError) {
-        console.error("PRODUCT ERROR:", productError);
-        setMessage("❌ لم يتم العثور على المنتج.");
-        setLoading(false);
-        return;
-      }
+    if (productError) {
+      console.error(productError);
+      setMessage("❌ تعذر تحميل المنتج");
+      setLoading(false);
+      return;
+    }
 
-      setProduct(productData);
+    setProduct(productData);
 
-      // جلب آخر محتوى تسويقي
-      const { data: marketingData, error: marketingError } = await supabase
+    const { data: marketingData, error: marketingError } =
+      await supabase
         .from("marketing_contents")
         .select("*")
-        .eq("product_id", id)
+        .eq("product_id", productId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (marketingError) {
-        console.error("MARKETING ERROR:", marketingError);
+    if (!marketingError && marketingData) {
+      const productUpdated = new Date(
+        productData.updated_at || productData.created_at
+      );
+
+      const marketingCreated = new Date(
+        marketingData.created_at
+      );
+
+      // لا نعرض التسويق القديم إذا تغير المنتج
+      if (marketingCreated >= productUpdated) {
+        setMarketing(marketingData);
+      } else {
+        setMarketing(null);
       }
-
-      /*
-        مهم:
-        إذا كان المنتج تم تعديله بعد إنشاء المحتوى التسويقي،
-        لا نعرض المحتوى القديم.
-      */
-      if (marketingData) {
-        const marketingCreated = new Date(
-          marketingData.created_at
-        ).getTime();
-
-        const productUpdated = new Date(
-          productData.updated_at || productData.created_at
-        ).getTime();
-
-        if (marketingCreated >= productUpdated) {
-          setMarketing(marketingData);
-        } else {
-          setMarketing(null);
-        }
-      }
-    } catch (error) {
-      console.error(error);
-      setMessage("❌ حدث خطأ أثناء تحميل البيانات.");
-    } finally {
-      setLoading(false);
+    } else {
+      setMarketing(null);
     }
+
+    setLoading(false);
   }
 
-  async function createMarketingContent() {
+  async function generateMarketing() {
     if (!product) return;
 
-    setCreating(true);
+    setGenerating(true);
     setMessage("");
-    setMarketing(null);
 
     try {
       const response = await fetch("/api/generate-marketing", {
@@ -94,27 +86,15 @@ export default function MarketingPage({ params }) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          product: {
-            name: product.name,
-            brand: product.brand,
-            category: product.category,
-            price: product.price,
-            currency: product.currency,
-            description: product.description,
-            specifications: product.specifications,
-            features: product.features,
-          },
+          product,
         }),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        console.error("AI ERROR:", result);
-
         throw new Error(
-          result.error ||
-            "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي."
+          result.error || "تعذر إنشاء المحتوى"
         );
       }
 
@@ -123,42 +103,50 @@ export default function MarketingPage({ params }) {
         .insert({
           product_id: product.id,
           marketing_description:
-            result.marketing_description || null,
-          instagram: result.instagram || null,
-          whatsapp: result.whatsapp || null,
+            result.marketing_description || "",
+          instagram: result.instagram || "",
+          whatsapp: result.whatsapp || "",
           tiktok_snapchat:
-            result.tiktok_snapchat || null,
-          seo_title: result.seo_title || null,
+            result.tiktok_snapchat || "",
+          seo_title: result.seo_title || "",
           seo_description:
-            result.seo_description || null,
+            result.seo_description || "",
           seo_keywords:
-            result.seo_keywords || null,
+            result.seo_keywords || "",
           call_to_action:
-            result.call_to_action || null,
-          status: "generated",
+            result.call_to_action || "",
+          status: "completed",
         })
         .select()
         .single();
 
       if (error) {
-        console.error("SAVE MARKETING ERROR:", error);
-
+        console.error(error);
         throw new Error(
-          "تم إنشاء المحتوى ولكن تعذر حفظه في قاعدة البيانات."
+          "تم إنشاء المحتوى ولكن تعذر حفظه"
         );
       }
 
       setMarketing(data);
 
+      await supabase
+        .from("products")
+        .update({
+          ai_status: "completed",
+        })
+        .eq("id", product.id);
+
       setMessage(
-        "✅ تم إنشاء المحتوى التسويقي بالذكاء الاصطناعي وحفظه بنجاح."
+        "✅ تم إنشاء وحفظ المحتوى التسويقي بنجاح."
       );
     } catch (error) {
-      console.error("CREATE MARKETING ERROR:", error);
+      console.error(error);
 
-      setMessage(`❌ ${error.message}`);
+      setMessage(
+        `❌ ${error.message || "حدث خطأ أثناء إنشاء المحتوى"}`
+      );
     } finally {
-      setCreating(false);
+      setGenerating(false);
     }
   }
 
@@ -167,24 +155,13 @@ export default function MarketingPage({ params }) {
       <main
         dir="rtl"
         style={{
-          minHeight: "100vh",
-          padding: "30px 18px",
-          fontFamily: "Arial, sans-serif",
-          background: "#f7f7fb",
+          maxWidth: 900,
+          margin: "40px auto",
+          padding: 20,
+          fontFamily: "Arial",
         }}
       >
-        <div
-          style={{
-            maxWidth: "850px",
-            margin: "0 auto",
-            background: "#fff",
-            padding: "30px",
-            borderRadius: "20px",
-            textAlign: "center",
-          }}
-        >
-          جاري تحميل المنتج...
-        </div>
+        <h2>جاري تحميل المنتج...</h2>
       </main>
     );
   }
@@ -194,40 +171,13 @@ export default function MarketingPage({ params }) {
       <main
         dir="rtl"
         style={{
-          minHeight: "100vh",
-          padding: "30px 18px",
-          fontFamily: "Arial, sans-serif",
-          background: "#f7f7fb",
+          maxWidth: 900,
+          margin: "40px auto",
+          padding: 20,
+          fontFamily: "Arial",
         }}
       >
-        <div
-          style={{
-            maxWidth: "850px",
-            margin: "0 auto",
-            background: "#fff",
-            padding: "30px",
-            borderRadius: "20px",
-            textAlign: "center",
-          }}
-        >
-          <h2>المنتج غير موجود</h2>
-
-          <a
-            href="/products"
-            style={{
-              display: "inline-block",
-              marginTop: "20px",
-              padding: "12px 20px",
-              borderRadius: "12px",
-              background: "#6246e5",
-              color: "#fff",
-              textDecoration: "none",
-              fontWeight: "700",
-            }}
-          >
-            العودة إلى المنتجات
-          </a>
-        </div>
+        <h2>❌ المنتج غير موجود</h2>
       </main>
     );
   }
@@ -236,322 +186,228 @@ export default function MarketingPage({ params }) {
     <main
       dir="rtl"
       style={{
-        minHeight: "100vh",
-        padding: "25px 18px 50px",
-        fontFamily: "Arial, sans-serif",
-        background: "#f7f7fb",
+        maxWidth: 900,
+        margin: "30px auto",
+        padding: 20,
+        fontFamily: "Arial",
       }}
     >
-      <div
+      <h1>🚀 تسويق المنتج بالذكاء الاصطناعي</h1>
+
+      {/* بيانات المنتج */}
+      <section
         style={{
-          maxWidth: "850px",
-          margin: "0 auto",
+          border: "1px solid #ddd",
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 20,
         }}
       >
-        <a
-          href="/products"
-          style={{
-            display: "inline-block",
-            marginBottom: "18px",
-            textDecoration: "none",
-            color: "#6246e5",
-            fontWeight: "700",
-          }}
-        >
-          ← العودة إلى إدارة المنتجات
-        </a>
-
         <div
           style={{
-            background: "#fff",
-            borderRadius: "22px",
-            padding: "25px",
-            boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
+            display: "flex",
+            gap: 20,
+            alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
-          <div
-            style={{
-              marginBottom: "25px",
-              paddingBottom: "20px",
-              borderBottom: "1px solid #eee",
-            }}
-          >
+          {product.image_url ? (
+            <img
+              src={product.image_url}
+              alt={product.name}
+              style={{
+                width: 180,
+                height: 180,
+                objectFit: "contain",
+                borderRadius: 12,
+                border: "1px solid #eee",
+              }}
+            />
+          ) : (
             <div
               style={{
-                display: "inline-block",
-                background: "#eeeaff",
-                color: "#6246e5",
-                padding: "7px 12px",
-                borderRadius: "20px",
-                fontSize: "13px",
-                fontWeight: "700",
-                marginBottom: "12px",
+                width: 180,
+                height: 180,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 60,
+                background: "#f5f5f5",
+                borderRadius: 12,
               }}
             >
-              🤖 التسويق بالذكاء الاصطناعي
+              📦
             </div>
+          )}
 
-            <h1
-              style={{
-                margin: "0 0 10px",
-                fontSize: "30px",
-              }}
-            >
-              {product.name}
-            </h1>
+          <div>
+            <h2>{product.name}</h2>
 
-            <p
-              style={{
-                margin: "0",
-                color: "#666",
-                lineHeight: "1.8",
-              }}
-            >
-              {product.brand &&
-                `العلامة التجارية: ${product.brand}`}
-              {product.category &&
-                ` • ${product.category}`}
-            </p>
+            {product.brand && (
+              <p>
+                <strong>العلامة التجارية:</strong>{" "}
+                {product.brand}
+              </p>
+            )}
 
-            {product.price !== null &&
-              product.price !== undefined &&
-              product.price !== "" && (
-                <div
-                  style={{
-                    marginTop: "12px",
-                    fontSize: "20px",
-                    fontWeight: "800",
-                  }}
-                >
-                  💰 {product.price}{" "}
-                  {product.currency || "AED"}
-                </div>
-              )}
+            {product.category && (
+              <p>
+                <strong>التصنيف:</strong>{" "}
+                {product.category}
+              </p>
+            )}
+
+            {product.price && (
+              <p>
+                <strong>💰 السعر:</strong>{" "}
+                {product.price} {product.currency || "AED"}
+              </p>
+            )}
           </div>
-
-          <button
-            onClick={createMarketingContent}
-            disabled={creating}
-            style={{
-              width: "100%",
-              border: "none",
-              background: creating ? "#999" : "#6246e5",
-              color: "#fff",
-              padding: "16px",
-              borderRadius: "14px",
-              fontSize: "18px",
-              fontWeight: "800",
-              cursor: creating
-                ? "default"
-                : "pointer",
-            }}
-          >
-            {creating
-              ? "🤖 جاري إنشاء المحتوى بالذكاء الاصطناعي..."
-              : "🚀 إنشاء الكل بالذكاء الاصطناعي"}
-          </button>
-
-          {message && (
-            <div
-              style={{
-                marginTop: "18px",
-                padding: "14px",
-                borderRadius: "12px",
-                background: message.startsWith("❌")
-                  ? "#fff0f0"
-                  : "#eefbf3",
-                color: message.startsWith("❌")
-                  ? "#b42318"
-                  : "#16794c",
-                lineHeight: "1.7",
-                fontWeight: "700",
-              }}
-            >
-              {message}
-            </div>
-          )}
-
-          {marketing && (
-            <div
-              style={{
-                marginTop: "25px",
-                display: "grid",
-                gap: "16px",
-              }}
-            >
-              <MarketingCard
-                title="✍️ الوصف التسويقي"
-                content={
-                  marketing.marketing_description
-                }
-              />
-
-              <MarketingCard
-                title="📱 Instagram"
-                content={marketing.instagram}
-              />
-
-              <MarketingCard
-                title="💬 WhatsApp"
-                content={marketing.whatsapp}
-              />
-
-              <MarketingCard
-                title="🎵 TikTok / Snapchat"
-                content={
-                  marketing.tiktok_snapchat
-                }
-              />
-
-              <MarketingCard
-                title="🔎 SEO"
-                content={
-                  <>
-                    <strong>العنوان:</strong>
-
-                    <div
-                      style={{
-                        marginBottom: "12px",
-                      }}
-                    >
-                      {marketing.seo_title}
-                    </div>
-
-                    <strong>الوصف:</strong>
-
-                    <div
-                      style={{
-                        marginBottom: "12px",
-                      }}
-                    >
-                      {marketing.seo_description}
-                    </div>
-
-                    <strong>
-                      الكلمات المفتاحية:
-                    </strong>
-
-                    <div>
-                      {marketing.seo_keywords}
-                    </div>
-                  </>
-                }
-              />
-
-              <MarketingCard
-                title="🎯 الدعوة لاتخاذ إجراء"
-                content={
-                  marketing.call_to_action
-                }
-              />
-
-              <div
-                style={{
-                  background: "#f5f5f5",
-                  borderRadius: "16px",
-                  padding: "20px",
-                }}
-              >
-                <h2
-                  style={{
-                    marginTop: 0,
-                    fontSize: "20px",
-                  }}
-                >
-                  🖼️ صورة الإعلان
-                </h2>
-
-                <p
-                  style={{
-                    color: "#666",
-                    marginBottom: 0,
-                  }}
-                >
-                  سيتم إضافة إنشاء صورة الإعلان
-                  بالذكاء الاصطناعي في الخطوة التالية.
-                </p>
-              </div>
-
-              <div
-                style={{
-                  background: "#f5f5f5",
-                  borderRadius: "16px",
-                  padding: "20px",
-                }}
-              >
-                <h2
-                  style={{
-                    marginTop: 0,
-                    fontSize: "20px",
-                  }}
-                >
-                  🎬 فيديو الإعلان
-                </h2>
-
-                <p
-                  style={{
-                    color: "#666",
-                    marginBottom: 0,
-                  }}
-                >
-                  سيتم إضافة إنشاء فيديو الإعلان
-                  في مرحلة لاحقة.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {!marketing && (
-            <div
-              style={{
-                marginTop: "22px",
-                padding: "18px",
-                borderRadius: "14px",
-                background: "#fff8e6",
-                color: "#8a5a00",
-                lineHeight: "1.8",
-                textAlign: "center",
-              }}
-            >
-              ℹ️ لا يوجد محتوى تسويقي حديث لهذا
-              المنتج. اضغط «إنشاء الكل» لإنشاء
-              محتوى جديد بناءً على البيانات الحالية.
-            </div>
-          )}
         </div>
-      </div>
+      </section>
+
+      {/* زر الإنشاء */}
+      <section
+        style={{
+          border: "1px solid #ddd",
+          borderRadius: 12,
+          padding: 20,
+          marginBottom: 20,
+          textAlign: "center",
+        }}
+      >
+        <h2>أنشئ تسويق المنتج بالذكاء الاصطناعي</h2>
+
+        <p style={{ color: "#666" }}>
+          إنشاء المحتوى التسويقي المناسب لمنتجك
+          لجميع المنصات من زر واحد.
+        </p>
+
+        <button
+          onClick={generateMarketing}
+          disabled={generating}
+          style={{
+            padding: "15px 30px",
+            borderRadius: 10,
+            border: "none",
+            background: generating
+              ? "#999"
+              : "#16a34a",
+            color: "#fff",
+            fontSize: 18,
+            cursor: generating
+              ? "not-allowed"
+              : "pointer",
+          }}
+        >
+          {generating
+            ? "⏳ جاري إنشاء المحتوى..."
+            : "🚀 إنشاء الكل"}
+        </button>
+      </section>
+
+      {/* الرسالة */}
+      {message && (
+        <div
+          style={{
+            padding: 15,
+            borderRadius: 10,
+            background: "#f5f5f5",
+            marginBottom: 20,
+            fontWeight: "bold",
+          }}
+        >
+          {message}
+        </div>
+      )}
+
+      {/* المحتوى */}
+      {marketing && (
+        <section>
+          <h2>📣 المحتوى التسويقي</h2>
+
+          <ContentBox
+            title="📝 الوصف التسويقي"
+            content={marketing.marketing_description}
+          />
+
+          <ContentBox
+            title="📸 Instagram"
+            content={marketing.instagram}
+          />
+
+          <ContentBox
+            title="💬 WhatsApp"
+            content={marketing.whatsapp}
+          />
+
+          <ContentBox
+            title="🎬 TikTok / Snapchat"
+            content={marketing.tiktok_snapchat}
+          />
+
+          <ContentBox
+            title="🔎 SEO Title"
+            content={marketing.seo_title}
+          />
+
+          <ContentBox
+            title="📄 SEO Description"
+            content={marketing.seo_description}
+          />
+
+          <ContentBox
+            title="🔑 SEO Keywords"
+            content={marketing.seo_keywords}
+          />
+
+          <ContentBox
+            title="📢 Call To Action"
+            content={marketing.call_to_action}
+          />
+        </section>
+      )}
+
+      {!marketing && !generating && (
+        <div
+          style={{
+            padding: 20,
+            borderRadius: 10,
+            background: "#f8f8f8",
+            textAlign: "center",
+          }}
+        >
+          ℹ️ لا يوجد محتوى تسويقي حديث لهذا المنتج.
+          <br />
+          اضغط «إنشاء الكل» لإنشاء محتوى جديد بناءً
+          على البيانات الحالية.
+        </div>
+      )}
     </main>
   );
 }
 
-function MarketingCard({ title, content }) {
+function ContentBox({ title, content }) {
   return (
     <div
       style={{
-        background: "#fafafa",
-        border: "1px solid #eee",
-        borderRadius: "16px",
-        padding: "20px",
+        border: "1px solid #ddd",
+        borderRadius: 10,
+        padding: 20,
+        marginBottom: 15,
       }}
     >
-      <h2
-        style={{
-          marginTop: 0,
-          marginBottom: "14px",
-          fontSize: "20px",
-        }}
-      >
-        {title}
-      </h2>
+      <h3>{title}</h3>
 
       <div
         style={{
           whiteSpace: "pre-wrap",
-          lineHeight: "1.9",
+          lineHeight: 1.8,
           color: "#333",
         }}
       >
-        {content || "لا يوجد محتوى."}
+        {content || "لا يوجد محتوى"}
       </div>
     </div>
   );
