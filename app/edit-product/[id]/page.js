@@ -83,30 +83,58 @@ export default function EditProductPage({ params }) {
     setSaving(true);
     setMessage("");
 
-    const { error } = await supabase
-      .from("products")
-      .update({
-        name: product.name.trim(),
-        brand: product.brand.trim() || null,
-        category: product.category.trim() || null,
-        price: product.price === "" ? null : Number(product.price),
-        description: product.description.trim() || null,
-        specifications: product.specifications.trim() || null,
-        features: product.features.trim() || null,
-        barcode: product.barcode.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", productId);
+    try {
+      // 1. تحديث بيانات المنتج
+      const { error: updateError } = await supabase
+        .from("products")
+        .update({
+          name: product.name.trim(),
+          brand: product.brand.trim() || null,
+          category: product.category.trim() || null,
+          price: product.price === "" ? null : Number(product.price),
+          description: product.description.trim() || null,
+          specifications: product.specifications.trim() || null,
+          features: product.features.trim() || null,
+          barcode: product.barcode.trim() || null,
+          updated_at: new Date().toISOString(),
 
-    if (error) {
-      console.error("UPDATE PRODUCT ERROR:", error);
-      setMessage("❌ حدث خطأ أثناء حفظ التعديلات.");
+          // المنتج تغير، لذلك نعيد حالة الذكاء الاصطناعي للانتظار
+          ai_status: "pending",
+          verification_status: "unverified",
+        })
+        .eq("id", productId);
+
+      if (updateError) {
+        console.error("UPDATE PRODUCT ERROR:", updateError);
+        throw new Error("تعذر حفظ بيانات المنتج.");
+      }
+
+      // 2. حذف المحتوى التسويقي القديم
+      const { error: deleteMarketingError } = await supabase
+        .from("marketing_contents")
+        .delete()
+        .eq("product_id", productId);
+
+      if (deleteMarketingError) {
+        console.error(
+          "DELETE OLD MARKETING ERROR:",
+          deleteMarketingError
+        );
+
+        throw new Error(
+          "تم تحديث المنتج، ولكن تعذر حذف التسويق القديم."
+        );
+      }
+
+      setMessage(
+        "✅ تم حفظ التعديلات وحذف المحتوى التسويقي القديم. يمكنك الآن إنشاء تسويق جديد."
+      );
+    } catch (error) {
+      console.error("SAVE PRODUCT ERROR:", error);
+      setMessage(`❌ ${error.message}`);
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setMessage("✅ تم حفظ تعديلات المنتج بنجاح.");
-    setSaving(false);
   }
 
   if (loading) {
