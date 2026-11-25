@@ -1,12 +1,13 @@
 "use client";
+
 import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-);
+import { useRouter } from "next/navigation";
+import { createClient } from "../../lib/supabase/client";
+
 export default function AddProductPage() {
-  const [image, setImage] = useState(null);
+  const router = useRouter();
+  const supabase = createClient();
+
   const [form, setForm] = useState({
     name: "",
     brand: "",
@@ -14,86 +15,175 @@ export default function AddProductPage() {
     price: "",
     barcode: "",
   });
+
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
+
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
   function updateField(field, value) {
-    setForm((prev) => ({
-      ...prev,
+    setForm((current) => ({
+      ...current,
       [field]: value,
     }));
   }
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!form.name.trim()) {
-      alert("اكتب اسم المنتج أولاً.");
+
+  function handleImageChange(e) {
+    const file = e.target.files?.[0];
+
+    if (!file) {
       return;
     }
+
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    setError("");
+
+    if (!form.name.trim()) {
+      setError("اكتب اسم المنتج.");
+      return;
+    }
+
+    if (!imageFile) {
+      setError("أضف صورة المنتج.");
+      return;
+    }
+
     setLoading(true);
+
     try {
-      // 1. إنشاء المنتج الأساسي
-      const { data: createdProduct, error: insertError } =
+      // 1. التأكد من تسجيل الدخول
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        router.replace("/login");
+        return;
+      }
+
+      // 2. الحصول على محل المستخدم
+      const { data: shop, error: shopError } = await supabase
+        .from("shops")
+        .select("id, name, status")
+        .eq("owner_id", user.id)
+        .maybeSingle();
+
+      if (shopError) {
+        console.error(shopError);
+        setError("تعذر الوصول إلى بيانات المحل.");
+        setLoading(false);
+        return;
+      }
+
+      if (!shop) {
+        setError("لم يتم العثور على المحل. أكمل بيانات المحل أولاً.");
+        setLoading(false);
+        return;
+      }
+
+      if (shop.status !== "active") {
+        setError("حساب المحل غير نشط حالياً.");
+        setLoading(false);
+        return;
+      }
+
+      // 3. رفع صورة المنتج
+      const fileExtension =
+        imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
+
+      const safeExtension =
+        fileExtension.replace(/[^a-z0-9]/g, "") || "jpg";
+
+      const fileName = `${crypto.randomUUID()}.${safeExtension}`;
+
+      const filePath = `${user.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("product-images")
+        .upload(filePath, imageFile, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: imageFile.type || "image/jpeg",
+        });
+
+      if (uploadError) {
+        console.error(uploadError);
+        setError("تعذر رفع صورة المنتج.");
+        setLoading(false);
+        return;
+      }
+
+      // 4. الحصول على رابط الصورة
+      const { data: publicImage } = supabase.storage
+        .from("product-images")
+        .getPublicUrl(filePath);
+
+      const imageUrl = publicImage?.publicUrl || "";
+
+      if (!imageUrl) {
+        setError("تعذر إنشاء رابط صورة المنتج.");
+        setLoading(false);
+        return;
+      }
+
+      // 5. إنشاء المنتج وربطه بالمحل
+      const productData = {
+        shop_id: shop.id,
+
+        name: form.name.trim(),
+        brand: form.brand.trim() || null,
+        category: form.category.trim() || null,
+
+        price: form.price
+          ? Number(form.price)
+          : null,
+
+        currency: "AED",
+
+        barcode: form.barcode.trim() || null,
+
+        image_url: imageUrl,
+
+        product_type: "local",
+
+        verification_status: "unverified",
+        ai_status: "pending",
+      };
+
+      const { data: createdProduct, error: productError } =
         await supabase
           .from("products")
-          .insert({
-            name: form.name.trim(),
-            brand: form.brand.trim() || null,
-            category: form.category.trim() || null,
-            price: form.price ? Number(form.price) : null,
-            barcode: form.barcode.trim() || null,
-            ai_status: "pending",
-            verification_status: "unverified",
-          })
-          .select()
+          .insert(productData)
+          .select("*")
           .single();
-      if (insertError) {
-        console.error("PRODUCT INSERT ERROR:", insertError);
-        throw new Error("تعذر إنشاء المنتج.");
+
+      if (productError) {
+        console.error(productError);
+
+        // نحاول حذف الصورة إذا فشل إنشاء المنتج
+        await supabase.storage
+          .from("product-images")
+          .remove([filePath]);
+
+        setError(
+          productError.message ||
+            "تعذر إنشاء المنتج."
+        );
+
+        setLoading(false);
+        return;
       }
-      let imageUrl = null;
-      // 2. رفع صورة المنتج
-      if (image) {
-        const extension =
-          image.name.split(".").pop() || "jpg";
-        const fileName =
-          `${createdProduct.id}-${Date.now()}.${extension}`;
-        const { error: uploadError } =
-          await supabase.storage
-            .from("product-images")
-            .upload(fileName, image, {
-              cacheControl: "3600",
-              upsert: true,
-              contentType: image.type,
-            });
-        if (uploadError) {
-          console.error("IMAGE UPLOAD ERROR:", uploadError);
-          await supabase
-            .from("products")
-            .update({
-              ai_status: "failed",
-            })
-            .eq("id", createdProduct.id);
-          throw new Error("تعذر رفع صورة المنتج.");
-        }
-        const { data: publicUrlData } =
-          supabase.storage
-            .from("product-images")
-            .getPublicUrl(fileName);
-        imageUrl = publicUrlData.publicUrl;
-        const { error: imageUpdateError } =
-          await supabase
-            .from("products")
-            .update({
-              image_url: imageUrl,
-            })
-            .eq("id", createdProduct.id);
-        if (imageUpdateError) {
-          console.error(
-            "IMAGE URL SAVE ERROR:",
-            imageUpdateError
-          );
-        }
-      }
-      // 3. تشغيل ذكاء المنتج
-      const response = await fetch(
+
+      // 6. إرسال المنتج للتحليل الذكي
+      const analyzeResponse = await fetch(
         "/api/analyze-product",
         {
           method: "POST",
@@ -108,274 +198,419 @@ export default function AddProductPage() {
           }),
         }
       );
-      const analyzed = await response.json();
-      console.log("ANALYZE RESPONSE:", analyzed);
-      // 4. إذا فشل الذكاء
-      if (!response.ok) {
-        console.error(
-          "ANALYZE PRODUCT ERROR:",
-          analyzed
+
+      const analyzeResult =
+        await analyzeResponse.json();
+
+      if (!analyzeResponse.ok) {
+        console.error(analyzeResult);
+
+        setError(
+          "تم حفظ المنتج، لكن تعذر إكمال التحليل الذكي."
         );
-        await supabase
-          .from("products")
-          .update({
-            ai_status: "failed",
-          })
-          .eq("id", createdProduct.id);
-        throw new Error(
-          analyzed.error ||
-            "تعذر تحليل المنتج."
+
+        setLoading(false);
+
+        router.push(
+          `/product-intelligence/${createdProduct.id}`
         );
+
+        return;
       }
-      // 5. حفظ نتيجة ذكاء المنتج
-      const { error: updateError } =
-        await supabase
-          .from("products")
-          .update({
-            name:
-              analyzed.product_name ||
-              createdProduct.name,
-            brand:
-              analyzed.brand ||
-              createdProduct.brand,
-            category:
-              analyzed.category ||
-              createdProduct.category,
-            product_type:
-              analyzed.product_type ||
-              createdProduct.product_type ||
-              "local",
-            description:
-              analyzed.full_description ||
-              analyzed.short_description ||
-              null,
-            specifications:
-              analyzed.specifications ||
-              null,
-            features:
-              analyzed.features ||
-              null,
-            uses:
-              analyzed.uses ||
-              null,
-            target_audience:
-              analyzed.target_audience ||
-              null,
-            manufacturer:
-              analyzed.manufacturer ||
-              null,
-            country_of_origin:
-              analyzed.country_of_origin ||
-              null,
-            size_or_volume:
-              analyzed.size_or_volume ||
-              null,
-            ingredients:
-              analyzed.ingredients ||
-              null,
-            warnings:
-              analyzed.warnings ||
-              null,
-            storage:
-              analyzed.storage ||
-              null,
-            warranty:
-              analyzed.warranty ||
-              null,
-            verification_notes:
-              analyzed.verification_notes ||
-              null,
-            confidence:
-              analyzed.confidence ||
-              null,
-            ai_status: "completed",
-            verification_status:
-              "unverified",
-          })
-          .eq("id", createdProduct.id);
+
+      // 7. حفظ نتيجة التحليل
+      const analyzed = analyzeResult?.product || analyzeResult;
+
+      const updateData = {
+        name:
+          analyzed?.product_name ||
+          analyzed?.name ||
+          createdProduct.name,
+
+        brand:
+          analyzed?.brand ||
+          createdProduct.brand,
+
+        category:
+          analyzed?.category ||
+          createdProduct.category,
+
+        description:
+          analyzed?.short_description ||
+          analyzed?.description ||
+          null,
+
+        specifications:
+          analyzed?.specifications ||
+          null,
+
+        features:
+          analyzed?.features ||
+          null,
+
+        uses:
+          analyzed?.uses ||
+          null,
+
+        target_audience:
+          analyzed?.target_audience ||
+          null,
+
+        manufacturer:
+          analyzed?.manufacturer ||
+          null,
+
+        country_of_origin:
+          analyzed?.country_of_origin ||
+          null,
+
+        size_or_volume:
+          analyzed?.size_or_volume ||
+          null,
+
+        ingredients:
+          analyzed?.ingredients ||
+          null,
+
+        warnings:
+          analyzed?.warnings ||
+          null,
+
+        storage:
+          analyzed?.storage ||
+          null,
+
+        warranty:
+          analyzed?.warranty ||
+          null,
+
+        verification_notes:
+          analyzed?.verification_notes ||
+          null,
+
+        confidence:
+          analyzed?.confidence ||
+          null,
+
+        ai_status: "completed",
+
+        verification_status: "verified",
+
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error: updateError } = await supabase
+        .from("products")
+        .update(updateData)
+        .eq("id", createdProduct.id)
+        .eq("shop_id", shop.id);
+
       if (updateError) {
-        console.error(
-          "SAVE ANALYSIS ERROR:",
-          updateError
+        console.error(updateError);
+
+        setError(
+          "تم التحليل، لكن تعذر حفظ بعض بيانات التحليل."
         );
-        throw new Error(
-          "تم تحليل المنتج لكن تعذر حفظ النتيجة."
+
+        setLoading(false);
+
+        router.push(
+          `/product-intelligence/${createdProduct.id}`
         );
+
+        return;
       }
-      // 6. تصفير النموذج
-      setForm({
-        name: "",
-        brand: "",
-        category: "",
-        price: "",
-        barcode: "",
-      });
-      setImage(null);
-      // 7. الانتقال مباشرة إلى ذكاء المنتج
-      window.location.href =
-        `/product-intelligence/${createdProduct.id}`;
-    } catch (error) {
-      console.error(
-        "ADD PRODUCT ERROR:",
-        error
+
+      // 8. الانتقال إلى صفحة ذكاء المنتج
+      router.push(
+        `/product-intelligence/${createdProduct.id}`
       );
-      alert(
-        error.message ||
-          "حدث خطأ أثناء إضافة المنتج."
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        "حدث خطأ غير متوقع. حاول مرة أخرى."
       );
-    } finally {
+
       setLoading(false);
     }
   }
+
   return (
     <main
+      dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f7f7",
-        padding: "25px 16px 50px",
-        direction: "rtl",
+        background: "#f7f8fa",
+        padding: "24px",
         fontFamily: "Arial, sans-serif",
       }}
     >
       <div
         style={{
-          maxWidth: 800,
-          margin: "auto",
+          maxWidth: "700px",
+          margin: "0 auto",
         }}
       >
         <div
           style={{
-            background: "#fff",
-            padding: 25,
-            borderRadius: 22,
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "28px",
             boxShadow:
-              "0 4px 18px rgba(0,0,0,0.05)",
+              "0 10px 35px rgba(0,0,0,0.07)",
           }}
         >
-          <h1
+          <button
+            type="button"
+            onClick={() => router.back()}
             style={{
-              marginTop: 0,
-              fontSize: 28,
+              border: "none",
+              background: "transparent",
+              color: "#6b7280",
+              cursor: "pointer",
+              fontSize: "14px",
+              marginBottom: "18px",
             }}
           >
-            🧠 ذكاء المنتج
-          </h1>
-          <p
-            style={{
-              color: "#666",
-              lineHeight: 1.8,
-            }}
-          >
-            أضف صورة المنتج والبيانات الأساسية فقط.
-            سوق AI سيحاول تحليل المنتج وتجهيز معلوماته.
-          </p>
-          <form onSubmit={handleSubmit}>
-            {/* الصورة */}
+            ← رجوع
+          </button>
+
+          <div style={{ marginBottom: "26px" }}>
             <div
               style={{
-                marginTop: 25,
-                marginBottom: 20,
+                fontSize: "40px",
+                marginBottom: "8px",
               }}
             >
-              <label
-                style={{
-                  display: "block",
-                  fontWeight: "bold",
-                  marginBottom: 8,
-                }}
-              >
-                📸 صورة المنتج
-              </label>
+              📦
+            </div>
+
+            <h1
+              style={{
+                margin: 0,
+                fontSize: "28px",
+                color: "#111827",
+              }}
+            >
+              إضافة منتج
+            </h1>
+
+            <p
+              style={{
+                color: "#6b7280",
+                lineHeight: "1.8",
+              }}
+            >
+              أضف المنتج وسيتعرف عليه سوق AI
+              ويجمع معلوماته قبل إنشاء المحتوى
+              التسويقي.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <label style={labelStyle}>
+              اسم المنتج *
+            </label>
+
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) =>
+                updateField(
+                  "name",
+                  e.target.value
+                )
+              }
+              placeholder="مثال: HUAWEI FreeClip"
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              العلامة التجارية
+            </label>
+
+            <input
+              type="text"
+              value={form.brand}
+              onChange={(e) =>
+                updateField(
+                  "brand",
+                  e.target.value
+                )
+              }
+              placeholder="مثال: Huawei"
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              التصنيف
+            </label>
+
+            <input
+              type="text"
+              value={form.category}
+              onChange={(e) =>
+                updateField(
+                  "category",
+                  e.target.value
+                )
+              }
+              placeholder="مثال: إلكترونيات"
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>
+              السعر
+            </label>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+              }}
+            >
               <input
-                type="file"
-                accept="image/*"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.price}
                 onChange={(e) =>
-                  setImage(
-                    e.target.files?.[0] || null
+                  updateField(
+                    "price",
+                    e.target.value
                   )
                 }
+                placeholder="0.00"
                 style={{
-                  width: "100%",
+                  ...inputStyle,
+                  flex: 1,
                 }}
               />
+
+              <div
+                style={{
+                  minWidth: "70px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "12px",
+                  color: "#374151",
+                  background: "#f9fafb",
+                  fontWeight: "bold",
+                }}
+              >
+                AED
+              </div>
             </div>
-            {/* الاسم */}
-            <Field
-              label="اسم المنتج *"
-              value={form.name}
-              onChange={(value) =>
-                updateField("name", value)
-              }
-              placeholder="مثال: Rosa Misl"
-            />
-            {/* العلامة */}
-            <Field
-              label="العلامة التجارية"
-              value={form.brand}
-              onChange={(value) =>
-                updateField("brand", value)
-              }
-              placeholder="مثال: Ajmal"
-            />
-            {/* التصنيف */}
-            <Field
-              label="التصنيف"
-              value={form.category}
-              onChange={(value) =>
-                updateField("category", value)
-              }
-              placeholder="مثال: عطور"
-            />
-            {/* السعر */}
-            <Field
-              label="السعر"
-              type="number"
-              value={form.price}
-              onChange={(value) =>
-                updateField("price", value)
-              }
-              placeholder="170"
-            />
-            {/* الباركود */}
-            <Field
-              label="الباركود"
+
+            <label style={labelStyle}>
+              الباركود
+            </label>
+
+            <input
+              type="text"
+              inputMode="numeric"
               value={form.barcode}
-              onChange={(value) =>
-                updateField("barcode", value)
+              onChange={(e) =>
+                updateField(
+                  "barcode",
+                  e.target.value
+                )
               }
               placeholder="اختياري"
+              style={inputStyle}
             />
+
+            <label style={labelStyle}>
+              صورة المنتج *
+            </label>
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: "12px",
+                border:
+                  "1px solid #d1d5db",
+                borderRadius: "12px",
+                background: "#ffffff",
+              }}
+            />
+
+            {imagePreview && (
+              <div
+                style={{
+                  marginTop: "16px",
+                  textAlign: "center",
+                }}
+              >
+                <img
+                  src={imagePreview}
+                  alt="معاينة المنتج"
+                  style={{
+                    width: "100%",
+                    maxWidth: "300px",
+                    maxHeight: "300px",
+                    objectFit: "contain",
+                    borderRadius: "16px",
+                    border:
+                      "1px solid #e5e7eb",
+                  }}
+                />
+              </div>
+            )}
+
             <div
               style={{
-                background: "#eef6ff",
-                padding: 15,
-                borderRadius: 14,
-                marginTop: 20,
-                marginBottom: 20,
-                lineHeight: 1.8,
+                marginTop: "18px",
+                padding: "14px",
+                borderRadius: "14px",
+                background: "#f9fafb",
+                color: "#6b7280",
+                fontSize: "14px",
+                lineHeight: "1.8",
               }}
             >
-              💡 <strong>ملاحظة:</strong>
-              <br />
-              لا تحتاج إلى كتابة الوصف أو المواصفات
-              أو المميزات بنفسك.
-              <br />
-              🧠 ذكاء المنتج سيحاول جمع المعلومات
-              وتجهيزها للمراجعة.
+              🔎 سيتم استخدام صورة المنتج
+              والاسم والعلامة التجارية والباركود
+              عند توفره للتعرف على المنتج وجمع
+              معلومات موثوقة عنه.
             </div>
+
+            {error && (
+              <div
+                style={{
+                  marginTop: "18px",
+                  padding: "13px",
+                  borderRadius: "12px",
+                  background: "#fef2f2",
+                  color: "#b91c1c",
+                  lineHeight: "1.7",
+                }}
+              >
+                {error}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
               style={{
                 width: "100%",
-                padding: 17,
+                marginTop: "22px",
+                padding: "16px",
                 border: "none",
-                borderRadius: 14,
+                borderRadius: "14px",
                 background: loading
-                  ? "#999"
-                  : "#111",
-                color: "#fff",
-                fontSize: 17,
+                  ? "#9ca3af"
+                  : "#111827",
+                color: "#ffffff",
+                fontSize: "17px",
                 fontWeight: "bold",
                 cursor: loading
                   ? "not-allowed"
@@ -383,8 +618,8 @@ export default function AddProductPage() {
               }}
             >
               {loading
-                ? "🧠 جاري تحليل المنتج..."
-                : "🧠 حفظ وتحليل المنتج"}
+                ? "جاري إضافة وتحليل المنتج..."
+                : "إضافة وتحليل المنتج"}
             </button>
           </form>
         </div>
@@ -392,45 +627,23 @@ export default function AddProductPage() {
     </main>
   );
 }
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder = "",
-  type = "text",
-}) {
-  return (
-    <div
-      style={{
-        marginBottom: 18,
-      }}
-    >
-      <label
-        style={{
-          display: "block",
-          fontWeight: "bold",
-          marginBottom: 8,
-        }}
-      >
-        {label}
-      </label>
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-          padding: 14,
-          borderRadius: 12,
-          border: "1px solid #ddd",
-          fontSize: 16,
-          fontFamily: "inherit",
-        }}
-      />
-    </div>
-  );
-}
+
+const labelStyle = {
+  display: "block",
+  marginTop: "18px",
+  marginBottom: "8px",
+  fontSize: "14px",
+  fontWeight: "bold",
+  color: "#374151",
+};
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "14px",
+  border: "1px solid #d1d5db",
+  borderRadius: "12px",
+  background: "#ffffff",
+  fontSize: "16px",
+  outline: "none",
+};
