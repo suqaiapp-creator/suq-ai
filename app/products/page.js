@@ -11,7 +11,7 @@ const supabase = createClient(
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(null);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     loadProducts();
@@ -25,59 +25,56 @@ export default function ProductsPage() {
       .select("*")
       .order("created_at", { ascending: false });
 
-    console.log("PRODUCTS:", data);
-    console.log("PRODUCT ERROR:", error);
-
     if (error) {
-      console.error(error);
-      setProducts([]);
-      setLoading(false);
-      return;
+      console.error("LOAD PRODUCTS ERROR:", error);
+      setMessage("❌ تعذر تحميل المنتجات.");
+    } else {
+      setProducts(data || []);
     }
 
-    setProducts(data || []);
     setLoading(false);
   }
 
-  async function deleteProduct(productId) {
+  async function deleteProduct(id) {
     const confirmed = window.confirm(
-      "هل أنت متأكد من حذف هذا المنتج؟ سيتم حذف المحتوى التسويقي المرتبط به أيضًا."
+      "هل أنت متأكد من حذف هذا المنتج؟"
     );
 
     if (!confirmed) return;
 
-    setDeleting(productId);
-
     const { error } = await supabase
       .from("products")
       .delete()
-      .eq("id", productId);
+      .eq("id", id);
 
     if (error) {
-      console.error("DELETE ERROR:", error);
-      alert("حدث خطأ أثناء حذف المنتج.");
-      setDeleting(null);
+      console.error("DELETE PRODUCT ERROR:", error);
+      setMessage("❌ تعذر حذف المنتج.");
       return;
     }
 
     setProducts((current) =>
-      current.filter((product) => product.id !== productId)
+      current.filter((product) => product.id !== id)
     );
 
-    setDeleting(null);
+    setMessage("✅ تم حذف المنتج.");
   }
 
-  function getVerificationText(status) {
-    if (status === "verified") return "✅ موثّق";
-    if (status === "review") return "🟡 يحتاج مراجعة";
-    return "⚪ غير موثّق";
-  }
-
-  function getAIStatusText(status) {
-    if (status === "completed") return "✅ جاهز";
-    if (status === "processing") return "🔄 قيد المعالجة";
-    if (status === "error") return "❌ خطأ";
-    return "⏳ بانتظار الذكاء الاصطناعي";
+  if (loading) {
+    return (
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          background: "#f7f7fb",
+          padding: "40px 18px",
+          fontFamily: "Arial, sans-serif",
+          textAlign: "center",
+        }}
+      >
+        ⏳ جاري تحميل المنتجات...
+      </main>
+    );
   }
 
   return (
@@ -86,18 +83,18 @@ export default function ProductsPage() {
       style={{
         minHeight: "100vh",
         background: "#f7f7fb",
-        padding: "25px 18px 50px",
+        padding: "25px 18px 60px",
         fontFamily: "Arial, sans-serif",
       }}
     >
       <div
         style={{
-          maxWidth: "950px",
+          maxWidth: "1000px",
           margin: "0 auto",
         }}
       >
         <a
-          href="/"
+          href="/dashboard"
           style={{
             display: "inline-block",
             marginBottom: "18px",
@@ -106,13 +103,13 @@ export default function ProductsPage() {
             fontWeight: "700",
           }}
         >
-          ← الرئيسية
+          ← لوحة التحكم
         </a>
 
         <div
           style={{
             background: "#fff",
-            borderRadius: "22px",
+            borderRadius: "24px",
             padding: "25px",
             boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
           }}
@@ -123,8 +120,8 @@ export default function ProductsPage() {
               justifyContent: "space-between",
               alignItems: "center",
               gap: "15px",
-              flexWrap: "wrap",
               marginBottom: "25px",
+              flexWrap: "wrap",
             }}
           >
             <div>
@@ -139,22 +136,21 @@ export default function ProductsPage() {
 
               <p
                 style={{
-                  margin: "8px 0 0",
                   color: "#666",
+                  marginBottom: 0,
                 }}
               >
-                مكتبة منتجاتك جاهزة للتسويق بالذكاء الاصطناعي.
+                أدر منتجاتك وراجع معلومات الذكاء الاصطناعي.
               </p>
             </div>
 
             <a
               href="/add-product"
               style={{
-                display: "inline-block",
-                padding: "13px 18px",
-                borderRadius: "12px",
                 background: "#6246e5",
                 color: "#fff",
+                padding: "13px 18px",
+                borderRadius: "12px",
                 textDecoration: "none",
                 fontWeight: "800",
               }}
@@ -163,42 +159,48 @@ export default function ProductsPage() {
             </a>
           </div>
 
-          {loading ? (
+          {message && (
             <div
               style={{
-                padding: "40px 20px",
-                textAlign: "center",
-                color: "#666",
+                marginBottom: "18px",
+                padding: "14px",
+                borderRadius: "12px",
+                background: message.startsWith("❌")
+                  ? "#fff0f0"
+                  : "#eefbf3",
+                color: message.startsWith("❌")
+                  ? "#b42318"
+                  : "#16794c",
+                fontWeight: "700",
               }}
             >
-              جاري تحميل المنتجات...
+              {message}
             </div>
-          ) : products.length === 0 ? (
+          )}
+
+          {products.length === 0 ? (
             <div
               style={{
-                padding: "45px 20px",
                 textAlign: "center",
-                background: "#fafafa",
-                borderRadius: "16px",
+                padding: "50px 20px",
+                color: "#777",
               }}
             >
               <div
                 style={{
-                  fontSize: "45px",
+                  fontSize: "50px",
                   marginBottom: "12px",
                 }}
               >
                 📦
               </div>
 
-              <h2>لا توجد منتجات حتى الآن</h2>
+              <h2 style={{ color: "#333" }}>
+                لا توجد منتجات بعد
+              </h2>
 
-              <p
-                style={{
-                  color: "#666",
-                }}
-              >
-                أضف أول منتج وابدأ بتسويقه بالذكاء الاصطناعي.
+              <p>
+                أضف أول منتج وخلّ ذكاء المنتج يجهز معلوماته.
               </p>
 
               <a
@@ -206,15 +208,15 @@ export default function ProductsPage() {
                 style={{
                   display: "inline-block",
                   marginTop: "10px",
-                  padding: "13px 20px",
-                  borderRadius: "12px",
                   background: "#6246e5",
                   color: "#fff",
+                  padding: "14px 20px",
+                  borderRadius: "12px",
                   textDecoration: "none",
-                  fontWeight: "700",
+                  fontWeight: "800",
                 }}
               >
-                ➕ إضافة أول منتج
+                🧠 إضافة أول منتج
               </a>
             </div>
           ) : (
@@ -224,35 +226,30 @@ export default function ProductsPage() {
                 gap: "18px",
               }}
             >
-              {products.map((product) => (
-                <div
-                  key={product.id}
-                  style={{
-                    background: "#fff",
-                    border: "1px solid #e8e8ee",
-                    borderRadius: "18px",
-                    padding: "20px",
-                  }}
-                >
+              {products.map((product) => {
+                const verified =
+                  product.verification_status ===
+                  "verified";
+
+                const aiCompleted =
+                  product.ai_status === "completed";
+
+                return (
                   <div
+                    key={product.id}
                     style={{
-                      display: "flex",
-                      gap: "18px",
-                      alignItems: "flex-start",
+                      border: "1px solid #eee",
+                      borderRadius: "20px",
+                      padding: "18px",
+                      background: "#fff",
                     }}
                   >
                     <div
                       style={{
-                        width: "90px",
-                        height: "90px",
-                        flexShrink: 0,
-                        borderRadius: "15px",
-                        background: "#f0eff8",
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        overflow: "hidden",
-                        fontSize: "38px",
+                        gap: "18px",
+                        alignItems: "flex-start",
+                        flexWrap: "wrap",
                       }}
                     >
                       {product.image_url ? (
@@ -260,184 +257,218 @@ export default function ProductsPage() {
                           src={product.image_url}
                           alt={product.name}
                           style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
+                            width: "150px",
+                            height: "150px",
+                            objectFit: "contain",
+                            borderRadius: "16px",
+                            background: "#f8f8f8",
+                            border:
+                              "1px solid #eee",
                           }}
                         />
                       ) : (
-                        "📦"
+                        <div
+                          style={{
+                            width: "150px",
+                            height: "150px",
+                            borderRadius: "16px",
+                            background: "#f5f5f7",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "45px",
+                          }}
+                        >
+                          📦
+                        </div>
                       )}
+
+                      <div
+                        style={{
+                          flex: 1,
+                          minWidth: "220px",
+                        }}
+                      >
+                        <h2
+                          style={{
+                            marginTop: 0,
+                            marginBottom: "8px",
+                          }}
+                        >
+                          {product.name}
+                        </h2>
+
+                        {product.brand && (
+                          <div
+                            style={{
+                              color: "#666",
+                              marginBottom: "5px",
+                            }}
+                          >
+                            🏷️ {product.brand}
+                          </div>
+                        )}
+
+                        {product.category && (
+                          <div
+                            style={{
+                              color: "#666",
+                              marginBottom: "5px",
+                            }}
+                          >
+                            📂 {product.category}
+                          </div>
+                        )}
+
+                        {product.price !== null &&
+                          product.price !== undefined && (
+                            <div
+                              style={{
+                                fontWeight: "800",
+                                marginTop: "8px",
+                              }}
+                            >
+                              💰 {product.price} AED
+                            </div>
+                          )}
+
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                            marginTop: "14px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              padding:
+                                "7px 10px",
+                              borderRadius:
+                                "10px",
+                              background:
+                                aiCompleted
+                                  ? "#eefbf3"
+                                  : "#fff5d9",
+                              color:
+                                aiCompleted
+                                  ? "#16794c"
+                                  : "#806000",
+                              fontSize:
+                                "13px",
+                              fontWeight:
+                                "800",
+                            }}
+                          >
+                            {aiCompleted
+                              ? "🧠 تم التحليل"
+                              : "🧠 يحتاج تحليل"}
+                          </span>
+
+                          <span
+                            style={{
+                              padding:
+                                "7px 10px",
+                              borderRadius:
+                                "10px",
+                              background:
+                                verified
+                                  ? "#eefbf3"
+                                  : "#fff5d9",
+                              color:
+                                verified
+                                  ? "#16794c"
+                                  : "#806000",
+                              fontSize:
+                                "13px",
+                              fontWeight:
+                                "800",
+                            }}
+                          >
+                            {verified
+                              ? "✅ معتمد"
+                              : "⚠️ يحتاج مراجعة"}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
                     <div
                       style={{
-                        flex: 1,
-                        minWidth: 0,
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: "10px",
+                        marginTop: "18px",
                       }}
                     >
-                      <h2
+                      <a
+                        href={`/product-intelligence/${product.id}`}
                         style={{
-                          margin: "0 0 7px",
-                          fontSize: "21px",
+                          background: "#6246e5",
+                          color: "#fff",
+                          padding: "13px",
+                          borderRadius: "12px",
+                          textAlign: "center",
+                          textDecoration: "none",
+                          fontWeight: "800",
                         }}
                       >
-                        {product.name}
-                      </h2>
+                        🧠 ذكاء المنتج
+                      </a>
 
-                      {product.brand && (
-                        <div
-                          style={{
-                            color: "#666",
-                            marginBottom: "5px",
-                          }}
-                        >
-                          🏷️ {product.brand}
-                        </div>
-                      )}
+                      <a
+                        href={`/marketing/${product.id}`}
+                        style={{
+                          background: "#16794c",
+                          color: "#fff",
+                          padding: "13px",
+                          borderRadius: "12px",
+                          textAlign: "center",
+                          textDecoration: "none",
+                          fontWeight: "800",
+                        }}
+                      >
+                        🚀 التسويق
+                      </a>
 
-                      {product.category && (
-                        <div
-                          style={{
-                            color: "#666",
-                            marginBottom: "5px",
-                          }}
-                        >
-                          📂 {product.category}
-                        </div>
-                      )}
+                      <a
+                        href={`/edit-product/${product.id}`}
+                        style={{
+                          background: "#f3f3f6",
+                          color: "#333",
+                          padding: "13px",
+                          borderRadius: "12px",
+                          textAlign: "center",
+                          textDecoration: "none",
+                          fontWeight: "800",
+                        }}
+                      >
+                        ✏️ تعديل
+                      </a>
 
-                      {product.price !== null &&
-                        product.price !== undefined &&
-                        product.price !== "" && (
-                          <div
-                            style={{
-                              fontSize: "18px",
-                              fontWeight: "800",
-                              marginTop: "8px",
-                            }}
-                          >
-                            💰 {product.price} {product.currency || "AED"}
-                          </div>
-                        )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          deleteProduct(product.id)
+                        }
+                        style={{
+                          border: "none",
+                          background: "#fff0f0",
+                          color: "#b42318",
+                          padding: "13px",
+                          borderRadius: "12px",
+                          fontWeight: "800",
+                          cursor: "pointer",
+                          fontSize: "15px",
+                        }}
+                      >
+                        🗑️ حذف
+                      </button>
                     </div>
                   </div>
-
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      flexWrap: "wrap",
-                      marginTop: "17px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        padding: "7px 10px",
-                        borderRadius: "20px",
-                        background: "#f3f3f6",
-                        fontSize: "13px",
-                      }}
-                    >
-                      {getVerificationText(product.verification_status)}
-                    </span>
-
-                    <span
-                      style={{
-                        padding: "7px 10px",
-                        borderRadius: "20px",
-                        background: "#f3f3f6",
-                        fontSize: "13px",
-                      }}
-                    >
-                      🤖 {getAIStatusText(product.ai_status)}
-                    </span>
-
-                    {product.barcode && (
-                      <span
-                        style={{
-                          padding: "7px 10px",
-                          borderRadius: "20px",
-                          background: "#f3f3f6",
-                          fontSize: "13px",
-                        }}
-                      >
-                        🔢 {product.barcode}
-                      </span>
-                    )}
-                  </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(130px, 1fr))",
-                      gap: "10px",
-                      marginTop: "18px",
-                    }}
-                  >
-                    <a
-                      href={`/marketing/${product.id}`}
-                      style={{
-                        boxSizing: "border-box",
-                        width: "100%",
-                        textAlign: "center",
-                        textDecoration: "none",
-                        background: "#6246e5",
-                        color: "#fff",
-                        padding: "13px 10px",
-                        borderRadius: "12px",
-                        fontSize: "15px",
-                        fontWeight: "800",
-                      }}
-                    >
-                      🚀 سوّق المنتج
-                    </a>
-
-                    <a
-                      href={`/edit-product/${product.id}`}
-                      style={{
-                        boxSizing: "border-box",
-                        width: "100%",
-                        textAlign: "center",
-                        textDecoration: "none",
-                        background: "#f0eff8",
-                        color: "#333",
-                        padding: "13px 10px",
-                        borderRadius: "12px",
-                        fontSize: "15px",
-                        fontWeight: "800",
-                      }}
-                    >
-                      ✏️ تعديل
-                    </a>
-
-                    <button
-                      onClick={() => deleteProduct(product.id)}
-                      disabled={deleting === product.id}
-                      style={{
-                        width: "100%",
-                        border: "none",
-                        background:
-                          deleting === product.id ? "#ddd" : "#fff0f0",
-                        color: "#b42318",
-                        padding: "13px 10px",
-                        borderRadius: "12px",
-                        fontSize: "15px",
-                        fontWeight: "800",
-                        cursor:
-                          deleting === product.id
-                            ? "default"
-                            : "pointer",
-                      }}
-                    >
-                      {deleting === product.id
-                        ? "جاري الحذف..."
-                        : "🗑️ حذف"}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
