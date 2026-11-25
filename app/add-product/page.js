@@ -21,9 +21,6 @@ export default function AddProductPage() {
     brand: "",
     category: "",
     price: "",
-    description: "",
-    specifications: "",
-    features: "",
     barcode: "",
   });
 
@@ -82,6 +79,28 @@ export default function AddProductPage() {
     return data.publicUrl;
   }
 
+  async function analyzeProduct(productData) {
+    const response = await fetch("/api/analyze-product", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        product: productData,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        result.error || "تعذر تحليل المنتج."
+      );
+    }
+
+    return result;
+  }
+
   async function saveProduct(event) {
     event.preventDefault();
 
@@ -91,10 +110,10 @@ export default function AddProductPage() {
     }
 
     setSaving(true);
-    setMessage("");
+    setMessage("⏳ جاري حفظ المنتج وتشغيل ذكاء المنتج...");
 
     try {
-      // 1. إنشاء المنتج أولاً للحصول على ID
+      // 1️⃣ حفظ المنتج الأساسي
       const { data: createdProduct, error: productError } =
         await supabase
           .from("products")
@@ -107,14 +126,12 @@ export default function AddProductPage() {
                 ? null
                 : Number(product.price),
             currency: "AED",
-            description:
-              product.description.trim() || null,
-            specifications:
-              product.specifications.trim() || null,
-            features:
-              product.features.trim() || null,
-            barcode:
-              product.barcode.trim() || null,
+            barcode: product.barcode.trim() || null,
+
+            description: null,
+            specifications: null,
+            features: null,
+
             product_type: "local",
             verification_status: "unverified",
             ai_status: "pending",
@@ -127,42 +144,101 @@ export default function AddProductPage() {
         throw new Error("تعذر حفظ المنتج.");
       }
 
-      // 2. رفع الصورة إذا تم اختيارها
+      // 2️⃣ رفع الصورة
       let imageUrl = null;
 
       if (imageFile) {
+        setMessage(
+          "📸 تم حفظ المنتج. جاري رفع الصورة..."
+        );
+
         imageUrl = await uploadImage(createdProduct.id);
 
-        // 3. حفظ رابط الصورة داخل المنتج
-        const { error: imageUpdateError } = await supabase
-          .from("products")
-          .update({
-            image_url: imageUrl,
-          })
-          .eq("id", createdProduct.id);
+        const { error: imageUpdateError } =
+          await supabase
+            .from("products")
+            .update({
+              image_url: imageUrl,
+            })
+            .eq("id", createdProduct.id);
 
         if (imageUpdateError) {
           console.error(
             "SAVE IMAGE URL ERROR:",
             imageUpdateError
           );
+
           throw new Error(
             "تم حفظ المنتج ولكن تعذر ربط الصورة به."
           );
         }
       }
 
-      setMessage("✅ تم حفظ المنتج والصورة بنجاح.");
+      // 3️⃣ تشغيل ذكاء المنتج
+      setMessage(
+        "🧠 جاري تحليل المنتج وتجهيز معلوماته..."
+      );
 
-      // تنظيف النموذج
+      const analyzed = await analyzeProduct({
+        ...createdProduct,
+        image_url: imageUrl,
+      });
+
+      // 4️⃣ تحديث المنتج بالمعلومات التي تم تحليلها
+      const { error: analysisUpdateError } =
+        await supabase
+          .from("products")
+          .update({
+            name:
+              analyzed.product_name ||
+              createdProduct.name,
+
+            brand:
+              analyzed.brand ||
+              createdProduct.brand,
+
+            category:
+              analyzed.category ||
+              createdProduct.category,
+
+            description:
+              analyzed.full_description ||
+              analyzed.short_description ||
+              null,
+
+            specifications:
+              analyzed.specifications || null,
+
+            features:
+              analyzed.features || null,
+
+            ai_status: "completed",
+
+            verification_status: "unverified",
+          })
+          .eq("id", createdProduct.id);
+
+      if (analysisUpdateError) {
+        console.error(
+          "ANALYSIS UPDATE ERROR:",
+          analysisUpdateError
+        );
+
+        throw new Error(
+          "تم تحليل المنتج ولكن تعذر حفظ معلومات الذكاء."
+        );
+      }
+
+      // 5️⃣ نجاح العملية
+      setMessage(
+        "✅ تم حفظ المنتج وتحليل معلوماته بنجاح."
+      );
+
       setProduct({
         name: "",
         brand: "",
         category: "",
         price: "",
-        description: "",
-        specifications: "",
-        features: "",
         barcode: "",
       });
 
@@ -173,8 +249,11 @@ export default function AddProductPage() {
         fileInputRef.current.value = "";
       }
     } catch (error) {
-      console.error("SAVE ERROR:", error);
-      setMessage(`❌ ${error.message}`);
+      console.error("SAVE PRODUCT ERROR:", error);
+
+      setMessage(
+        `❌ ${error.message || "حدث خطأ غير متوقع."}`
+      );
     } finally {
       setSaving(false);
     }
@@ -217,28 +296,48 @@ export default function AddProductPage() {
             boxShadow: "0 5px 20px rgba(0,0,0,0.06)",
           }}
         >
-          <h1
+          <div
             style={{
-              marginTop: 0,
-              marginBottom: "8px",
-              fontSize: "30px",
-            }}
-          >
-            ➕ إضافة منتج
-          </h1>
-
-          <p
-            style={{
-              color: "#666",
+              padding: "18px",
+              background:
+                "linear-gradient(135deg, #f3efff, #fafafa)",
+              borderRadius: "18px",
               marginBottom: "25px",
+              border: "1px solid #e6e0ff",
             }}
           >
-            أضف بيانات المنتج وصورته ليصبح جاهزًا للتسويق بالذكاء
-            الاصطناعي.
-          </p>
+            <div
+              style={{
+                fontSize: "28px",
+                marginBottom: "6px",
+              }}
+            >
+              🧠
+            </div>
+
+            <h1
+              style={{
+                margin: 0,
+                marginBottom: "8px",
+                fontSize: "28px",
+              }}
+            >
+              ذكاء المنتج
+            </h1>
+
+            <p
+              style={{
+                margin: 0,
+                color: "#666",
+                lineHeight: "1.7",
+              }}
+            >
+              أدخل المعلومات الأساسية فقط، وسوق AI
+              سيجهز لك ملف المنتج تلقائيًا.
+            </p>
+          </div>
 
           <form onSubmit={saveProduct}>
-            {/* صورة المنتج */}
             <div
               style={{
                 marginBottom: "25px",
@@ -414,41 +513,24 @@ export default function AddProductPage() {
               placeholder="أدخل الباركود إذا كان موجودًا"
             />
 
-            <TextArea
-              label="وصف المنتج"
-              value={product.description}
-              onChange={(value) =>
-                updateField(
-                  "description",
-                  value
-                )
-              }
-              placeholder="اكتب وصف المنتج..."
-            />
-
-            <TextArea
-              label="المواصفات"
-              value={product.specifications}
-              onChange={(value) =>
-                updateField(
-                  "specifications",
-                  value
-                )
-              }
-              placeholder="مثال: الحجم، المادة، السعة، المقاس..."
-            />
-
-            <TextArea
-              label="المميزات"
-              value={product.features}
-              onChange={(value) =>
-                updateField(
-                  "features",
-                  value
-                )
-              }
-              placeholder="اكتب أهم مميزات المنتج..."
-            />
+            <div
+              style={{
+                marginTop: "8px",
+                marginBottom: "20px",
+                padding: "15px",
+                background: "#fff8e7",
+                border: "1px solid #f1dfaa",
+                borderRadius: "14px",
+                color: "#765d00",
+                lineHeight: "1.7",
+                fontSize: "14px",
+              }}
+            >
+              💡 لا تحتاج تكتب الوصف والمواصفات
+              والمميزات بنفسك. ذكاء المنتج سيجهزها
+              لك بناءً على المعلومات المتوفرة، ثم
+              نضيف مرحلة المراجعة والتحقق.
+            </div>
 
             {message && (
               <div
@@ -490,8 +572,8 @@ export default function AddProductPage() {
               }}
             >
               {saving
-                ? "⏳ جاري حفظ المنتج..."
-                : "💾 حفظ المنتج"}
+                ? "🧠 جاري تجهيز المنتج..."
+                : "🧠 حفظ وتحليل المنتج"}
             </button>
           </form>
         </div>
@@ -532,47 +614,6 @@ function Field({
           borderRadius: "12px",
           fontSize: "16px",
           boxSizing: "border-box",
-        }}
-      />
-    </div>
-  );
-}
-
-function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder,
-}) {
-  return (
-    <div style={{ marginBottom: "18px" }}>
-      <label
-        style={{
-          display: "block",
-          marginBottom: "8px",
-          fontWeight: "700",
-        }}
-      >
-        {label}
-      </label>
-
-      <textarea
-        value={value}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        placeholder={placeholder}
-        rows={5}
-        style={{
-          width: "100%",
-          padding: "14px",
-          border: "1px solid #ddd",
-          borderRadius: "12px",
-          fontSize: "16px",
-          boxSizing: "border-box",
-          resize: "vertical",
-          fontFamily: "Arial, sans-serif",
-          lineHeight: "1.7",
         }}
       />
     </div>
