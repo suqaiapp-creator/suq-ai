@@ -18,10 +18,11 @@ export default function ProductsPage() {
 
   async function loadProducts() {
     const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", { ascending: false });
+  .from("products")
+  .select("*");
 
+console.log("PRODUCTS:", data);
+console.log("PRODUCT ERROR:", error);
     if (error) {
       console.error(error);
       setLoading(false);
