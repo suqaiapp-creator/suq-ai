@@ -25,87 +25,156 @@ export async function POST(request) {
       );
     }
 
+    if (!product.image_url) {
+      return Response.json(
+        {
+          error: "صورة المنتج غير موجودة",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
     const selectedFormat = format || "1:1";
 
     const prompt = `
-Create a professional commercial advertising image for this product.
+Create a professional commercial advertising design using the provided product image as the PRIMARY PRODUCT REFERENCE.
 
-PRODUCT INFORMATION:
-
-Product name:
+PRODUCT:
 ${product.name || ""}
 
-Brand:
+BRAND:
 ${product.brand || ""}
 
-Category:
+CATEGORY:
 ${product.category || ""}
 
-Price:
+PRICE:
 ${product.price || ""} ${product.currency || "AED"}
 
-Product description:
+DESCRIPTION:
 ${product.description || ""}
 
-Features:
+FEATURES:
 ${product.features || ""}
 
-Design format:
+DESIGN FORMAT:
 ${selectedFormat}
 
-Target market:
+TARGET MARKET:
 United Arab Emirates.
 
-IMPORTANT RULES:
+CRITICAL PRODUCT PRESERVATION RULES:
 
-- Keep the product appearance accurate.
-- Do not invent product specifications.
-- Do not invent certifications.
-- Do not invent guarantees or warranties.
-- Do not add technical claims that are not provided.
-- Do not change the product identity.
-- Make the product the main visual focus.
-- Create a premium commercial advertising composition.
-- Use professional studio lighting.
-- Use a clean and attractive background.
-- Leave suitable visual space for Arabic advertising text.
-- Do not generate fake logos.
-- Do not create fake brands.
-- Make the design suitable for an Emirati/UAE market.
-- Make the advertisement look professional and ready for social media.
+1. The uploaded product image is the exact real product.
+2. Preserve the product's bottle, packaging, shape, proportions, colors, cap, label, logo and overall identity.
+3. Do NOT replace the product with a newly invented bottle.
+4. Do NOT redesign the packaging.
+5. Do NOT change the brand.
+6. Do NOT create a different bottle.
+7. Do NOT invent another product.
+8. Keep the original product clearly recognizable.
+9. The product must remain the main focus of the advertisement.
+10. You may improve the background, lighting, shadows and commercial composition around the product.
+11. Do not invent product specifications.
+12. Do not add fake certifications, warranties or claims.
+13. Do not create fake logos.
+14. Create a premium advertising composition suitable for the UAE market.
+15. Leave clean visual space for Arabic marketing text.
+16. Keep the advertisement elegant and suitable for a premium Emirati fragrance brand.
 `;
 
-    const response = await openai.images.generate({
-      model: "gpt-image-2",
-      prompt,
-      size:
-        selectedFormat === "9:16"
-          ? "1024x1536"
-          : selectedFormat === "16:9"
-          ? "1536x1024"
-          : "1024x1024",
-    });
-
-    const imageBase64 = response.data?.[0]?.b64_json;
-
-    if (!imageBase64) {
-      throw new Error("لم يتم الحصول على الصورة من OpenAI");
-    }
-
-    const imageBuffer = Buffer.from(
-      imageBase64,
-      "base64"
+    /*
+     * Download the original product image
+     * from Supabase Storage.
+     */
+    const imageResponse = await fetch(
+      product.image_url
     );
 
-    const filePath = `${product.id}/${Date.now()}.png`;
+    if (!imageResponse.ok) {
+      throw new Error(
+        "تعذر تحميل صورة المنتج الأصلية"
+      );
+    }
 
-    const { error: uploadError } = await supabase.storage
-      .from("ad-images")
-      .upload(filePath, imageBuffer, {
-        contentType: "image/png",
-        cacheControl: "3600",
-        upsert: false,
+    const imageArrayBuffer =
+      await imageResponse.arrayBuffer();
+
+    const imageBuffer =
+      Buffer.from(imageArrayBuffer);
+
+    /*
+     * Create a File for OpenAI.
+     */
+    const productImage =
+      new File(
+        [imageBuffer],
+        "product.png",
+        {
+          type:
+            imageResponse.headers.get(
+              "content-type"
+            ) || "image/png",
+        }
+      );
+
+    /*
+     * Use GPT Image 2 editing
+     * with the real product image.
+     */
+    const response =
+      await openai.images.edit({
+        model: "gpt-image-2",
+        image: productImage,
+        prompt,
+        size:
+          selectedFormat === "9:16"
+            ? "1024x1536"
+            : selectedFormat === "16:9"
+            ? "1536x1024"
+            : "1024x1024",
       });
+
+    const imageBase64 =
+      response.data?.[0]?.b64_json;
+
+    if (!imageBase64) {
+      throw new Error(
+        "لم يتم الحصول على الصورة من OpenAI"
+      );
+    }
+
+    /*
+     * Convert Base64 to image.
+     */
+    const imageBufferResult =
+      Buffer.from(
+        imageBase64,
+        "base64"
+      );
+
+    /*
+     * Save generated advertisement
+     * in Supabase Storage.
+     */
+    const filePath =
+      `${product.id}/${Date.now()}.png`;
+
+    const {
+      error: uploadError,
+    } = await supabase.storage
+      .from("ad-images")
+      .upload(
+        filePath,
+        imageBufferResult,
+        {
+          contentType: "image/png",
+          cacheControl: "3600",
+          upsert: false,
+        }
+      );
 
     if (uploadError) {
       console.error(
@@ -113,34 +182,47 @@ IMPORTANT RULES:
         uploadError
       );
 
-      throw new Error("تعذر حفظ الصورة في التخزين");
+      throw new Error(
+        "تعذر حفظ التصميم"
+      );
     }
 
-    const { data: publicUrlData } =
-      supabase.storage
-        .from("ad-images")
-        .getPublicUrl(filePath);
+    /*
+     * Get public image URL.
+     */
+    const {
+      data: publicUrlData,
+    } = supabase.storage
+      .from("ad-images")
+      .getPublicUrl(filePath);
 
     const imageUrl =
       publicUrlData?.publicUrl;
 
     if (!imageUrl) {
       throw new Error(
-        "تعذر الحصول على رابط الصورة"
+        "تعذر الحصول على رابط التصميم"
       );
     }
 
+    /*
+     * Update design record.
+     */
     if (designId) {
-      const { error: updateError } =
-        await supabase
-          .from("ad_images")
-          .update({
-            image_url: imageUrl,
-            status: "completed",
-            updated_at:
-              new Date().toISOString(),
-          })
-          .eq("id", designId);
+      const {
+        error: updateError,
+      } = await supabase
+        .from("ad_images")
+        .update({
+          image_url: imageUrl,
+          status: "completed",
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
 
       if (updateError) {
         console.error(
@@ -149,7 +231,7 @@ IMPORTANT RULES:
         );
 
         throw new Error(
-          "تم إنشاء الصورة لكن تعذر تحديث حالة التصميم"
+          "تم إنشاء التصميم لكن تعذر تحديث البيانات"
         );
       }
     }
@@ -168,7 +250,7 @@ IMPORTANT RULES:
       {
         error:
           error?.message ||
-          "حدث خطأ أثناء إنشاء الصورة",
+          "حدث خطأ أثناء إنشاء التصميم",
       },
       {
         status: 500,
