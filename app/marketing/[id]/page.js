@@ -10,31 +10,40 @@ const supabase = createClient(
 
 export default function MarketingPage({ params }) {
   const [product, setProduct] = useState(null);
+  const [marketing, setMarketing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    loadProduct();
+    loadData();
   }, []);
 
-  async function loadProduct() {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", params.id)
-      .single();
+  async function loadData() {
+    const { data: productData, error: productError } =
+      await supabase
+        .from("products")
+        .select("*")
+        .eq("id", params.id)
+        .single();
 
-    console.log("MARKETING PRODUCT:", data);
-    console.log("MARKETING ERROR:", error);
-
-    if (error) {
-      console.error(error);
+    if (productError) {
+      console.error(productError);
       setLoading(false);
       return;
     }
 
-    setProduct(data);
+    setProduct(productData);
+
+    const { data: marketingData } = await supabase
+      .from("marketing_contents")
+      .select("*")
+      .eq("product_id", params.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    setMarketing(marketingData || null);
     setLoading(false);
   }
 
@@ -44,7 +53,7 @@ export default function MarketingPage({ params }) {
     setCreating(true);
     setMessage("");
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("marketing_contents")
       .insert({
         product_id: product.id,
@@ -104,7 +113,9 @@ export default function MarketingPage({ params }) {
           "اطلب منتجك الآن وتواصل معنا لمعرفة التفاصيل.",
 
         status: "draft",
-      });
+      })
+      .select()
+      .single();
 
     if (error) {
       console.error(error);
@@ -113,6 +124,7 @@ export default function MarketingPage({ params }) {
       return;
     }
 
+    setMarketing(data);
     setMessage("✅ تم إنشاء وحفظ المحتوى التسويقي بنجاح.");
     setCreating(false);
   }
@@ -164,7 +176,6 @@ export default function MarketingPage({ params }) {
           }}
         >
           <h1>المنتج غير موجود</h1>
-
           <a href="/products">
             ← العودة إلى المنتجات
           </a>
@@ -250,12 +261,7 @@ export default function MarketingPage({ params }) {
             marginBottom: "20px",
           }}
         >
-          <h2
-            style={{
-              marginTop: 0,
-              fontSize: "25px",
-            }}
-          >
+          <h2 style={{ marginTop: 0 }}>
             📦 {product.name}
           </h2>
 
@@ -370,13 +376,66 @@ export default function MarketingPage({ params }) {
           )}
         </div>
 
+        {marketing && (
+          <>
+            <h2
+              style={{
+                fontSize: "26px",
+                margin: "30px 0 15px",
+              }}
+            >
+              ✨ المحتوى الذي تم إنشاؤه
+            </h2>
+
+            <ResultCard
+              icon="✍️"
+              title="الوصف التسويقي"
+              content={marketing.marketing_description}
+            />
+
+            <ResultCard
+              icon="📱"
+              title="Instagram"
+              content={marketing.instagram}
+            />
+
+            <ResultCard
+              icon="💬"
+              title="WhatsApp"
+              content={marketing.whatsapp}
+            />
+
+            <ResultCard
+              icon="🎵"
+              title="TikTok / Snapchat"
+              content={marketing.tiktok_snapchat}
+            />
+
+            <ResultCard
+              icon="🔎"
+              title="SEO"
+              content={
+                `العنوان: ${marketing.seo_title}\n\n` +
+                `الوصف: ${marketing.seo_description}\n\n` +
+                `الكلمات المفتاحية: ${marketing.seo_keywords}`
+              }
+            />
+
+            <ResultCard
+              icon="🎯"
+              title="دعوة لاتخاذ إجراء"
+              content={marketing.call_to_action}
+            />
+          </>
+        )}
+
         <h2
           style={{
             fontSize: "25px",
-            margin: "30px 0 15px",
+            margin: "35px 0 15px",
           }}
         >
-          أدوات التسويق
+          أدوات التسويق القادمة
         </h2>
 
         <div
@@ -387,42 +446,6 @@ export default function MarketingPage({ params }) {
             gap: "16px",
           }}
         >
-          <MarketingCard
-            icon="✍️"
-            title="وصف تسويقي"
-            text="وصف احترافي وجذاب للمنتج."
-          />
-
-          <MarketingCard
-            icon="📱"
-            title="Instagram"
-            text="منشور جاهز للنشر على إنستغرام."
-          />
-
-          <MarketingCard
-            icon="💬"
-            title="WhatsApp"
-            text="رسالة تسويقية جاهزة للواتساب."
-          />
-
-          <MarketingCard
-            icon="🎵"
-            title="TikTok / Snapchat"
-            text="نص قصير مناسب للفيديوهات القصيرة."
-          />
-
-          <MarketingCard
-            icon="🔎"
-            title="SEO"
-            text="عنوان ووصف وكلمات مفتاحية للبحث."
-          />
-
-          <MarketingCard
-            icon="🎯"
-            title="دعوة لاتخاذ إجراء"
-            text="CTA مناسب لتحويل المشاهد إلى عميل."
-          />
-
           <MarketingCard
             icon="🖼️"
             title="صورة إعلان"
@@ -459,12 +482,44 @@ function InfoBox({ title, value }) {
         {title}
       </div>
 
-      <div
+      <div style={{ fontWeight: "700" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ResultCard({ icon, title, content }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #e8e8ef",
+        borderRadius: "20px",
+        padding: "22px",
+        marginBottom: "16px",
+      }}
+    >
+      <h3
         style={{
-          fontWeight: "700",
+          margin: "0 0 14px",
+          fontSize: "20px",
         }}
       >
-        {value}
+        {icon} {title}
+      </h3>
+
+      <div
+        style={{
+          background: "#f7f8fc",
+          borderRadius: "14px",
+          padding: "16px",
+          whiteSpace: "pre-wrap",
+          lineHeight: "1.8",
+          color: "#444",
+        }}
+      >
+        {content || "لا يوجد محتوى."}
       </div>
     </div>
   );
