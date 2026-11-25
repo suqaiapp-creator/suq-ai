@@ -64,31 +64,56 @@ export default function AdminPage() {
 
       setProfile(profileData);
 
-      // الإحصائيات التي يستطيع الحساب الحالي قراءتها حاليًا.
-      // سنربط لاحقًا إحصائيات الإدارة الكاملة بسياسات Super Admin آمنة.
       const [
+        usersResult,
         shopsResult,
         productsResult,
         marketingResult,
         designsResult,
+        lockedResult,
+        reviewResult,
+        aiResult,
       ] = await Promise.all([
+        supabase.from("profiles").select("id", { count: "exact", head: true }),
+
         supabase.from("shops").select("id", { count: "exact", head: true }),
+
         supabase.from("products").select("id", { count: "exact", head: true }),
+
         supabase
           .from("marketing_contents")
           .select("id", { count: "exact", head: true }),
-        supabase.from("ad_images").select("id", { count: "exact", head: true }),
+
+        supabase
+          .from("ad_images")
+          .select("id", { count: "exact", head: true }),
+
+        supabase
+          .from("products")
+          .select("id", { count: "exact", head: true })
+          .or("verification_status.eq.locked,safety_status.eq.locked"),
+
+        supabase
+          .from("products")
+          .select("id", { count: "exact", head: true })
+          .or(
+            "verification_status.eq.review,safety_status.eq.review"
+          ),
+
+        supabase
+          .from("ai_usage")
+          .select("id", { count: "exact", head: true }),
       ]);
 
       setStats({
-        users: 0,
+        users: usersResult.count || 0,
         shops: shopsResult.count || 0,
         products: productsResult.count || 0,
         marketing: marketingResult.count || 0,
         designs: designsResult.count || 0,
-        ai: 0,
-        locked: 0,
-        review: 0,
+        ai: aiResult.count || 0,
+        locked: lockedResult.count || 0,
+        review: reviewResult.count || 0,
       });
     } catch (error) {
       console.error(error);
@@ -138,7 +163,6 @@ export default function AdminPage() {
         fontFamily: "Arial, sans-serif",
       }}
     >
-      {/* Header */}
       <header
         style={{
           background: "#111",
@@ -216,7 +240,6 @@ export default function AdminPage() {
           padding: "25px 18px 50px",
         }}
       >
-        {/* Welcome */}
         <section
           style={{
             background: "#fff",
@@ -251,7 +274,6 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* Stats */}
         <section
           style={{
             display: "grid",
@@ -271,7 +293,6 @@ export default function AdminPage() {
           <StatCard title="مقفلة" value={stats.locked} icon="🔒" />
         </section>
 
-        {/* Management */}
         <section>
           <h2
             style={{
@@ -340,7 +361,6 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* Quick actions */}
         <section
           style={{
             background: "#fff",
@@ -384,7 +404,6 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {/* Notice */}
         <section
           style={{
             marginTop: 20,
@@ -397,10 +416,9 @@ export default function AdminPage() {
             fontSize: 14,
           }}
         >
-          <strong>ملاحظة:</strong> هذه أول نسخة من لوحة Super Admin.
-          حماية الوصول تعمل الآن، وسنضيف في الخطوات التالية الصلاحيات
-          الإدارية الكاملة والجداول الحقيقية للمستخدمين والمحلات والمنتجات
-          وسجل النشاط واستخدام AI.
+          <strong>ملاحظة:</strong> لوحة Super Admin أصبحت مرتبطة
+          ببيانات النظام الحقيقية. سنضيف لاحقًا صفحات الإدارة التفصيلية
+          للمستخدمين والمحلات والمنتجات والمراجعة وسجل النشاط.
         </section>
       </div>
     </main>
