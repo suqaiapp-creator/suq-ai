@@ -1,3 +1,5 @@
+"use client";
+
 export default function Home() {
   return (
     <main
@@ -9,12 +11,11 @@ export default function Home() {
         color: "#171923",
       }}
     >
-      {/* Header */}
       <header
         style={{
-          background: "#ffffff",
+          background: "#fff",
           borderBottom: "1px solid #e8e8ef",
-          padding: "18px 24px",
+          padding: "18px 20px",
         }}
       >
         <div
@@ -30,6 +31,7 @@ export default function Home() {
             <div style={{ fontSize: "25px", fontWeight: "800" }}>
               سوق AI
             </div>
+
             <div style={{ fontSize: "13px", color: "#777" }}>
               من منتجك إلى إعلانك
             </div>
@@ -40,10 +42,9 @@ export default function Home() {
               border: "none",
               background: "#111827",
               color: "#fff",
-              padding: "12px 20px",
+              padding: "11px 17px",
               borderRadius: "12px",
-              fontSize: "15px",
-              cursor: "pointer",
+              fontSize: "14px",
             }}
           >
             تسجيل الدخول
@@ -51,12 +52,11 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Hero */}
       <section
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-          padding: "70px 24px 45px",
+          padding: "45px 20px",
         }}
       >
         <div
@@ -64,7 +64,7 @@ export default function Home() {
             background:
               "linear-gradient(135deg, #ffffff 0%, #f0edff 100%)",
             borderRadius: "28px",
-            padding: "55px 35px",
+            padding: "50px 25px",
             textAlign: "center",
             border: "1px solid #e8e5ff",
           }}
@@ -86,15 +86,17 @@ export default function Home() {
 
           <h1
             style={{
-              fontSize: "clamp(36px, 6vw, 64px)",
+              fontSize: "clamp(36px, 8vw, 64px)",
               margin: "0 auto 18px",
               maxWidth: "850px",
-              lineHeight: "1.15",
+              lineHeight: "1.2",
             }}
           >
             من منتجك إلى إعلانك
             <br />
-            <span style={{ color: "#6246e5" }}>بضغطة واحدة</span>
+            <span style={{ color: "#6246e5" }}>
+              بضغطة واحدة
+            </span>
           </h1>
 
           <p
@@ -106,43 +108,45 @@ export default function Home() {
               lineHeight: "1.8",
             }}
           >
-            صوّر منتجك أو امسح الباركود، ودع سوق AI يحلل المنتج
-            ويجهز لك المحتوى والتصميم والفيديو التسويقي.
+            صوّر منتجك أو امسح الباركود أو أدخل منتجك المحلي،
+            ودع سوق AI يحلل المنتج ويجهز لك المحتوى والتصميم
+            والفيديو التسويقي.
           </p>
 
-          <button
+          <a
+            href="/add-product"
             style={{
+              display: "inline-block",
               background: "#6246e5",
               color: "#fff",
-              border: "none",
+              textDecoration: "none",
               padding: "17px 34px",
               borderRadius: "15px",
               fontSize: "18px",
               fontWeight: "700",
-              cursor: "pointer",
             }}
           >
             🚀 أضف منتج
-          </button>
+          </a>
         </div>
       </section>
 
-      {/* Features */}
       <section
         style={{
           maxWidth: "1200px",
           margin: "0 auto",
-          padding: "20px 24px 70px",
+          padding: "10px 20px 60px",
         }}
       >
-        <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>
+        <h2 style={{ fontSize: "30px", marginBottom: "25px" }}>
           كل أدوات التسويق في مكان واحد
         </h2>
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(220px, 1fr))",
             gap: "18px",
           }}
         >
@@ -179,28 +183,28 @@ export default function Home() {
           <Feature
             icon="📱"
             title="كل المنصات"
-            text="محتوى جاهز لواتساب وإنستغرام وتيك توك وغيرها."
+            text="واتساب وإنستغرام وتيك توك وغيرها."
           />
         </div>
       </section>
 
-      {/* Workflow */}
       <section
         style={{
-          background: "#ffffff",
-          padding: "60px 24px",
-          borderTop: "1px solid #eeeeee",
+          background: "#fff",
+          padding: "55px 20px",
+          borderTop: "1px solid #eee",
         }}
       >
         <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
-          <h2 style={{ fontSize: "30px", marginBottom: "35px" }}>
+          <h2 style={{ fontSize: "30px", marginBottom: "30px" }}>
             كيف يعمل سوق AI؟
           </h2>
 
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(170px, 1fr))",
               gap: "15px",
             }}
           >
@@ -213,7 +217,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer
         style={{
           textAlign: "center",
@@ -232,14 +235,20 @@ function Feature({ icon, title, text }) {
   return (
     <div
       style={{
-        background: "#ffffff",
+        background: "#fff",
         border: "1px solid #e9e9ef",
         borderRadius: "20px",
         padding: "25px",
       }}
     >
-      <div style={{ fontSize: "34px", marginBottom: "15px" }}>{icon}</div>
-      <h3 style={{ margin: "0 0 10px", fontSize: "19px" }}>{title}</h3>
+      <div style={{ fontSize: "34px", marginBottom: "15px" }}>
+        {icon}
+      </div>
+
+      <h3 style={{ margin: "0 0 10px", fontSize: "19px" }}>
+        {title}
+      </h3>
+
       <p
         style={{
           margin: 0,
