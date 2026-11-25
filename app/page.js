@@ -151,19 +151,19 @@ export default function Home() {
           }}
         >
           <a
-  href="/products"
-  style={{
-    textDecoration: "none",
-    color: "inherit",
-    display: "block",
-  }}
->
-  <Feature
-    icon="📦"
-    title="إدارة المنتجات"
-    text="أضف منتجاتك واحفظ معلوماتها في مكتبتك."
-  />
-</a>
+            href="/products"
+            style={{
+              textDecoration: "none",
+              color: "inherit",
+              display: "block",
+            }}
+          >
+            <Feature
+              icon="📦"
+              title="إدارة المنتجات"
+              text="أضف منتجاتك واحفظ معلوماتها في مكتبتك."
+            />
+          </a>
 
           <Feature
             icon="🔎"
@@ -177,11 +177,21 @@ export default function Home() {
             text="وصف وإعلانات جاهزة لمنصات التواصل."
           />
 
-          <Feature
-            icon="🎨"
-            title="تصاميم إعلانية"
-            text="أنشئ تصاميم متوافقة مع هوية متجرك."
-          />
+          {/* تصاميم الإعلانات أصبحت قابلة للضغط */}
+          <a
+            href="/designs"
+            style={{
+              textDecoration: "none",
+              color: "inherit",
+              display: "block",
+            }}
+          >
+            <Feature
+              icon="🎨"
+              title="تصاميم إعلانية"
+              text="أنشئ تصاميم متوافقة مع هوية متجرك."
+            />
+          </a>
 
           <Feature
             icon="🎬"
@@ -248,6 +258,7 @@ function Feature({ icon, title, text }) {
         border: "1px solid #e9e9ef",
         borderRadius: "20px",
         padding: "25px",
+        cursor: "pointer",
       }}
     >
       <div style={{ fontSize: "34px", marginBottom: "15px" }}>
