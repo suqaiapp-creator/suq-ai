@@ -1,6 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+);
 
 export default function AddProduct() {
   const cameraInputRef = useRef(null);
@@ -9,6 +15,7 @@ export default function AddProduct() {
   const [image, setImage] = useState(null);
   const [mode, setMode] = useState(null);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [product, setProduct] = useState({
     name: "",
@@ -42,9 +49,34 @@ export default function AddProduct() {
     setSaved(false);
   }
 
-  function saveProduct() {
+  async function saveProduct() {
     if (!product.name.trim()) {
       alert("اكتب اسم المنتج أولاً");
+      return;
+    }
+
+    setSaving(true);
+    setSaved(false);
+
+    const { error } = await supabase.from("products").insert({
+      name: product.name.trim(),
+      brand: product.brand.trim() || null,
+      category: product.category.trim() || null,
+      price: product.price ? Number(product.price) : null,
+      currency: "AED",
+      description: product.description.trim() || null,
+      specifications: product.specifications.trim() || null,
+      features: product.features.trim() || null,
+      product_type: "local",
+      verification_status: "unverified",
+      ai_status: "pending",
+    });
+
+    setSaving(false);
+
+    if (error) {
+      console.error(error);
+      alert("حدث خطأ أثناء حفظ المنتج: " + error.message);
       return;
     }
 
@@ -339,9 +371,7 @@ export default function AddProduct() {
 
               <TextArea
                 label="المواصفات"
-                placeholder={
-                  "مثال:\nالحجم: 100 مل\nاللون: أسود\nالمادة: ..."
-                }
+                placeholder={"مثال:\nالحجم: 100 مل\nاللون: أسود\nالمادة: ..."}
                 value={product.specifications}
                 onChange={(value) =>
                   updateProduct("specifications", value)
@@ -350,9 +380,7 @@ export default function AddProduct() {
 
               <TextArea
                 label="المميزات"
-                placeholder={
-                  "مثال:\nجودة عالية\nصناعة محلية\nتصميم فاخر"
-                }
+                placeholder={"مثال:\nجودة عالية\nصناعة محلية\nتصميم فاخر"}
                 value={product.features}
                 onChange={(value) =>
                   updateProduct("features", value)
@@ -361,20 +389,21 @@ export default function AddProduct() {
 
               <button
                 onClick={saveProduct}
+                disabled={saving}
                 style={{
                   width: "100%",
                   marginTop: "10px",
                   border: "none",
-                  background: "#111827",
+                  background: saving ? "#888" : "#111827",
                   color: "#fff",
                   padding: "16px",
                   borderRadius: "14px",
                   fontSize: "17px",
                   fontWeight: "700",
-                  cursor: "pointer",
+                  cursor: saving ? "wait" : "pointer",
                 }}
               >
-                💾 حفظ المنتج
+                {saving ? "⏳ جاري الحفظ..." : "💾 حفظ المنتج"}
               </button>
 
               {saved && (
@@ -388,7 +417,7 @@ export default function AddProduct() {
                     fontWeight: "700",
                   }}
                 >
-                  ✅ تم حفظ المنتج مؤقتًا بنجاح
+                  ✅ تم حفظ المنتج في قاعدة البيانات بنجاح
                 </div>
               )}
             </section>
