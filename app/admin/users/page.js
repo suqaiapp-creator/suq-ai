@@ -1,0 +1,469 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "../../../lib/supabase/client";
+
+export default function AdminUsersPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  async function loadUsers() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError || !profile) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      if (
+        profile.is_super_admin !== true &&
+        profile.role !== "super_admin"
+      ) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      const { data, error: usersError } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (usersError) {
+        throw usersError;
+      }
+
+      const profiles = data || [];
+
+      const usersWithShops = await Promise.all(
+        profiles.map(async (profile) => {
+          const { data: shop } = await supabase
+            .from("shops")
+            .select("id, name, status")
+            .eq("owner_id", profile.id)
+            .maybeSingle();
+
+          const { count: productCount } = await supabase
+            .from("products")
+            .select("id", {
+              count: "exact",
+              head: true,
+            })
+            .eq("shop_id", shop?.id || "00000000-0000-0000-0000-000000000000");
+
+          return {
+            ...profile,
+            shop,
+            productCount: productCount || 0,
+          };
+        })
+      );
+
+      setUsers(usersWithShops);
+    } catch (err) {
+      console.error(err);
+      setError("تعذر تحميل المستخدمين.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filteredUsers = users.filter((user) => {
+    const text = search.trim().toLowerCase();
+
+    if (!text) return true;
+
+    return (
+      (user.full_name || "").toLowerCase().includes(text) ||
+      (user.role || "").toLowerCase().includes(text) ||
+      (user.account_status || "").toLowerCase().includes(text) ||
+      (user.shop?.name || "").toLowerCase().includes(text)
+    );
+  });
+
+  if (loading) {
+    return (
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          background: "#f5f6f8",
+          fontFamily: "Arial, sans-serif",
+          padding: 24,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: "80px auto",
+            background: "#fff",
+            borderRadius: 20,
+            padding: 40,
+            textAlign: "center",
+          }}
+        >
+          جاري تحميل المستخدمين...
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main
+      dir="rtl"
+      style={{
+        minHeight: "100vh",
+        background: "#f5f6f8",
+        fontFamily: "Arial, sans-serif",
+      }}
+    >
+      <header
+        style={{
+          background: "#111",
+          color: "#fff",
+          padding: "18px 20px",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: "0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 15,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, opacity: 0.7 }}>
+              سوق AI
+            </div>
+
+            <h1
+              style={{
+                margin: "5px 0 0",
+                fontSize: 25,
+              }}
+            >
+              إدارة المستخدمين
+            </h1>
+          </div>
+
+          <Link
+            href="/admin"
+            style={{
+              color: "#fff",
+              textDecoration: "none",
+              border: "1px solid #555",
+              borderRadius: 10,
+              padding: "9px 14px",
+              fontSize: 14,
+            }}
+          >
+            ← لوحة الإدارة
+          </Link>
+        </div>
+      </header>
+
+      <div
+        style={{
+          maxWidth: 1200,
+          margin: "0 auto",
+          padding: "25px 18px 50px",
+        }}
+      >
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: 22,
+            border: "1px solid #e8e8e8",
+            marginBottom: 20,
+          }}
+        >
+          <h2
+            style={{
+              margin: "0 0 6px",
+              fontSize: 22,
+            }}
+          >
+            المستخدمون
+          </h2>
+
+          <p
+            style={{
+              margin: 0,
+              color: "#777",
+              fontSize: 14,
+            }}
+          >
+            عرض جميع الحسابات المسجلة في سوق AI.
+          </p>
+
+          <div
+            style={{
+              marginTop: 18,
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="بحث بالاسم أو المحل..."
+              style={{
+                flex: 1,
+                minWidth: 220,
+                border: "1px solid #ddd",
+                borderRadius: 12,
+                padding: "13px 14px",
+                fontSize: 15,
+                outline: "none",
+              }}
+            />
+
+            <button
+              onClick={loadUsers}
+              style={{
+                border: "none",
+                background: "#111",
+                color: "#fff",
+                borderRadius: 12,
+                padding: "13px 18px",
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              تحديث
+            </button>
+          </div>
+        </section>
+
+        {error && (
+          <section
+            style={{
+              background: "#fff0f0",
+              border: "1px solid #f0bcbc",
+              color: "#9b1c1c",
+              borderRadius: 16,
+              padding: 16,
+              marginBottom: 20,
+            }}
+          >
+            {error}
+          </section>
+        )}
+
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            border: "1px solid #e8e8e8",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: 20,
+              borderBottom: "1px solid #eee",
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <strong>
+              إجمالي الحسابات: {users.length}
+            </strong>
+
+            <span
+              style={{
+                color: "#777",
+                fontSize: 14,
+              }}
+            >
+              الظاهر: {filteredUsers.length}
+            </span>
+          </div>
+
+          {filteredUsers.length === 0 ? (
+            <div
+              style={{
+                padding: 40,
+                textAlign: "center",
+                color: "#777",
+              }}
+            >
+              لا يوجد مستخدمون مطابقون للبحث.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  minWidth: 850,
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      background: "#fafafa",
+                    }}
+                  >
+                    <th style={thStyle}>المستخدم</th>
+                    <th style={thStyle}>المحل</th>
+                    <th style={thStyle}>الدور</th>
+                    <th style={thStyle}>الحالة</th>
+                    <th style={thStyle}>المنتجات</th>
+                    <th style={thStyle}>تاريخ التسجيل</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredUsers.map((user) => (
+                    <tr key={user.id}>
+                      <td style={tdStyle}>
+                        <div
+                          style={{
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {user.full_name || "بدون اسم"}
+                        </div>
+
+                        <div
+                          style={{
+                            color: "#888",
+                            fontSize: 12,
+                            marginTop: 4,
+                            direction: "ltr",
+                            textAlign: "right",
+                          }}
+                        >
+                          {user.id}
+                        </div>
+                      </td>
+
+                      <td style={tdStyle}>
+                        {user.shop?.name || "لم ينشئ محل"}
+                      </td>
+
+                      <td style={tdStyle}>
+                        <StatusBadge
+                          text={
+                            user.is_super_admin
+                              ? "Super Admin"
+                              : user.role || "owner"
+                          }
+                        />
+                      </td>
+
+                      <td style={tdStyle}>
+                        <StatusBadge
+                          text={
+                            user.account_status === "suspended"
+                              ? "موقوف"
+                              : "نشط"
+                          }
+                          danger={
+                            user.account_status === "suspended"
+                          }
+                        />
+                      </td>
+
+                      <td style={tdStyle}>
+                        {user.productCount}
+                      </td>
+
+                      <td style={tdStyle}>
+                        {formatDate(user.created_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function StatusBadge({ text, danger = false }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "6px 10px",
+        borderRadius: 999,
+        background: danger ? "#ffe8e8" : "#eef7ee",
+        color: danger ? "#a51d1d" : "#277227",
+        fontSize: 12,
+        fontWeight: "bold",
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+function formatDate(date) {
+  if (!date) return "-";
+
+  try {
+    return new Date(date).toLocaleDateString("ar-AE", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return "-";
+  }
+}
+
+const thStyle = {
+  padding: "14px 16px",
+  textAlign: "right",
+  fontSize: 13,
+  color: "#555",
+  borderBottom: "1px solid #eee",
+};
+
+const tdStyle = {
+  padding: "15px 16px",
+  textAlign: "right",
+  fontSize: 14,
+  borderBottom: "1px solid #eee",
+  verticalAlign: "top",
+};
