@@ -8,6 +8,17 @@ export default function AddProduct() {
 
   const [image, setImage] = useState(null);
   const [mode, setMode] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  const [product, setProduct] = useState({
+    name: "",
+    brand: "",
+    category: "",
+    price: "",
+    description: "",
+    specifications: "",
+    features: "",
+  });
 
   function handleImage(event) {
     const file = event.target.files?.[0];
@@ -15,10 +26,29 @@ export default function AddProduct() {
     if (!file) return;
 
     const imageUrl = URL.createObjectURL(file);
+
     setImage(imageUrl);
-    setMode("photo");
+    setSaved(false);
 
     event.target.value = "";
+  }
+
+  function updateProduct(field, value) {
+    setProduct((current) => ({
+      ...current,
+      [field]: value,
+    }));
+
+    setSaved(false);
+  }
+
+  function saveProduct() {
+    if (!product.name.trim()) {
+      alert("اكتب اسم المنتج أولاً");
+      return;
+    }
+
+    setSaved(true);
   }
 
   return (
@@ -32,7 +62,12 @@ export default function AddProduct() {
         padding: "25px 18px",
       }}
     >
-      <div style={{ maxWidth: "850px", margin: "0 auto" }}>
+      <div
+        style={{
+          maxWidth: "850px",
+          margin: "0 auto",
+        }}
+      >
         <a
           href="/"
           style={{
@@ -70,11 +105,10 @@ export default function AddProduct() {
               marginBottom: "30px",
             }}
           >
-            صوّر منتجك أو اختر صورة من الألبوم، وبعدها سوق AI يحلل
-            المنتج ويجهزه للتسويق.
+            أضف صورة المنتج أو أدخل معلوماته، وسوق AI سيجهزه
+            للتحليل والتسويق.
           </p>
 
-          {/* ملفات الإدخال */}
           <input
             ref={cameraInputRef}
             type="file"
@@ -92,7 +126,6 @@ export default function AddProduct() {
             style={{ display: "none" }}
           />
 
-          {/* الكاميرا والألبوم */}
           <div
             style={{
               display: "grid",
@@ -127,7 +160,6 @@ export default function AddProduct() {
                 style={{
                   fontSize: "13px",
                   marginTop: "6px",
-                  opacity: 0.9,
                 }}
               >
                 افتح الكاميرا
@@ -169,7 +201,6 @@ export default function AddProduct() {
             </button>
           </div>
 
-          {/* معاينة الصورة */}
           {image && (
             <div
               style={{
@@ -186,7 +217,7 @@ export default function AddProduct() {
                   marginBottom: "12px",
                 }}
               >
-                ✅ تم اختيار صورة المنتج
+                ✅ صورة المنتج
               </div>
 
               <img
@@ -200,66 +231,9 @@ export default function AddProduct() {
                   background: "#fff",
                 }}
               />
-
-              <button
-                onClick={() => galleryInputRef.current?.click()}
-                style={{
-                  width: "100%",
-                  marginTop: "12px",
-                  border: "none",
-                  background: "#111827",
-                  color: "#fff",
-                  padding: "13px",
-                  borderRadius: "12px",
-                  cursor: "pointer",
-                }}
-              >
-                تغيير الصورة
-              </button>
             </div>
           )}
 
-          {/* الباركود */}
-          <button
-            onClick={() => setMode("barcode")}
-            style={{
-              width: "100%",
-              textAlign: "right",
-              border:
-                mode === "barcode"
-                  ? "2px solid #6246e5"
-                  : "1px solid #e3e3ea",
-              background: "#fff",
-              borderRadius: "18px",
-              padding: "20px",
-              cursor: "pointer",
-              marginTop: "25px",
-            }}
-          >
-            <div style={{ fontSize: "32px" }}>📦</div>
-
-            <strong
-              style={{
-                display: "block",
-                fontSize: "18px",
-                marginTop: "8px",
-              }}
-            >
-              مسح الباركود
-            </strong>
-
-            <span
-              style={{
-                display: "block",
-                color: "#777",
-                marginTop: "6px",
-              }}
-            >
-              ابحث عن المنتج عن طريق الباركود
-            </span>
-          </button>
-
-          {/* المنتج المحلي */}
           <button
             onClick={() => setMode("local")}
             style={{
@@ -273,7 +247,7 @@ export default function AddProduct() {
               borderRadius: "18px",
               padding: "20px",
               cursor: "pointer",
-              marginTop: "15px",
+              marginTop: "25px",
             }}
           >
             <div style={{ fontSize: "32px" }}>✍️</div>
@@ -299,43 +273,205 @@ export default function AddProduct() {
             </span>
           </button>
 
-          {mode === "barcode" && (
-            <div
-              style={{
-                marginTop: "20px",
-                padding: "20px",
-                background: "#f5f5f8",
-                borderRadius: "16px",
-              }}
-            >
-              <strong>📦 قارئ الباركود</strong>
-
-              <p style={{ color: "#666", lineHeight: "1.7" }}>
-                سنربط هذه الصفحة لاحقًا بقارئ باركود وقاعدة بيانات
-                المنتجات.
-              </p>
-            </div>
-          )}
-
           {mode === "local" && (
-            <div
+            <section
               style={{
                 marginTop: "20px",
                 padding: "20px",
-                background: "#f5f5f8",
-                borderRadius: "16px",
+                background: "#f8f8fb",
+                borderRadius: "18px",
               }}
             >
-              <strong>✍️ منتج محلي</strong>
+              <h2
+                style={{
+                  marginTop: 0,
+                  fontSize: "24px",
+                }}
+              >
+                معلومات المنتج
+              </h2>
 
-              <p style={{ color: "#666", lineHeight: "1.7" }}>
-                سنضيف هنا نموذجًا كاملًا لاسم المنتج ومواصفاته
-                وصوره ومعلوماته.
-              </p>
-            </div>
+              <Field
+                label="اسم المنتج *"
+                placeholder="مثال: عطر إماراتي فاخر"
+                value={product.name}
+                onChange={(value) =>
+                  updateProduct("name", value)
+                }
+              />
+
+              <Field
+                label="العلامة التجارية"
+                placeholder="اسم العلامة التجارية"
+                value={product.brand}
+                onChange={(value) =>
+                  updateProduct("brand", value)
+                }
+              />
+
+              <Field
+                label="الفئة"
+                placeholder="مثال: عطور، ملابس، إلكترونيات"
+                value={product.category}
+                onChange={(value) =>
+                  updateProduct("category", value)
+                }
+              />
+
+              <Field
+                label="السعر"
+                placeholder="مثال: 149"
+                value={product.price}
+                onChange={(value) =>
+                  updateProduct("price", value)
+                }
+                type="number"
+              />
+
+              <TextArea
+                label="وصف المنتج"
+                placeholder="اكتب وصفًا مختصرًا عن المنتج..."
+                value={product.description}
+                onChange={(value) =>
+                  updateProduct("description", value)
+                }
+              />
+
+              <TextArea
+                label="المواصفات"
+                placeholder={
+                  "مثال:\nالحجم: 100 مل\nاللون: أسود\nالمادة: ..."
+                }
+                value={product.specifications}
+                onChange={(value) =>
+                  updateProduct("specifications", value)
+                }
+              />
+
+              <TextArea
+                label="المميزات"
+                placeholder={
+                  "مثال:\nجودة عالية\nصناعة محلية\nتصميم فاخر"
+                }
+                value={product.features}
+                onChange={(value) =>
+                  updateProduct("features", value)
+                }
+              />
+
+              <button
+                onClick={saveProduct}
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                  border: "none",
+                  background: "#111827",
+                  color: "#fff",
+                  padding: "16px",
+                  borderRadius: "14px",
+                  fontSize: "17px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                }}
+              >
+                💾 حفظ المنتج
+              </button>
+
+              {saved && (
+                <div
+                  style={{
+                    marginTop: "15px",
+                    padding: "15px",
+                    background: "#ecfdf5",
+                    borderRadius: "12px",
+                    color: "#166534",
+                    fontWeight: "700",
+                  }}
+                >
+                  ✅ تم حفظ المنتج مؤقتًا بنجاح
+                </div>
+              )}
+            </section>
           )}
         </div>
       </div>
     </main>
+  );
+}
+
+function Field({
+  label,
+  placeholder,
+  value,
+  onChange,
+  type = "text",
+}) {
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      <label
+        style={{
+          display: "block",
+          fontWeight: "700",
+          marginBottom: "8px",
+        }}
+      >
+        {label}
+      </label>
+
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          border: "1px solid #ddd",
+          borderRadius: "12px",
+          padding: "14px",
+          fontSize: "16px",
+          background: "#fff",
+        }}
+      />
+    </div>
+  );
+}
+
+function TextArea({
+  label,
+  placeholder,
+  value,
+  onChange,
+}) {
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      <label
+        style={{
+          display: "block",
+          fontWeight: "700",
+          marginBottom: "8px",
+        }}
+      >
+        {label}
+      </label>
+
+      <textarea
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        rows={4}
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          border: "1px solid #ddd",
+          borderRadius: "12px",
+          padding: "14px",
+          fontSize: "16px",
+          background: "#fff",
+          resize: "vertical",
+          lineHeight: "1.7",
+        }}
+      />
+    </div>
   );
 }
