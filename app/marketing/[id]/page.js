@@ -23,6 +23,7 @@ export default function MarketingPage({ params }) {
     try {
       const { id } = await params;
 
+      // جلب المنتج
       const { data: productData, error: productError } = await supabase
         .from("products")
         .select("*")
@@ -38,6 +39,7 @@ export default function MarketingPage({ params }) {
 
       setProduct(productData);
 
+      // جلب آخر محتوى تسويقي
       const { data: marketingData, error: marketingError } = await supabase
         .from("marketing_contents")
         .select("*")
@@ -50,8 +52,25 @@ export default function MarketingPage({ params }) {
         console.error("MARKETING ERROR:", marketingError);
       }
 
+      /*
+        مهم:
+        إذا كان المنتج تم تعديله بعد إنشاء المحتوى التسويقي،
+        لا نعرض المحتوى القديم.
+      */
       if (marketingData) {
-        setMarketing(marketingData);
+        const marketingCreated = new Date(
+          marketingData.created_at
+        ).getTime();
+
+        const productUpdated = new Date(
+          productData.updated_at || productData.created_at
+        ).getTime();
+
+        if (marketingCreated >= productUpdated) {
+          setMarketing(marketingData);
+        } else {
+          setMarketing(null);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -69,7 +88,6 @@ export default function MarketingPage({ params }) {
     setMarketing(null);
 
     try {
-      // إرسال بيانات المنتج إلى API الخاص بنا
       const response = await fetch("/api/generate-marketing", {
         method: "POST",
         headers: {
@@ -93,41 +111,30 @@ export default function MarketingPage({ params }) {
 
       if (!response.ok) {
         console.error("AI ERROR:", result);
+
         throw new Error(
-          result.error || "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي."
+          result.error ||
+            "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي."
         );
       }
 
-      // حفظ نتيجة الذكاء الاصطناعي في Supabase
       const { data, error } = await supabase
         .from("marketing_contents")
         .insert({
           product_id: product.id,
-
           marketing_description:
             result.marketing_description || null,
-
-          instagram:
-            result.instagram || null,
-
-          whatsapp:
-            result.whatsapp || null,
-
+          instagram: result.instagram || null,
+          whatsapp: result.whatsapp || null,
           tiktok_snapchat:
             result.tiktok_snapchat || null,
-
-          seo_title:
-            result.seo_title || null,
-
+          seo_title: result.seo_title || null,
           seo_description:
             result.seo_description || null,
-
           seo_keywords:
             result.seo_keywords || null,
-
           call_to_action:
             result.call_to_action || null,
-
           status: "generated",
         })
         .select()
@@ -135,13 +142,20 @@ export default function MarketingPage({ params }) {
 
       if (error) {
         console.error("SAVE MARKETING ERROR:", error);
-        throw new Error("تم إنشاء المحتوى ولكن تعذر حفظه في قاعدة البيانات.");
+
+        throw new Error(
+          "تم إنشاء المحتوى ولكن تعذر حفظه في قاعدة البيانات."
+        );
       }
 
       setMarketing(data);
-      setMessage("✅ تم إنشاء المحتوى التسويقي بالذكاء الاصطناعي وحفظه بنجاح.");
+
+      setMessage(
+        "✅ تم إنشاء المحتوى التسويقي بالذكاء الاصطناعي وحفظه بنجاح."
+      );
     } catch (error) {
       console.error("CREATE MARKETING ERROR:", error);
+
       setMessage(`❌ ${error.message}`);
     } finally {
       setCreating(false);
@@ -293,8 +307,10 @@ export default function MarketingPage({ params }) {
                 lineHeight: "1.8",
               }}
             >
-              {product.brand && `العلامة التجارية: ${product.brand}`}
-              {product.category && ` • ${product.category}`}
+              {product.brand &&
+                `العلامة التجارية: ${product.brand}`}
+              {product.category &&
+                ` • ${product.category}`}
             </p>
 
             {product.price !== null &&
@@ -307,7 +323,8 @@ export default function MarketingPage({ params }) {
                     fontWeight: "800",
                   }}
                 >
-                  💰 {product.price} {product.currency || "AED"}
+                  💰 {product.price}{" "}
+                  {product.currency || "AED"}
                 </div>
               )}
           </div>
@@ -324,7 +341,9 @@ export default function MarketingPage({ params }) {
               borderRadius: "14px",
               fontSize: "18px",
               fontWeight: "800",
-              cursor: creating ? "default" : "pointer",
+              cursor: creating
+                ? "default"
+                : "pointer",
             }}
           >
             {creating
@@ -362,7 +381,9 @@ export default function MarketingPage({ params }) {
             >
               <MarketingCard
                 title="✍️ الوصف التسويقي"
-                content={marketing.marketing_description}
+                content={
+                  marketing.marketing_description
+                }
               />
 
               <MarketingCard
@@ -377,7 +398,9 @@ export default function MarketingPage({ params }) {
 
               <MarketingCard
                 title="🎵 TikTok / Snapchat"
-                content={marketing.tiktok_snapchat}
+                content={
+                  marketing.tiktok_snapchat
+                }
               />
 
               <MarketingCard
@@ -385,24 +408,41 @@ export default function MarketingPage({ params }) {
                 content={
                   <>
                     <strong>العنوان:</strong>
-                    <div style={{ marginBottom: "12px" }}>
+
+                    <div
+                      style={{
+                        marginBottom: "12px",
+                      }}
+                    >
                       {marketing.seo_title}
                     </div>
 
                     <strong>الوصف:</strong>
-                    <div style={{ marginBottom: "12px" }}>
+
+                    <div
+                      style={{
+                        marginBottom: "12px",
+                      }}
+                    >
                       {marketing.seo_description}
                     </div>
 
-                    <strong>الكلمات المفتاحية:</strong>
-                    <div>{marketing.seo_keywords}</div>
+                    <strong>
+                      الكلمات المفتاحية:
+                    </strong>
+
+                    <div>
+                      {marketing.seo_keywords}
+                    </div>
                   </>
                 }
               />
 
               <MarketingCard
                 title="🎯 الدعوة لاتخاذ إجراء"
-                content={marketing.call_to_action}
+                content={
+                  marketing.call_to_action
+                }
               />
 
               <div
@@ -427,8 +467,8 @@ export default function MarketingPage({ params }) {
                     marginBottom: 0,
                   }}
                 >
-                  سيتم إضافة إنشاء صورة الإعلان بالذكاء الاصطناعي في الخطوة
-                  التالية.
+                  سيتم إضافة إنشاء صورة الإعلان
+                  بالذكاء الاصطناعي في الخطوة التالية.
                 </p>
               </div>
 
@@ -454,9 +494,28 @@ export default function MarketingPage({ params }) {
                     marginBottom: 0,
                   }}
                 >
-                  سيتم إضافة إنشاء فيديو الإعلان في مرحلة لاحقة.
+                  سيتم إضافة إنشاء فيديو الإعلان
+                  في مرحلة لاحقة.
                 </p>
               </div>
+            </div>
+          )}
+
+          {!marketing && (
+            <div
+              style={{
+                marginTop: "22px",
+                padding: "18px",
+                borderRadius: "14px",
+                background: "#fff8e6",
+                color: "#8a5a00",
+                lineHeight: "1.8",
+                textAlign: "center",
+              }}
+            >
+              ℹ️ لا يوجد محتوى تسويقي حديث لهذا
+              المنتج. اضغط «إنشاء الكل» لإنشاء
+              محتوى جديد بناءً على البيانات الحالية.
             </div>
           )}
         </div>
