@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { generateVideo } from "../../../lib/video-generator";
 
 export const runtime = "nodejs";
 
@@ -52,7 +53,24 @@ export async function POST(request) {
     }
 
     /*
-     * 2. جلب المنتج
+     * 2. منع إعادة تشغيل فيديو قيد المعالجة
+     */
+
+    if (video.status === "processing") {
+      return NextResponse.json({
+        success: true,
+        message:
+          "الفيديو قيد المعالجة بالفعل.",
+        video: {
+          id: video.id,
+          status: video.status,
+        },
+        already_processing: true,
+      });
+    }
+
+    /*
+     * 3. جلب المنتج
      */
 
     const { data: product, error: productError } =
@@ -71,14 +89,15 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "المنتج المرتبط بالفيديو غير موجود.",
+          error:
+            "المنتج المرتبط بالفيديو غير موجود.",
         },
         { status: 404 }
       );
     }
 
     /*
-     * 3. منع المنتجات المقفلة
+     * 4. فحص الأمان
      */
 
     if (
@@ -94,10 +113,6 @@ export async function POST(request) {
         { status: 403 }
       );
     }
-
-    /*
-     * 4. منع المنتجات التي تحتاج مراجعة
-     */
 
     if (
       product.safety_status === "review"
@@ -131,7 +146,8 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "المحل المرتبط بالفيديو غير موجود.",
+          error:
+            "المحل المرتبط بالفيديو غير موجود.",
         },
         { status: 404 }
       );
@@ -144,13 +160,15 @@ export async function POST(request) {
     let design = null;
 
     if (video.design_id) {
-      const { data: designData, error: designError } =
-        await supabase
-          .from("ad_images")
-          .select("*")
-          .eq("id", video.design_id)
-          .eq("shop_id", video.shop_id)
-          .maybeSingle();
+      const {
+        data: designData,
+        error: designError,
+      } = await supabase
+        .from("ad_images")
+        .select("*")
+        .eq("id", video.design_id)
+        .eq("shop_id", video.shop_id)
+        .maybeSingle();
 
       if (designError) {
         throw designError;
@@ -160,12 +178,10 @@ export async function POST(request) {
     }
 
     /*
-     * 7. بناء معلومات الفيديو
+     * 7. تجهيز Prompt منظم
      */
 
-    const videoPrompt = {
-      video_id: video.id,
-
+    const structuredPrompt = {
       product: {
         id: product.id,
         name: product.name,
@@ -174,10 +190,12 @@ export async function POST(request) {
         price: product.price,
         currency: product.currency,
         description: product.description,
-        specifications: product.specifications,
+        specifications:
+          product.specifications,
         features: product.features,
         image_url: product.image_url,
-        model_number: product.model_number,
+        model_number:
+          product.model_number,
       },
 
       shop: {
@@ -191,58 +209,112 @@ export async function POST(request) {
         tiktok: shop.tiktok,
         snapchat: shop.snapchat,
         website: shop.website,
-        address: shop.address,
       },
 
       design: design
         ? {
             id: design.id,
-            image_url: design.image_url,
+            image_url:
+              design.image_url,
             format: design.format,
-            prompt: design.prompt,
           }
         : null,
 
       settings: {
         mode: video.mode,
-        video_type: video.video_type,
+        video_type:
+          video.video_type,
         format: video.format,
         duration_seconds:
           video.duration_seconds,
         style: video.style,
-        background: video.background,
+        background:
+          video.background,
       },
 
-      custom_description:
+      user_description:
         video.prompt || null,
-
-      rules: [
-        "Preserve the exact identity of the product.",
-        "Do not change the product shape.",
-        "Do not invent product specifications.",
-        "Do not invent prices.",
-        "Do not invent offers.",
-        "Do not add unsupported claims.",
-        "Keep the product clearly visible.",
-        "Use the shop identity when appropriate.",
-        "Create a professional advertising video.",
-        "Follow the selected format.",
-        "Follow the selected duration.",
-        "Use the selected advertising style.",
-      ],
     };
 
     /*
-     * 8. حفظ الـ prompt المنظم
+     * 8. تجهيز بيانات المحرك
      */
 
-    const { data: updatedVideo, error: updateError } =
+    const engineResult =
+      await generateVideo({
+        product,
+        shop,
+        video: {
+          ...video,
+          prompt:
+            JSON.stringify(
+              structuredPrompt
+            ),
+        },
+      });
+
+    /*
+     * 9. المحرك غير مفعّل
+     *
+     * هذا هو الوضع الحالي.
+     */
+
+    if (
+      engineResult?.enabled === false
+    ) {
+      const { data: updatedVideo, error: updateError } =
+        await supabase
+          .from("ad_videos")
+          .update({
+            prompt:
+              JSON.stringify(
+                structuredPrompt
+              ),
+
+            status: "pending",
+
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", video.id)
+          .select()
+          .single();
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      return NextResponse.json({
+        success: true,
+
+        message:
+          "تم تجهيز الفيديو. محرك الذكاء الاصطناعي غير مفعّل حالياً.",
+
+        video: {
+          id: updatedVideo.id,
+          status:
+            updatedVideo.status,
+        },
+
+        engine_enabled: false,
+
+        ai_generation_started:
+          false,
+      });
+    }
+
+    /*
+     * 10. المحرك مفعّل
+     */
+
+    const { data: processingVideo, error: processingError } =
       await supabase
         .from("ad_videos")
         .update({
-          prompt: JSON.stringify(
-            videoPrompt
-          ),
+          prompt:
+            JSON.stringify(
+              structuredPrompt
+            ),
 
           status: "processing",
 
@@ -256,54 +328,109 @@ export async function POST(request) {
         .select()
         .single();
 
-    if (updateError) {
-      throw updateError;
+    if (processingError) {
+      throw processingError;
     }
 
     /*
-     * مهم:
+     * 11. حفظ Task ID
      *
-     * لا يوجد استدعاء OpenAI هنا.
+     * نستخدم error_code مؤقتاً لتخزين
+     * معرف مهمة المزود.
      *
-     * هذا فقط يجهز الطلب للمحرك
-     * الحقيقي لاحقاً.
+     * لاحقاً نضيف video_provider_task_id
+     * كعمود مستقل.
      */
+
+    if (engineResult.taskId) {
+      await supabase
+        .from("ad_videos")
+        .update({
+          error_code:
+            `provider_task:${engineResult.taskId}`,
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq("id", video.id);
+    }
 
     return NextResponse.json({
       success: true,
 
       message:
-        "تم تجهيز الفيديو لمحرك التوليد.",
+        "تم إرسال الفيديو إلى محرك التوليد.",
 
       video: {
-        id: updatedVideo.id,
-        status: updatedVideo.status,
-        product_id:
-          updatedVideo.product_id,
-        shop_id:
-          updatedVideo.shop_id,
-        format:
-          updatedVideo.format,
-        duration_seconds:
-          updatedVideo.duration_seconds,
+        id: processingVideo.id,
+        status:
+          processingVideo.status,
       },
 
-      ready_for_generation: true,
+      engine_enabled: true,
 
-      ai_generation_started: false,
+      ai_generation_started:
+        true,
+
+      task_id:
+        engineResult.taskId ||
+        null,
+
+      engine:
+        engineResult.engine ||
+        null,
+
+      model:
+        engineResult.model ||
+        null,
     });
   } catch (error) {
     console.error(
-      "GENERATE VIDEO PREPARATION ERROR:",
+      "GENERATE VIDEO ERROR:",
       error
     );
+
+    /*
+     * نحاول تسجيل الفشل في قاعدة البيانات
+     * إذا كان لدينا video_id.
+     */
+
+    try {
+      const body =
+        await request.clone().json();
+
+      if (body?.video_id) {
+        await supabase
+          .from("ad_videos")
+          .update({
+            status: "failed",
+
+            error_message:
+              error?.message ||
+              "فشل إنشاء الفيديو.",
+
+            error_code:
+              "VIDEO_GENERATION_ERROR",
+
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", body.video_id);
+      }
+    } catch (logError) {
+      console.error(
+        "VIDEO ERROR LOGGING FAILED:",
+        logError
+      );
+    }
 
     return NextResponse.json(
       {
         success: false,
+
         error:
           error?.message ||
-          "حدث خطأ أثناء تجهيز الفيديو.",
+          "حدث خطأ أثناء إنشاء الفيديو.",
       },
       { status: 500 }
     );
