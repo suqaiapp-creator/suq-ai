@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "../../../lib/supabase/client";
 
 export default function VideoDetailsPage() {
@@ -13,7 +12,7 @@ export default function VideoDetailsPage() {
   const videoId = params?.id;
 
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [video, setVideo] = useState(null);
@@ -24,13 +23,9 @@ export default function VideoDetailsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (videoId) {
-      loadVideo();
-    }
-  }, [videoId]);
-
   async function loadVideo() {
+    if (!videoId) return;
+
     try {
       setLoading(true);
       setError("");
@@ -40,17 +35,23 @@ export default function VideoDetailsPage() {
         error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !user) {
+      if (userError) {
+        throw userError;
+      }
+
+      if (!user) {
         router.push("/login");
         return;
       }
 
-      const { data: shopData, error: shopError } =
-        await supabase
-          .from("shops")
-          .select("*")
-          .eq("owner_id", user.id)
-          .maybeSingle();
+      const {
+        data: shopData,
+        error: shopError,
+      } = await supabase
+        .from("shops")
+        .select("*")
+        .eq("owner_id", user.id)
+        .maybeSingle();
 
       if (shopError) {
         throw shopError;
@@ -62,13 +63,15 @@ export default function VideoDetailsPage() {
 
       setShop(shopData);
 
-      const { data: videoData, error: videoError } =
-        await supabase
-          .from("ad_videos")
-          .select("*")
-          .eq("id", videoId)
-          .eq("shop_id", shopData.id)
-          .maybeSingle();
+      const {
+        data: videoData,
+        error: videoError,
+      } = await supabase
+        .from("ad_videos")
+        .select("*")
+        .eq("id", videoId)
+        .eq("shop_id", shopData.id)
+        .maybeSingle();
 
       if (videoError) {
         throw videoError;
@@ -80,13 +83,15 @@ export default function VideoDetailsPage() {
 
       setVideo(videoData);
 
-      const { data: productData, error: productError } =
-        await supabase
-          .from("products")
-          .select("*")
-          .eq("id", videoData.product_id)
-          .eq("shop_id", shopData.id)
-          .maybeSingle();
+      const {
+        data: productData,
+        error: productError,
+      } = await supabase
+        .from("products")
+        .select("*")
+        .eq("id", videoData.product_id)
+        .eq("shop_id", shopData.id)
+        .maybeSingle();
 
       if (productError) {
         throw productError;
@@ -95,13 +100,15 @@ export default function VideoDetailsPage() {
       setProduct(productData || null);
 
       if (videoData.design_id) {
-        const { data: designData, error: designError } =
-          await supabase
-            .from("ad_images")
-            .select("*")
-            .eq("id", videoData.design_id)
-            .eq("shop_id", shopData.id)
-            .maybeSingle();
+        const {
+          data: designData,
+          error: designError,
+        } = await supabase
+          .from("ad_images")
+          .select("*")
+          .eq("id", videoData.design_id)
+          .eq("shop_id", shopData.id)
+          .maybeSingle();
 
         if (designError) {
           throw designError;
@@ -116,39 +123,122 @@ export default function VideoDetailsPage() {
 
       setError(
         err?.message ||
-          "حدث خطأ أثناء تحميل الفيديو."
+          "تعذر تحميل بيانات الفيديو."
       );
     } finally {
       setLoading(false);
     }
   }
 
-  async function startGeneration() {
-    if (!video?.id) return;
+  async function checkVideoStatus() {
+    if (!videoId || !video) return;
+
+    if (
+      video.status !== "processing"
+    ) {
+      return;
+    }
 
     try {
-      setGenerating(true);
-      setMessage("");
+      setChecking(true);
+
+      const response = await fetch(
+        "/api/video-status",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            video_id: videoId,
+          }),
+        }
+      );
+
+      const result =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "تعذر فحص حالة الفيديو."
+        );
+      }
+
+      if (
+        result.status === "completed" &&
+        result.video_url
+      ) {
+        setVideo((current) => ({
+          ...current,
+          status: "completed",
+          video_url:
+            result.video_url,
+          completed_at:
+            new Date().toISOString(),
+        }));
+
+        setMessage(
+          "تم إنشاء الفيديو بنجاح."
+        );
+
+        return;
+      }
+
+      if (
+        result.status === "failed"
+      ) {
+        setVideo((current) => ({
+          ...current,
+          status: "failed",
+          error_message:
+            result.error ||
+            "فشل إنشاء الفيديو.",
+        }));
+
+        return;
+      }
+
+      if (
+        result.status === "cancelled"
+      ) {
+        setVideo((current) => ({
+          ...current,
+          status: "cancelled",
+          error_message:
+            result.error ||
+            "تم إلغاء الفيديو.",
+        }));
+
+        return;
+      }
+
+      setVideo((current) => ({
+        ...current,
+        status:
+          result.status ||
+          current.status,
+      }));
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err?.message ||
+          "تعذر فحص حالة الفيديو."
+      );
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function startVideoPreparation() {
+    if (!videoId || !video) return;
+
+    try {
+      setChecking(true);
       setError("");
-
-      if (
-        product?.safety_status === "locked" ||
-        product?.safety_status === "violation"
-      ) {
-        setError(
-          "هذا المنتج مقفل ولا يمكن إنشاء فيديو له."
-        );
-        return;
-      }
-
-      if (
-        product?.safety_status === "review"
-      ) {
-        setError(
-          "هذا المنتج يحتاج إلى مراجعة قبل إنشاء الفيديو."
-        );
-        return;
-      }
+      setMessage("");
 
       const response = await fetch(
         "/api/generate-video",
@@ -159,7 +249,7 @@ export default function VideoDetailsPage() {
               "application/json",
           },
           body: JSON.stringify({
-            video_id: video.id,
+            video_id: videoId,
           }),
         }
       );
@@ -167,24 +257,43 @@ export default function VideoDetailsPage() {
       const result =
         await response.json();
 
-      if (!response.ok || !result.success) {
+      if (!response.ok) {
         throw new Error(
           result?.error ||
             "تعذر تجهيز الفيديو."
         );
       }
 
+      if (
+        result.engine_enabled ===
+        false
+      ) {
+        setVideo((current) => ({
+          ...current,
+          status:
+            result.video?.status ||
+            "pending",
+        }));
+
+        setMessage(
+          "تم تجهيز الفيديو. محرك الذكاء الاصطناعي غير مفعّل حالياً."
+        );
+
+        return;
+      }
+
       setVideo((current) => ({
         ...current,
         status:
-          result?.video?.status ||
+          result.video?.status ||
           "processing",
-        generation_started_at:
-          new Date().toISOString(),
+        provider_task_id:
+          result.task_id ||
+          current.provider_task_id,
       }));
 
       setMessage(
-        "تم تجهيز الفيديو بنجاح. وهو الآن بانتظار محرك التوليد."
+        "تم إرسال الفيديو إلى محرك التوليد."
       );
     } catch (err) {
       console.error(err);
@@ -194,12 +303,12 @@ export default function VideoDetailsPage() {
           "حدث خطأ أثناء تجهيز الفيديو."
       );
     } finally {
-      setGenerating(false);
+      setChecking(false);
     }
   }
 
   async function deleteVideo() {
-    if (!video?.id) return;
+    if (!videoId || !video) return;
 
     const confirmed = window.confirm(
       "هل أنت متأكد من حذف هذا الفيديو؟"
@@ -211,12 +320,13 @@ export default function VideoDetailsPage() {
       setDeleting(true);
       setError("");
 
-      const { error: deleteError } =
-        await supabase
-          .from("ad_videos")
-          .delete()
-          .eq("id", video.id)
-          .eq("shop_id", shop.id);
+      const {
+        error: deleteError,
+      } = await supabase
+        .from("ad_videos")
+        .delete()
+        .eq("id", videoId)
+        .eq("shop_id", shop.id);
 
       if (deleteError) {
         throw deleteError;
@@ -235,74 +345,30 @@ export default function VideoDetailsPage() {
     }
   }
 
-  async function shareVideo() {
-    if (!video?.video_url) return;
+  useEffect(() => {
+    loadVideo();
+  }, [videoId]);
 
-    try {
-      if (
-        navigator.share
-      ) {
-        await navigator.share({
-          title:
-            video.title ||
-            product?.name ||
-            "فيديو إعلاني",
-          url: video.video_url,
-        });
-      } else {
-        await navigator.clipboard.writeText(
-          video.video_url
-        );
-
-        setMessage(
-          "تم نسخ رابط الفيديو."
-        );
-      }
-    } catch (err) {
-      console.error(err);
+  useEffect(() => {
+    if (
+      !video ||
+      video.status !== "processing"
+    ) {
+      return;
     }
-  }
 
-  function statusText(status) {
-    switch (status) {
-      case "pending":
-        return "بانتظار الإنشاء";
+    const interval =
+      setInterval(() => {
+        checkVideoStatus();
+      }, 8000);
 
-      case "processing":
-        return "جارٍ المعالجة";
-
-      case "completed":
-        return "مكتمل";
-
-      case "failed":
-        return "فشل الإنشاء";
-
-      case "cancelled":
-        return "ملغي";
-
-      default:
-        return status || "غير محدد";
-    }
-  }
-
-  function statusColor(status) {
-    switch (status) {
-      case "completed":
-        return "#15803d";
-
-      case "processing":
-        return "#b45309";
-
-      case "failed":
-        return "#b91c1c";
-
-      case "cancelled":
-        return "#6b7280";
-
-      default:
-        return "#475569";
-    }
-  }
+    return () => {
+      clearInterval(interval);
+    };
+  }, [
+    video?.status,
+    videoId,
+  ]);
 
   if (loading) {
     return (
@@ -310,19 +376,27 @@ export default function VideoDetailsPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f8fafc",
           padding: 24,
+          fontFamily:
+            "Arial, sans-serif",
         }}
       >
         <div
           style={{
-            maxWidth: 1000,
+            maxWidth: 1100,
             margin: "0 auto",
-            textAlign: "center",
-            padding: 60,
           }}
         >
-          جاري تحميل الفيديو...
+          <div
+            style={{
+              padding: 24,
+              borderRadius: 16,
+              background: "#f8fafc",
+              textAlign: "center",
+            }}
+          >
+            جاري تحميل الفيديو...
+          </div>
         </div>
       </main>
     );
@@ -334,70 +408,74 @@ export default function VideoDetailsPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f8fafc",
           padding: 24,
+          fontFamily:
+            "Arial, sans-serif",
         }}
       >
         <div
           style={{
             maxWidth: 700,
-            margin: "60px auto",
-            background: "#fff",
-            borderRadius: 20,
-            padding: 30,
-            textAlign: "center",
-            border: "1px solid #e5e7eb",
+            margin: "0 auto",
           }}
         >
           <div
             style={{
-              fontSize: 40,
-              marginBottom: 15,
-            }}
-          >
-            ⚠️
-          </div>
-
-          <h2>
-            تعذر تحميل الفيديو
-          </h2>
-
-          <p
-            style={{
-              color: "#b91c1c",
-            }}
-          >
-            {error}
-          </p>
-
-          <Link
-            href="/videos"
-            style={{
-              display: "inline-block",
-              marginTop: 15,
-              background: "#15803d",
-              color: "#fff",
-              padding: "12px 20px",
-              borderRadius: 10,
-              textDecoration: "none",
+              padding: 24,
+              borderRadius: 16,
+              background: "#fef2f2",
+              color: "#991b1b",
               fontWeight: 800,
             }}
           >
+            {error}
+          </div>
+
+          <button
+            onClick={() =>
+              router.push("/videos")
+            }
+            style={{
+              marginTop: 16,
+              width: "100%",
+              padding: 14,
+              border: "none",
+              borderRadius: 12,
+              background: "#15803d",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
             العودة للفيديوهات
-          </Link>
+          </button>
         </div>
       </main>
     );
   }
 
-  const canGenerate =
-    video &&
-    product &&
-    video.status !== "processing" &&
-    video.status !== "completed" &&
-    product.safety_status !== "locked" &&
-    product.safety_status !== "violation" &&
-    product.safety_status !== "review";
+  const statusLabels = {
+    pending: "بانتظار التوليد",
+    processing: "جاري التوليد",
+    completed: "مكتمل",
+    failed: "فشل",
+    cancelled: "ملغي",
+  };
+
+  const statusLabel =
+    statusLabels[
+      video?.status
+    ] ||
+    video?.status ||
+    "غير معروف";
+
+  const typeLabels = {
+    product_ad: "إعلان منتج",
+    product_showcase:
+      "عرض منتج",
+    sale: "عرض وخصم",
+    social: "سوشيال ميديا",
+  };
 
   return (
     <main
@@ -406,6 +484,8 @@ export default function VideoDetailsPage() {
         minHeight: "100vh",
         background: "#f8fafc",
         padding: 20,
+        fontFamily:
+          "Arial, sans-serif",
       }}
     >
       <div
@@ -414,122 +494,351 @@ export default function VideoDetailsPage() {
           margin: "0 auto",
         }}
       >
-        {/* Header */}
+        <button
+          onClick={() =>
+            router.push("/videos")
+          }
+          style={{
+            marginBottom: 16,
+            border: "none",
+            background:
+              "transparent",
+            color: "#166534",
+            fontWeight: 900,
+            cursor: "pointer",
+            fontSize: 15,
+          }}
+        >
+          ← العودة للفيديوهات
+        </button>
 
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 20,
-            flexWrap: "wrap",
+            background: "#fff",
+            borderRadius: 20,
+            padding: 20,
+            boxShadow:
+              "0 4px 20px rgba(0,0,0,.06)",
           }}
         >
-          <div>
-            <Link
-              href="/videos"
+          <div
+            style={{
+              display: "flex",
+              justifyContent:
+                "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: 25,
+                }}
+              >
+                {video?.title ||
+                  product?.name ||
+                  "فيديو إعلاني"}
+              </h1>
+
+              <p
+                style={{
+                  marginTop: 8,
+                  color: "#64748b",
+                }}
+              >
+                فيديو إعلاني بالذكاء
+                الاصطناعي
+              </p>
+            </div>
+
+            <span
               style={{
-                color: "#15803d",
-                textDecoration: "none",
+                padding:
+                  "8px 14px",
+                borderRadius: 999,
+                background:
+                  video?.status ===
+                  "completed"
+                    ? "#dcfce7"
+                    : video?.status ===
+                      "failed"
+                    ? "#fee2e2"
+                    : "#fef3c7",
+                color:
+                  video?.status ===
+                  "completed"
+                    ? "#166534"
+                    : video?.status ===
+                      "failed"
+                    ? "#991b1b"
+                    : "#92400e",
+                fontWeight: 900,
+              }}
+            >
+              {statusLabel}
+            </span>
+          </div>
+
+          {message && (
+            <div
+              style={{
+                marginTop: 16,
+                padding: 14,
+                borderRadius: 12,
+                background:
+                  "#ecfdf5",
+                color: "#166534",
                 fontWeight: 800,
               }}
             >
-              ← الفيديوهات
-            </Link>
+              {message}
+            </div>
+          )}
 
-            <h1
-              style={{
-                margin:
-                  "10px 0 5px",
-                fontSize: 28,
-              }}
-            >
-              {video?.title ||
-                product?.name ||
-                "فيديو إعلاني"}
-            </h1>
-
+          {error && (
             <div
               style={{
-                color: "#64748b",
+                marginTop: 16,
+                padding: 14,
+                borderRadius: 12,
+                background:
+                  "#fef2f2",
+                color: "#991b1b",
+                fontWeight: 800,
               }}
             >
-              إنشاء فيديو إعلاني بالذكاء الاصطناعي
+              {error}
             </div>
+          )}
+
+          <div
+            style={{
+              marginTop: 20,
+              borderRadius: 18,
+              overflow: "hidden",
+              background: "#0f172a",
+              minHeight: 420,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {video?.video_url ? (
+              <video
+                src={video.video_url}
+                controls
+                playsInline
+                style={{
+                  width: "100%",
+                  maxHeight: 650,
+                  display: "block",
+                }}
+              />
+            ) : product?.image_url ? (
+              <div
+                style={{
+                  width: "100%",
+                  textAlign: "center",
+                  padding: 30,
+                }}
+              >
+                <img
+                  src={
+                    product.image_url
+                  }
+                  alt={
+                    product.name ||
+                    "المنتج"
+                  }
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 500,
+                    objectFit:
+                      "contain",
+                    borderRadius: 12,
+                  }}
+                />
+
+                <div
+                  style={{
+                    marginTop: 20,
+                    color: "#fff",
+                    fontWeight: 900,
+                    fontSize: 18,
+                  }}
+                >
+                  {video?.status ===
+                  "processing"
+                    ? "جاري إنشاء الفيديو..."
+                    : video?.status ===
+                      "pending"
+                    ? "الفيديو بانتظار التوليد"
+                    : video?.status ===
+                      "failed"
+                    ? "تعذر إنشاء الفيديو"
+                    : "لا يوجد فيديو جاهز حالياً"}
+                </div>
+
+                {video?.status ===
+                  "processing" && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      color: "#cbd5e1",
+                    }}
+                  >
+                    يتم تحديث الحالة
+                    تلقائياً.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  color: "#fff",
+                  padding: 30,
+                  textAlign: "center",
+                }}
+              >
+                لا توجد صورة أو فيديو
+                متاح حالياً.
+              </div>
+            )}
           </div>
 
           <div
             style={{
-              background:
-                statusColor(video?.status),
-              color: "#fff",
-              padding:
-                "9px 15px",
-              borderRadius: 999,
-              fontWeight: 900,
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              marginTop: 18,
             }}
           >
-            {statusText(
-              video?.status
+            {video?.video_url && (
+              <>
+                <a
+                  href={
+                    video.video_url
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    textAlign:
+                      "center",
+                    textDecoration:
+                      "none",
+                    padding: 13,
+                    borderRadius: 12,
+                    background:
+                      "#15803d",
+                    color: "#fff",
+                    fontWeight: 900,
+                  }}
+                >
+                  ▶️ فتح الفيديو
+                </a>
+
+                <a
+                  href={
+                    video.video_url
+                  }
+                  download
+                  style={{
+                    flex: 1,
+                    minWidth: 140,
+                    textAlign:
+                      "center",
+                    textDecoration:
+                      "none",
+                    padding: 13,
+                    borderRadius: 12,
+                    background:
+                      "#0f172a",
+                    color: "#fff",
+                    fontWeight: 900,
+                  }}
+                >
+                  ⬇️ تحميل
+                </a>
+              </>
+            )}
+
+            {video?.status ===
+              "pending" && (
+              <button
+                onClick={
+                  startVideoPreparation
+                }
+                disabled={checking}
+                style={{
+                  flex: 1,
+                  minWidth: 180,
+                  padding: 13,
+                  border: "none",
+                  borderRadius: 12,
+                  background:
+                    "#15803d",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: checking
+                    ? "wait"
+                    : "pointer",
+                }}
+              >
+                {checking
+                  ? "جاري التجهيز..."
+                  : "🎬 تجهيز الفيديو"}
+              </button>
+            )}
+
+            {video?.status ===
+              "processing" && (
+              <button
+                onClick={
+                  checkVideoStatus
+                }
+                disabled={checking}
+                style={{
+                  flex: 1,
+                  minWidth: 180,
+                  padding: 13,
+                  border: "none",
+                  borderRadius: 12,
+                  background:
+                    "#166534",
+                  color: "#fff",
+                  fontWeight: 900,
+                  cursor: checking
+                    ? "wait"
+                    : "pointer",
+                }}
+              >
+                {checking
+                  ? "جاري الفحص..."
+                  : "🔄 تحديث الحالة"}
+              </button>
             )}
           </div>
         </div>
-
-        {/* Messages */}
-
-        {message && (
-          <div
-            style={{
-              background: "#dcfce7",
-              color: "#166534",
-              border:
-                "1px solid #86efac",
-              borderRadius: 12,
-              padding: 14,
-              marginBottom: 16,
-              fontWeight: 700,
-            }}
-          >
-            {message}
-          </div>
-        )}
-
-        {error && (
-          <div
-            style={{
-              background: "#fee2e2",
-              color: "#991b1b",
-              border:
-                "1px solid #fca5a5",
-              borderRadius: 12,
-              padding: 14,
-              marginBottom: 16,
-              fontWeight: 700,
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {/* Main */}
 
         <div
           style={{
             display: "grid",
             gridTemplateColumns:
-              "minmax(0, 1.4fr) minmax(280px, 0.8fr)",
-            gap: 20,
+              "repeat(auto-fit,minmax(280px,1fr))",
+            gap: 16,
+            marginTop: 16,
           }}
         >
-          {/* Preview */}
-
           <section
             style={{
               background: "#fff",
-              border:
-                "1px solid #e5e7eb",
-              borderRadius: 20,
+              borderRadius: 18,
               padding: 20,
             }}
           >
@@ -538,586 +847,304 @@ export default function VideoDetailsPage() {
                 marginTop: 0,
               }}
             >
-              🎬 معاينة الفيديو
+              المنتج
             </h2>
 
             <div
               style={{
-                background: "#111827",
-                borderRadius: 16,
-                minHeight: 420,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
+                color: "#475569",
+                lineHeight: 1.9,
               }}
             >
-              {video?.video_url ? (
-                <video
-                  src={video.video_url}
-                  controls
-                  playsInline
-                  style={{
-                    maxWidth: "100%",
-                    maxHeight: 650,
-                    width: "100%",
-                    objectFit:
-                      "contain",
-                  }}
-                />
-              ) : product?.image_url ? (
-                <div
-                  style={{
-                    width: "100%",
-                    textAlign: "center",
-                  }}
-                >
-                  <img
-                    src={
-                      product.image_url
-                    }
-                    alt={
-                      product.name
-                    }
-                    style={{
-                      maxWidth:
-                        "90%",
-                      maxHeight: 450,
-                      objectFit:
-                        "contain",
-                      borderRadius: 12,
-                    }}
-                  />
+              <strong>
+                الاسم:
+              </strong>{" "}
+              {product?.name ||
+                "—"}
+              <br />
 
-                  <div
-                    style={{
-                      color: "#fff",
-                      padding: 20,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {video?.status ===
-                    "processing"
-                      ? "🎬 جارٍ تجهيز الفيديو..."
-                      : "الفيديو لم يتم توليده بعد"}
-                  </div>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    color: "#fff",
-                    padding: 40,
-                  }}
-                >
-                  لا توجد معاينة حالياً
-                </div>
-              )}
-            </div>
+              <strong>
+                العلامة:
+              </strong>{" "}
+              {product?.brand ||
+                "—"}
+              <br />
 
-            {/* Actions */}
+              <strong>
+                السعر:
+              </strong>{" "}
+              {product?.price !=
+              null
+                ? `${product.price} ${
+                    product.currency ||
+                    "AED"
+                  }`
+                : "—"}
+              <br />
 
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                flexWrap: "wrap",
-                marginTop: 16,
-              }}
-            >
-              {canGenerate && (
-                <button
-                  onClick={
-                    startGeneration
-                  }
-                  disabled={
-                    generating
-                  }
-                  style={{
-                    flex: 1,
-                    minWidth: 180,
-                    background:
-                      "#15803d",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 12,
-                    padding:
-                      "14px 18px",
-                    fontWeight: 900,
-                    cursor:
-                      generating
-                        ? "not-allowed"
-                        : "pointer",
-                    opacity:
-                      generating
-                        ? 0.7
-                        : 1,
-                  }}
-                >
-                  {generating
-                    ? "جاري التجهيز..."
-                    : "🎬 بدء إنشاء الفيديو"}
-                </button>
-              )}
-
-              {video?.video_url && (
-                <>
-                  <a
-                    href={
-                      video.video_url
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      flex: 1,
-                      minWidth: 130,
-                      textAlign:
-                        "center",
-                      background:
-                        "#0f172a",
-                      color: "#fff",
-                      borderRadius: 12,
-                      padding:
-                        "14px 18px",
-                      textDecoration:
-                        "none",
-                      fontWeight: 800,
-                    }}
-                  >
-                    👁️ فتح
-                  </a>
-
-                  <a
-                    href={
-                      video.video_url
-                    }
-                    download
-                    style={{
-                      flex: 1,
-                      minWidth: 130,
-                      textAlign:
-                        "center",
-                      background:
-                        "#e2e8f0",
-                      color: "#0f172a",
-                      borderRadius: 12,
-                      padding:
-                        "14px 18px",
-                      textDecoration:
-                        "none",
-                      fontWeight: 800,
-                    }}
-                  >
-                    تحميل
-                  </a>
-
-                  <button
-                    onClick={
-                      shareVideo
-                    }
-                    style={{
-                      flex: 1,
-                      minWidth: 130,
-                      background:
-                        "#e2e8f0",
-                      color: "#0f172a",
-                      border: "none",
-                      borderRadius: 12,
-                      padding:
-                        "14px 18px",
-                      fontWeight: 800,
-                      cursor: "pointer",
-                    }}
-                  >
-                    مشاركة
-                  </button>
-                </>
-              )}
+              <strong>
+                التصنيف:
+              </strong>{" "}
+              {product?.category ||
+                "—"}
             </div>
           </section>
 
-          {/* Settings */}
-
-          <aside
-            style={{
-              display: "flex",
-              flexDirection:
-                "column",
-              gap: 16,
-            }}
-          >
-            <section
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e5e7eb",
-                borderRadius: 20,
-                padding: 20,
-              }}
-            >
-              <h2
-                style={{
-                  marginTop: 0,
-                }}
-              >
-                ⚙️ إعدادات الفيديو
-              </h2>
-
-              <InfoRow
-                label="النوع"
-                value={
-                  video?.video_type
-                }
-              />
-
-              <InfoRow
-                label="النمط"
-                value={
-                  video?.mode
-                }
-              />
-
-              <InfoRow
-                label="المقاس"
-                value={
-                  video?.format
-                }
-              />
-
-              <InfoRow
-                label="المدة"
-                value={`${video?.duration_seconds || 0} ثانية`}
-              />
-
-              <InfoRow
-                label="الأسلوب"
-                value={
-                  video?.style ||
-                  "تلقائي"
-                }
-              />
-
-              <InfoRow
-                label="الخلفية"
-                value={
-                  video?.background ||
-                  "تلقائي"
-                }
-              />
-            </section>
-
-            {/* Product */}
-
-            <section
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e5e7eb",
-                borderRadius: 20,
-                padding: 20,
-              }}
-            >
-              <h2
-                style={{
-                  marginTop: 0,
-                }}
-              >
-                📦 المنتج
-              </h2>
-
-              {product?.image_url && (
-                <img
-                  src={
-                    product.image_url
-                  }
-                  alt={
-                    product.name
-                  }
-                  style={{
-                    width: "100%",
-                    height: 180,
-                    objectFit:
-                      "contain",
-                    background:
-                      "#f8fafc",
-                    borderRadius: 12,
-                    marginBottom: 12,
-                  }}
-                />
-              )}
-
-              <strong>
-                {product?.name ||
-                  "غير محدد"}
-              </strong>
-
-              {product?.brand && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    color: "#64748b",
-                  }}
-                >
-                  {product.brand}
-                </div>
-              )}
-
-              {product?.price != null && (
-                <div
-                  style={{
-                    marginTop: 10,
-                    fontWeight: 900,
-                  }}
-                >
-                  {product.price}{" "}
-                  {product.currency ||
-                    "AED"}
-                </div>
-              )}
-            </section>
-
-            {/* Design */}
-
-            {design && (
-              <section
-                style={{
-                  background:
-                    "#fff",
-                  border:
-                    "1px solid #e5e7eb",
-                  borderRadius: 20,
-                  padding: 20,
-                }}
-              >
-                <h2
-                  style={{
-                    marginTop: 0,
-                  }}
-                >
-                  🎨 التصميم المستخدم
-                </h2>
-
-                {design.image_url && (
-                  <img
-                    src={
-                      design.image_url
-                    }
-                    alt="التصميم"
-                    style={{
-                      width: "100%",
-                      borderRadius: 12,
-                    }}
-                  />
-                )}
-
-                <Link
-                  href={`/designs/${design.id}`}
-                  style={{
-                    display:
-                      "block",
-                    marginTop: 12,
-                    textAlign:
-                      "center",
-                    background:
-                      "#f1f5f9",
-                    color:
-                      "#0f172a",
-                    padding:
-                      "11px",
-                    borderRadius: 10,
-                    textDecoration:
-                      "none",
-                    fontWeight: 800,
-                  }}
-                >
-                  عرض التصميم
-                </Link>
-              </section>
-            )}
-
-            {/* Shop */}
-
-            {shop && (
-              <section
-                style={{
-                  background:
-                    "#fff",
-                  border:
-                    "1px solid #e5e7eb",
-                  borderRadius: 20,
-                  padding: 20,
-                }}
-              >
-                <h2
-                  style={{
-                    marginTop: 0,
-                  }}
-                >
-                  🏪 بيانات المحل
-                </h2>
-
-                <InfoRow
-                  label="المحل"
-                  value={
-                    shop.name
-                  }
-                />
-
-                {shop.phone && (
-                  <InfoRow
-                    label="الهاتف"
-                    value={
-                      shop.phone
-                    }
-                  />
-                )}
-
-                {shop.whatsapp && (
-                  <InfoRow
-                    label="واتساب"
-                    value={
-                      shop.whatsapp
-                    }
-                  />
-                )}
-              </section>
-            )}
-          </aside>
-        </div>
-
-        {/* Description */}
-
-        {video?.prompt && (
           <section
             style={{
-              marginTop: 20,
               background: "#fff",
-              border:
-                "1px solid #e5e7eb",
-              borderRadius: 20,
+              borderRadius: 18,
               padding: 20,
             }}
           >
-            <h2>
-              📝 وصف الفيديو
-            </h2>
-
-            <p
+            <h2
               style={{
-                color: "#475569",
-                whiteSpace:
-                  "pre-wrap",
-                lineHeight: 1.8,
+                marginTop: 0,
               }}
             >
-              {video.prompt}
-            </p>
-          </section>
-        )}
+              إعدادات الفيديو
+            </h2>
 
-        {/* Delete */}
+            <div
+              style={{
+                color: "#475569",
+                lineHeight: 1.9,
+              }}
+            >
+              <strong>
+                النوع:
+              </strong>{" "}
+              {typeLabels[
+                video?.video_type
+              ] ||
+                video?.video_type ||
+                "—"}
+              <br />
+
+              <strong>
+                الوضع:
+              </strong>{" "}
+              {video?.mode ===
+              "simple"
+                ? "بسيط"
+                : "احترافي"}
+              <br />
+
+              <strong>
+                المقاس:
+              </strong>{" "}
+              {video?.format ||
+                "—"}
+              <br />
+
+              <strong>
+                المدة:
+              </strong>{" "}
+              {video?.duration_seconds ||
+                "—"}{" "}
+              ثانية
+              <br />
+
+              <strong>
+                النمط:
+              </strong>{" "}
+              {video?.style ||
+                "—"}
+              <br />
+
+              <strong>
+                الخلفية:
+              </strong>{" "}
+              {video?.background ||
+                "—"}
+            </div>
+          </section>
+
+          {design && (
+            <section
+              style={{
+                background: "#fff",
+                borderRadius: 18,
+                padding: 20,
+              }}
+            >
+              <h2
+                style={{
+                  marginTop: 0,
+                }}
+              >
+                التصميم المستخدم
+              </h2>
+
+              {design.image_url && (
+                <img
+                  src={
+                    design.image_url
+                  }
+                  alt="التصميم"
+                  style={{
+                    width: "100%",
+                    borderRadius: 12,
+                  }}
+                />
+              )}
+
+              <button
+                onClick={() =>
+                  router.push(
+                    `/designs/${design.id}`
+                  )
+                }
+                style={{
+                  width: "100%",
+                  marginTop: 12,
+                  padding: 12,
+                  border: "none",
+                  borderRadius: 10,
+                  background:
+                    "#f1f5f9",
+                  color: "#0f172a",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                فتح التصميم
+              </button>
+            </section>
+          )}
+        </div>
 
         <section
           style={{
-            marginTop: 20,
+            marginTop: 16,
             background: "#fff",
-            border:
-              "1px solid #fee2e2",
-            borderRadius: 20,
+            borderRadius: 18,
             padding: 20,
           }}
         >
+          <h2
+            style={{
+              marginTop: 0,
+            }}
+          >
+            بيانات المحل
+          </h2>
+
+          <div
+            style={{
+              color: "#475569",
+              lineHeight: 1.9,
+            }}
+          >
+            <strong>
+              المحل:
+            </strong>{" "}
+            {shop?.name || "—"}
+            <br />
+
+            <strong>
+              الهاتف:
+            </strong>{" "}
+            {shop?.phone || "—"}
+            <br />
+
+            <strong>
+              واتساب:
+            </strong>{" "}
+            {shop?.whatsapp ||
+              "—"}
+            <br />
+
+            <strong>
+              Instagram:
+            </strong>{" "}
+            {shop?.instagram ||
+              "—"}
+            <br />
+
+            <strong>
+              TikTok:
+            </strong>{" "}
+            {shop?.tiktok || "—"}
+          </div>
+        </section>
+
+        {video?.error_message && (
+          <section
+            style={{
+              marginTop: 16,
+              background: "#fef2f2",
+              color: "#991b1b",
+              borderRadius: 18,
+              padding: 20,
+            }}
+          >
+            <strong>
+              سبب الخطأ:
+            </strong>
+
+            <div
+              style={{
+                marginTop: 8,
+              }}
+            >
+              {video.error_message}
+            </div>
+          </section>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            marginTop: 20,
+          }}
+        >
+          <button
+            onClick={() =>
+              router.push(
+                "/videos/new"
+              )
+            }
+            style={{
+              flex: 1,
+              minWidth: 180,
+              padding: 14,
+              border: "none",
+              borderRadius: 12,
+              background: "#15803d",
+              color: "#fff",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            🎬 إنشاء فيديو جديد
+          </button>
+
           <button
             onClick={deleteVideo}
             disabled={deleting}
             style={{
-              background: "#dc2626",
-              color: "#fff",
+              flex: 1,
+              minWidth: 180,
+              padding: 14,
               border: "none",
-              borderRadius: 10,
-              padding:
-                "12px 18px",
-              fontWeight: 800,
-              cursor:
-                deleting
-                  ? "not-allowed"
-                  : "pointer",
-              opacity:
-                deleting
-                  ? 0.7
-                  : 1,
+              borderRadius: 12,
+              background: "#fee2e2",
+              color: "#991b1b",
+              fontWeight: 900,
+              cursor: deleting
+                ? "wait"
+                : "pointer",
             }}
           >
             {deleting
               ? "جاري الحذف..."
               : "🗑️ حذف الفيديو"}
           </button>
-        </section>
-
-        {/* New video */}
-
-        <div
-          style={{
-            textAlign: "center",
-            marginTop: 25,
-            paddingBottom: 30,
-          }}
-        >
-          <Link
-            href="/videos/new"
-            style={{
-              display:
-                "inline-block",
-              background:
-                "#15803d",
-              color: "#fff",
-              padding:
-                "13px 22px",
-              borderRadius: 12,
-              textDecoration:
-                "none",
-              fontWeight: 900,
-            }}
-          >
-            + إنشاء فيديو جديد
-          </Link>
         </div>
       </div>
     </main>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent:
-          "space-between",
-        gap: 15,
-        padding:
-          "10px 0",
-        borderBottom:
-          "1px solid #f1f5f9",
-      }}
-    >
-      <span
-        style={{
-          color: "#64748b",
-        }}
-      >
-        {label}
-      </span>
-
-      <strong
-        style={{
-          textAlign: "left",
-        }}
-      >
-        {value || "-"}
-      </strong>
-    </div>
   );
 }
