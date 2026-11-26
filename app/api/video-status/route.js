@@ -14,19 +14,210 @@ const RUNWAY_API_URL =
 const RUNWAY_VERSION =
   "2024-11-06";
 
+// -----------------------------------------
+// Runway Cost Settings
+// -----------------------------------------
+
+const RUNWAY_CREDITS_PER_SECOND = 2;
+
+const RUNWAY_START_FRAME_CREDITS = 1;
+
+const RUNWAY_COST_PER_CREDIT =
+  Number(
+    process.env.RUNWAY_CREDIT_COST_USD
+  ) || 0.0084;
+
+// -----------------------------------------
+// حساب الاستخدام
+// -----------------------------------------
+
+function calculateRunwayCredits(duration) {
+  const seconds =
+    Number(duration) || 5;
+
+  return (
+    seconds *
+      RUNWAY_CREDITS_PER_SECOND +
+    RUNWAY_START_FRAME_CREDITS
+  );
+}
+
+function calculateRunwayCost(credits) {
+  return (
+    Number(credits || 0) *
+    RUNWAY_COST_PER_CREDIT
+  );
+}
+
+// -----------------------------------------
+// العثور على سجل AI Usage الخاص بالفيديو
+// -----------------------------------------
+
+async function findVideoUsage(videoId) {
+  if (!videoId) {
+    return null;
+  }
+
+  const {
+    data,
+    error,
+  } = await supabase
+    .from("ai_usage")
+    .select("*")
+    .contains("metadata", {
+      video_id: videoId,
+    })
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      "AI USAGE FIND ERROR:",
+      error
+    );
+
+    return null;
+  }
+
+  return data || null;
+}
+
+// -----------------------------------------
+// تحديث سجل AI Usage
+// -----------------------------------------
+
+async function updateVideoUsage({
+  video,
+  status,
+  providerStatus,
+  errorMessage = null,
+}) {
+  try {
+    const usage =
+      await findVideoUsage(
+        video.id
+      );
+
+    if (!usage) {
+      console.warn(
+        "AI USAGE RECORD NOT FOUND FOR VIDEO:",
+        video.id
+      );
+
+      return;
+    }
+
+    const duration =
+      Number(
+        video.duration_seconds
+      ) || 5;
+
+    const credits =
+      Number(
+        usage.credits_used
+      ) ||
+      calculateRunwayCredits(
+        duration
+      );
+
+    const cost =
+      Number(
+        usage.estimated_cost
+      ) ||
+      calculateRunwayCost(
+        credits
+      );
+
+    const updatedMetadata = {
+      ...(usage.metadata || {}),
+
+      video_id:
+        video.id,
+
+      provider_task_id:
+        video.provider_task_id ||
+        null,
+
+      duration_seconds:
+        duration,
+
+      credits_used:
+        credits,
+
+      cost_per_credit_usd:
+        RUNWAY_COST_PER_CREDIT,
+
+      estimated_cost_usd:
+        cost,
+
+      provider_status:
+        providerStatus || null,
+
+      final_status:
+        status,
+
+      completed_at:
+        status === "completed"
+          ? new Date().toISOString()
+          : usage.metadata
+              ?.completed_at ||
+            null,
+
+      error_message:
+        errorMessage || null,
+    };
+
+    const {
+      error: updateError,
+    } = await supabase
+      .from("ai_usage")
+      .update({
+        status,
+
+        credits_used:
+          credits,
+
+        estimated_cost:
+          cost,
+
+        metadata:
+          updatedMetadata,
+      })
+      .eq("id", usage.id);
+
+    if (updateError) {
+      console.error(
+        "AI USAGE UPDATE ERROR:",
+        updateError
+      );
+    }
+  } catch (error) {
+    console.error(
+      "AI USAGE UPDATE FAILED:",
+      error
+    );
+  }
+}
+
 export async function POST(request) {
   let videoId = null;
 
   try {
-    const body = await request.json();
+    const body =
+      await request.json();
 
-    videoId = body?.video_id || null;
+    videoId =
+      body?.video_id || null;
 
     if (!videoId) {
       return NextResponse.json(
         {
           success: false,
-          error: "معرّف الفيديو مطلوب.",
+          error:
+            "معرّف الفيديو مطلوب.",
         },
         { status: 400 }
       );
@@ -53,7 +244,8 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "الفيديو غير موجود.",
+          error:
+            "الفيديو غير موجود.",
         },
         { status: 404 }
       );
@@ -64,14 +256,17 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      video.status === "completed" &&
+      video.status ===
+        "completed" &&
       video.video_url
     ) {
       return NextResponse.json({
         success: true,
         status: "completed",
-        video_url: video.video_url,
-        already_completed: true,
+        video_url:
+          video.video_url,
+        already_completed:
+          true,
       });
     }
 
@@ -80,13 +275,16 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      process.env.VIDEO_GENERATION_ENABLED !==
+      process.env
+        .VIDEO_GENERATION_ENABLED !==
       "true"
     ) {
       return NextResponse.json({
         success: true,
-        status: video.status,
-        engine_enabled: false,
+        status:
+          video.status,
+        engine_enabled:
+          false,
         message:
           "محرك الفيديو غير مفعّل حالياً.",
       });
@@ -96,7 +294,9 @@ export async function POST(request) {
     // التأكد من وجود Task ID
     // -----------------------------------------
 
-    if (!video.provider_task_id) {
+    if (
+      !video.provider_task_id
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -112,7 +312,8 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      !process.env.RUNWAYML_API_SECRET
+      !process.env
+        .RUNWAYML_API_SECRET
     ) {
       throw new Error(
         "RUNWAYML_API_SECRET غير موجود في إعدادات الخادم."
@@ -123,27 +324,29 @@ export async function POST(request) {
     // فحص حالة المهمة
     // -----------------------------------------
 
-    const response = await fetch(
-      `${RUNWAY_API_URL}/v1/tasks/${video.provider_task_id}`,
-      {
-        method: "GET",
+    const response =
+      await fetch(
+        `${RUNWAY_API_URL}/v1/tasks/${video.provider_task_id}`,
+        {
+          method: "GET",
 
-        headers: {
-          Authorization:
-            `Bearer ${process.env.RUNWAYML_API_SECRET}`,
+          headers: {
+            Authorization:
+              `Bearer ${process.env.RUNWAYML_API_SECRET}`,
 
-          "X-Runway-Version":
-            RUNWAY_VERSION,
-        },
+            "X-Runway-Version":
+              RUNWAY_VERSION,
+          },
 
-        cache: "no-store",
-      }
-    );
+          cache: "no-store",
+        }
+      );
 
     let result = null;
 
     try {
-      result = await response.json();
+      result =
+        await response.json();
     } catch {
       result = null;
     }
@@ -157,7 +360,8 @@ export async function POST(request) {
       const providerMessage =
         result?.error ||
         result?.message ||
-        result?.issues?.[0]?.message ||
+        result?.issues?.[0]
+          ?.message ||
         `HTTP ${response.status}`;
 
       throw new Error(
@@ -183,7 +387,9 @@ export async function POST(request) {
       } = await supabase
         .from("ad_videos")
         .update({
-          status: "processing",
+          status:
+            "processing",
+
           updated_at:
             new Date().toISOString(),
         })
@@ -193,10 +399,20 @@ export async function POST(request) {
         throw updateError;
       }
 
+      // نضمن بقاء سجل AI Usage بحالة processing
+      await updateVideoUsage({
+        video,
+        status:
+          "processing",
+        providerStatus:
+          runwayStatus,
+      });
+
       return NextResponse.json({
         success: true,
 
-        status: "processing",
+        status:
+          "processing",
 
         provider_status:
           runwayStatus,
@@ -221,7 +437,8 @@ export async function POST(request) {
         "فشل إنشاء الفيديو.";
 
       const finalStatus =
-        runwayStatus === "CANCELLED"
+        runwayStatus ===
+        "CANCELLED"
           ? "cancelled"
           : "failed";
 
@@ -230,10 +447,13 @@ export async function POST(request) {
       } = await supabase
         .from("ad_videos")
         .update({
-          status: finalStatus,
+          status:
+            finalStatus,
 
           error_message:
-            String(errorMessage),
+            String(
+              errorMessage
+            ),
 
           error_code:
             runwayStatus,
@@ -247,16 +467,32 @@ export async function POST(request) {
         throw updateError;
       }
 
+      // تحديث سجل تكلفة الذكاء الاصطناعي
+      await updateVideoUsage({
+        video,
+        status:
+          finalStatus,
+        providerStatus:
+          runwayStatus,
+        errorMessage:
+          String(
+            errorMessage
+          ),
+      });
+
       return NextResponse.json({
         success: true,
 
-        status: finalStatus,
+        status:
+          finalStatus,
 
         provider_status:
           runwayStatus,
 
         error:
-          String(errorMessage),
+          String(
+            errorMessage
+          ),
       });
     }
 
@@ -265,10 +501,13 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      runwayStatus === "SUCCEEDED"
+      runwayStatus ===
+      "SUCCEEDED"
     ) {
       const outputUrl =
-        Array.isArray(result?.output)
+        Array.isArray(
+          result?.output
+        )
           ? result.output[0]
           : result?.output;
 
@@ -283,7 +522,9 @@ export async function POST(request) {
       // ---------------------------------------
 
       const videoResponse =
-        await fetch(outputUrl);
+        await fetch(
+          outputUrl
+        );
 
       if (!videoResponse.ok) {
         throw new Error(
@@ -343,13 +584,16 @@ export async function POST(request) {
         data: publicUrlData,
       } =
         supabase.storage
-          .from("ad-videos")
+          .from(
+            "ad-videos"
+          )
           .getPublicUrl(
             filePath
           );
 
       const finalVideoUrl =
-        publicUrlData?.publicUrl;
+        publicUrlData
+          ?.publicUrl;
 
       if (!finalVideoUrl) {
         throw new Error(
@@ -401,13 +645,29 @@ export async function POST(request) {
       }
 
       // ---------------------------------------
+      // تحديث سجل AI Usage
+      // ---------------------------------------
+
+      await updateVideoUsage({
+        video:
+          completedVideo,
+
+        status:
+          "completed",
+
+        providerStatus:
+          runwayStatus,
+      });
+
+      // ---------------------------------------
       // النتيجة النهائية
       // ---------------------------------------
 
       return NextResponse.json({
         success: true,
 
-        status: "completed",
+        status:
+          "completed",
 
         video_url:
           completedVideo.video_url,
@@ -424,7 +684,8 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
 
-      status: video.status,
+      status:
+        video.status,
 
       provider_status:
         runwayStatus,
@@ -439,7 +700,7 @@ export async function POST(request) {
     );
 
     // -----------------------------------------
-    // تسجيل الخطأ
+    // تسجيل الخطأ في الفيديو
     // -----------------------------------------
 
     if (videoId) {
@@ -447,7 +708,8 @@ export async function POST(request) {
         await supabase
           .from("ad_videos")
           .update({
-            status: "failed",
+            status:
+              "failed",
 
             error_message:
               error?.message ||
@@ -459,7 +721,43 @@ export async function POST(request) {
             updated_at:
               new Date().toISOString(),
           })
-          .eq("id", videoId);
+          .eq(
+            "id",
+            videoId
+          );
+
+        // -------------------------------------
+        // تسجيل الخطأ في AI Usage
+        // -------------------------------------
+
+        const {
+          data: failedVideo,
+        } =
+          await supabase
+            .from("ad_videos")
+            .select("*")
+            .eq(
+              "id",
+              videoId
+            )
+            .maybeSingle();
+
+        if (failedVideo) {
+          await updateVideoUsage({
+            video:
+              failedVideo,
+
+            status:
+              "failed",
+
+            providerStatus:
+              "STATUS_ERROR",
+
+            errorMessage:
+              error?.message ||
+              "فشل فحص حالة الفيديو.",
+          });
+        }
       } catch (updateError) {
         console.error(
           "VIDEO STATUS DB ERROR:",
