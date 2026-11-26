@@ -224,6 +224,52 @@ export default function ProductsPage() {
           </div>
         )}
 
+        {/* Status Guide */}
+        {products.length > 0 && (
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "16px",
+              padding: "15px 18px",
+              marginBottom: "20px",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            <div
+              style={{
+                fontWeight: "bold",
+                marginBottom: "9px",
+                color: "#111827",
+              }}
+            >
+              حالة المنتجات
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              <StatusBadge
+                text="🟢 واضح / موثّق"
+                type="clear"
+              />
+
+              <StatusBadge
+                text="🟡 معلومات غير واضحة"
+                type="review"
+              />
+
+              <StatusBadge
+                text="🔴 مقفل"
+                type="locked"
+              />
+            </div>
+          </div>
+        )}
+
         {/* Empty */}
         {products.length === 0 ? (
           <div
@@ -305,8 +351,24 @@ function ProductCard({ product, onDelete }) {
     product.verification_status === "locked" ||
     product.safety_status === "locked";
 
+  const isUnclear = isProductUnclear(product);
+
   const isCompleted =
     product.ai_status === "completed";
+
+  const isVerified =
+    product.verification_status === "verified";
+
+  let statusText = "🟡 معلومات غير واضحة";
+  let statusType = "review";
+
+  if (isLocked) {
+    statusText = "🔴 مقفل";
+    statusType = "locked";
+  } else if (isVerified && !isUnclear) {
+    statusText = "🟢 واضح / موثّق";
+    statusType = "clear";
+  }
 
   return (
     <div
@@ -316,6 +378,8 @@ function ProductCard({ product, onDelete }) {
         overflow: "hidden",
         border: isLocked
           ? "2px solid #dc2626"
+          : isUnclear
+          ? "2px solid #f59e0b"
           : "1px solid #e5e7eb",
         boxShadow:
           "0 5px 20px rgba(0,0,0,0.04)",
@@ -352,23 +416,18 @@ function ProductCard({ product, onDelete }) {
           </div>
         )}
 
-        {isLocked && (
-          <div
-            style={{
-              position: "absolute",
-              top: "12px",
-              right: "12px",
-              background: "#dc2626",
-              color: "#ffffff",
-              padding: "7px 10px",
-              borderRadius: "10px",
-              fontSize: "13px",
-              fontWeight: "bold",
-            }}
-          >
-            🔒 مقفل
-          </div>
-        )}
+        <div
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+          }}
+        >
+          <StatusBadge
+            text={statusText}
+            type={statusType}
+          />
+        </div>
       </div>
 
       {/* Content */}
@@ -417,45 +476,104 @@ function ProductCard({ product, onDelete }) {
                 marginBottom: "12px",
               }}
             >
-              {product.price} AED
+              {product.price}{" "}
+              {product.currency || "AED"}
             </div>
           )}
 
+        {/* AI / Verification */}
         <div
           style={{
             display: "flex",
             gap: "7px",
             flexWrap: "wrap",
-            marginBottom: "16px",
+            marginBottom: "12px",
           }}
         >
           <StatusBadge
             text={
               isCompleted
-                ? "✓ مكتمل"
-                : "⏳ قيد المعالجة"
+                ? "✓ تحليل AI مكتمل"
+                : "⏳ تحليل AI"
             }
-            success={isCompleted}
+            type={
+              isCompleted
+                ? "clear"
+                : "review"
+            }
           />
 
-          {product.verification_status && (
-            <StatusBadge
-              text={
-                product.verification_status ===
-                "verified"
-                  ? "✓ موثّق"
-                  : product.verification_status ===
-                    "locked"
-                  ? "🔒 مقفل"
-                  : "مراجعة"
-              }
-              success={
-                product.verification_status ===
-                "verified"
-              }
-            />
+          {product.product_type && (
+            <span
+              style={{
+                display: "inline-block",
+                padding: "5px 8px",
+                borderRadius: "8px",
+                background: "#f3f4f6",
+                color: "#4b5563",
+                fontSize: "12px",
+                fontWeight: "bold",
+              }}
+            >
+              {product.product_type ===
+              "imported"
+                ? "مستورد"
+                : "محلي"}
+            </span>
           )}
         </div>
+
+        {/* Responsibility notice */}
+        {isUnclear && !isLocked && (
+          <div
+            style={{
+              background: "#fff8e1",
+              border: "1px solid #f0d98a",
+              borderRadius: "12px",
+              padding: "11px",
+              marginBottom: "14px",
+              color: "#7c5a00",
+              fontSize: "13px",
+              lineHeight: "1.7",
+            }}
+          >
+            ⚠️ المعلومات غير مكتملة أو غير
+            واضحة.
+            <br />
+            عند استخدام المنتج للتسويق أو التصميم،
+            سيطلب منك تأكيد مسؤوليتك عنه.
+          </div>
+        )}
+
+        {/* Locked notice */}
+        {isLocked && (
+          <div
+            style={{
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "12px",
+              padding: "11px",
+              marginBottom: "14px",
+              color: "#991b1b",
+              fontSize: "13px",
+              lineHeight: "1.7",
+            }}
+          >
+            🔒 هذا المنتج مقفل حاليًا.
+            <br />
+            لا يمكن استخدامه في التسويق أو
+            التصاميم حتى تتم مراجعته.
+            {product.safety_reason && (
+              <>
+                <br />
+                <strong>
+                  السبب:
+                </strong>{" "}
+                {product.safety_reason}
+              </>
+            )}
+          </div>
+        )}
 
         {/* Buttons */}
         <div
@@ -498,21 +616,39 @@ function ProductCard({ product, onDelete }) {
           </Link>
 
           {!isLocked && (
-            <Link
-              href={`/marketing/${product.id}`}
-              style={{
-                textDecoration: "none",
-                textAlign: "center",
-                padding: "11px 8px",
-                borderRadius: "10px",
-                background: "#111827",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "bold",
-              }}
-            >
-              🚀 التسويق
-            </Link>
+            <>
+              <Link
+                href={`/marketing/${product.id}`}
+                style={{
+                  textDecoration: "none",
+                  textAlign: "center",
+                  padding: "11px 8px",
+                  borderRadius: "10px",
+                  background: "#111827",
+                  color: "#ffffff",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                }}
+              >
+                🚀 التسويق
+              </Link>
+
+              <Link
+                href="/designs"
+                style={{
+                  textDecoration: "none",
+                  textAlign: "center",
+                  padding: "11px 8px",
+                  borderRadius: "10px",
+                  background: "#111827",
+                  color: "#ffffff",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                }}
+              >
+                🎨 التصميم
+              </Link>
+            </>
           )}
 
           <button
@@ -527,9 +663,10 @@ function ProductCard({ product, onDelete }) {
               fontSize: "13px",
               fontWeight: "bold",
               cursor: "pointer",
+              gridColumn: "1 / -1",
             }}
           >
-            🗑️ حذف
+            🗑️ حذف المنتج
           </button>
         </div>
       </div>
@@ -537,19 +674,69 @@ function ProductCard({ product, onDelete }) {
   );
 }
 
-function StatusBadge({ text, success }) {
+function isProductUnclear(product) {
+  if (!product) {
+    return true;
+  }
+
+  if (
+    product.verification_status === "review" ||
+    product.verification_status === "unverified"
+  ) {
+    return true;
+  }
+
+  if (
+    product.confidence === "low" ||
+    product.confidence === "منخفض" ||
+    product.confidence === "medium" ||
+    product.confidence === "متوسط"
+  ) {
+    return true;
+  }
+
+  if (
+    product.name &&
+    (!product.brand ||
+      !product.category ||
+      !product.description)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function StatusBadge({ text, type }) {
+  const styles = {
+    clear: {
+      background: "#ecfdf5",
+      color: "#047857",
+      border: "1px solid #a7f3d0",
+    },
+    review: {
+      background: "#fff7ed",
+      color: "#c2410c",
+      border: "1px solid #fed7aa",
+    },
+    locked: {
+      background: "#fef2f2",
+      color: "#b91c1c",
+      border: "1px solid #fecaca",
+    },
+  };
+
+  const style = styles[type] || styles.review;
+
   return (
     <span
       style={{
         display: "inline-block",
-        padding: "5px 8px",
-        borderRadius: "8px",
-        background: success
-          ? "#ecfdf5"
-          : "#fff7ed",
-        color: success
-          ? "#047857"
-          : "#c2410c",
+        padding: "6px 9px",
+        borderRadius: "9px",
+        background: style.background,
+        color: style.color,
+        border: style.border,
         fontSize: "12px",
         fontWeight: "bold",
       }}
