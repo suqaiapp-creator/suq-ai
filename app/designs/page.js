@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const supabase = createClient();
 
@@ -169,15 +169,7 @@ function IconBox({
         boxSizing: "border-box",
       }}
     >
-      <span
-        style={{
-          display: "block",
-          lineHeight: 1,
-          transform: "translateY(-1px)",
-        }}
-      >
-        {children}
-      </span>
+      {children}
     </div>
   );
 }
@@ -221,16 +213,7 @@ function StatusBadge({ type, children }) {
         lineHeight: 1.2,
       }}
     >
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          lineHeight: 1,
-        }}
-      >
-        {children}
-      </span>
+      {children}
     </span>
   );
 }
@@ -249,12 +232,27 @@ function isUnclear(product) {
 
   if (isLocked(product)) return false;
 
+  const verification = String(
+    product.verification_status || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  const confidence = String(
+    product.confidence || ""
+  )
+    .trim()
+    .toLowerCase();
+
   return (
-    product.verification_status === "review" ||
-    product.verification_status === "unverified" ||
+    verification === "review" ||
+    verification === "unverified" ||
+    verification === "pending" ||
     product.ai_status === "pending" ||
-    product.confidence === "low" ||
-    product.confidence === "medium" ||
+    confidence === "low" ||
+    confidence === "medium" ||
+    confidence === "منخفض" ||
+    confidence === "متوسط" ||
     !product.brand ||
     !product.category ||
     !product.description
@@ -322,6 +320,7 @@ function getDesignStatus(status) {
 
 export default function DesignsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -336,19 +335,14 @@ export default function DesignsPage() {
     useState("");
 
   const [mode, setMode] = useState("simple");
-
   const [selectedTemplate, setSelectedTemplate] =
     useState("product");
-
   const [selectedStyle, setSelectedStyle] =
     useState("modern");
-
   const [selectedBackground, setSelectedBackground] =
     useState("black");
-
   const [selectedFormat, setSelectedFormat] =
     useState("1:1");
-
   const [description, setDescription] =
     useState("");
 
@@ -357,6 +351,10 @@ export default function DesignsPage() {
 
   const [responsibilityAccepted, setResponsibilityAccepted] =
     useState(false);
+
+  const [search, setSearch] = useState("");
+  const [designFilter, setDesignFilter] =
+    useState("all");
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -380,6 +378,21 @@ export default function DesignsPage() {
   useEffect(() => {
     loadPage();
   }, []);
+
+  useEffect(() => {
+    const productFromUrl =
+      searchParams.get("product");
+
+    if (
+      productFromUrl &&
+      products.some(
+        (product) =>
+          product.id === productFromUrl
+      )
+    ) {
+      setSelectedProductId(productFromUrl);
+    }
+  }, [searchParams, products]);
 
   async function loadPage() {
     setLoading(true);
@@ -416,9 +429,7 @@ export default function DesignsPage() {
       }
 
       if (!shopData) {
-        setError(
-          "لم يتم العثور على المحل الخاص بالحساب."
-        );
+        router.replace("/setup-shop");
         return;
       }
 
@@ -441,10 +452,6 @@ export default function DesignsPage() {
 
       setProducts(productData || []);
 
-      if (productData?.length > 0) {
-        setSelectedProductId(productData[0].id);
-      }
-
       const {
         data: designData,
         error: designError,
@@ -454,27 +461,143 @@ export default function DesignsPage() {
         .eq("shop_id", shopData.id)
         .order("created_at", {
           ascending: false,
-        })
-        .limit(20);
+        });
 
-      if (!designError) {
-        setDesigns(designData || []);
-      } else {
-        console.error(
-          "DESIGNS FETCH ERROR:",
-          designError
+      if (designError) {
+        throw designError;
+      }
+
+      setDesigns(designData || []);
+
+      const productFromUrl =
+        searchParams.get("product");
+
+      if (
+        productFromUrl &&
+        productData?.some(
+          (product) =>
+            product.id === productFromUrl
+        )
+      ) {
+        setSelectedProductId(
+          productFromUrl
+        );
+      } else if (productData?.length) {
+        setSelectedProductId(
+          productData[0].id
         );
       }
     } catch (err) {
       console.error(err);
 
       setError(
-        "حدث خطأ أثناء تحميل صفحة التصميم."
+        err?.message ||
+          "حدث خطأ أثناء تحميل استوديو التصميم."
       );
     } finally {
       setLoading(false);
     }
   }
+
+  const filteredDesigns = useMemo(() => {
+    const query = search
+      .trim()
+      .toLowerCase();
+
+    return designs.filter((design) => {
+      const product = products.find(
+        (item) =>
+          item.id === design.product_id
+      );
+
+      const productName =
+        product?.name || "";
+
+      const productBrand =
+        product?.brand || "";
+
+      const matchesSearch =
+        !query ||
+        `${productName} ${productBrand} ${
+          design.format || ""
+        }`
+          .toLowerCase()
+          .includes(query);
+
+      if (!matchesSearch) {
+        return false;
+      }
+
+      if (designFilter === "completed") {
+        return design.status === "completed";
+      }
+
+      if (designFilter === "processing") {
+        return (
+          design.status === "processing" ||
+          design.status === "generating" ||
+          design.status === "pending"
+        );
+      }
+
+      if (designFilter === "failed") {
+        return design.status === "failed";
+      }
+
+      return true;
+    });
+  }, [
+    designs,
+    products,
+    search,
+    designFilter,
+  ]);
+
+  const designStats = useMemo(() => {
+    return {
+      total: designs.length,
+
+      completed: designs.filter(
+        (design) =>
+          design.status === "completed"
+      ).length,
+
+      processing: designs.filter(
+        (design) =>
+          design.status === "processing" ||
+          design.status === "generating" ||
+          design.status === "pending"
+      ).length,
+
+      failed: designs.filter(
+        (design) =>
+          design.status === "failed"
+      ).length,
+    };
+  }, [designs]);
+
+  const productStats = useMemo(() => {
+    return {
+      total: products.length,
+
+      ready: products.filter(
+        (product) =>
+          !isLocked(product) &&
+          !isUnclear(product)
+      ).length,
+
+      review: products.filter(
+        (product) =>
+          !isLocked(product) &&
+          isUnclear(product)
+      ).length,
+
+      locked: products.filter(
+        (product) =>
+          isLocked(product)
+      ).length,
+    };
+  }, [products]);
 
   async function checkResponsibilityAcceptance() {
     if (
@@ -562,7 +685,8 @@ export default function DesignsPage() {
       console.error(err);
 
       setError(
-        "تعذر حفظ تأكيد المسؤولية."
+        err?.message ||
+          "تعذر حفظ تأكيد المسؤولية."
       );
     } finally {
       setSaving(false);
@@ -580,7 +704,7 @@ export default function DesignsPage() {
 
     if (selectedProductLocked) {
       setError(
-        "هذا المنتج مقفل ولا يمكن استخدامه في التسويق أو التصميم حالياً."
+        "🔒 هذا المنتج مقفل ولا يمكن استخدامه في التصميم حالياً."
       );
       return;
     }
@@ -601,7 +725,7 @@ export default function DesignsPage() {
 
       if (!accepted) {
         setError(
-          "هذا المنتج يحتاج تأكيد مسؤولية المنتج قبل إنشاء التصميم."
+          "⚠️ هذا المنتج يحتاج تأكيد مسؤولية المنتج قبل إنشاء التصميم."
         );
 
         return;
@@ -654,24 +778,18 @@ export default function DesignsPage() {
           body: JSON.stringify({
             productId:
               selectedProduct.id,
-
             mode,
-
             template:
               mode === "simple"
                 ? selectedTemplate
                 : null,
-
             style:
               mode === "professional"
                 ? selectedStyle
                 : null,
-
             background:
               backgroundValue,
-
             format: selectedFormat,
-
             description:
               typeof description ===
               "string"
@@ -698,7 +816,7 @@ export default function DesignsPage() {
           );
 
           setError(
-            "يجب تأكيد مسؤولية المنتج قبل إنشاء التصميم."
+            "⚠️ يجب تأكيد مسؤولية المنتج قبل إنشاء التصميم."
           );
         } else {
           setError(
@@ -711,7 +829,7 @@ export default function DesignsPage() {
       }
 
       setMessage(
-        "تم إنشاء التصميم بنجاح."
+        "تم إرسال طلب التصميم بنجاح."
       );
 
       await loadPage();
@@ -722,7 +840,8 @@ export default function DesignsPage() {
       );
 
       setError(
-        "حدث خطأ أثناء إرسال طلب التصميم."
+        err?.message ||
+          "حدث خطأ أثناء إرسال طلب التصميم."
       );
     } finally {
       setSaving(false);
@@ -775,6 +894,7 @@ export default function DesignsPage() {
           padding: "24px 18px",
         }}
       >
+        {/* HEADER */}
         <header
           style={{
             display: "flex",
@@ -787,6 +907,25 @@ export default function DesignsPage() {
           }}
         >
           <div>
+            <button
+              type="button"
+              onClick={() =>
+                router.push("/dashboard")
+              }
+              style={{
+                border: 0,
+                background:
+                  "transparent",
+                padding: 0,
+                color: "#66736d",
+                cursor: "pointer",
+                fontSize: 13,
+                marginBottom: 8,
+              }}
+            >
+              ← لوحة التحكم
+            </button>
+
             <div
               style={{
                 color: "#15803d",
@@ -805,7 +944,7 @@ export default function DesignsPage() {
                 fontWeight: 900,
               }}
             >
-              🎨 استوديو التصميم
+              🎨 مركز التصاميم
             </h1>
 
             <p
@@ -815,7 +954,7 @@ export default function DesignsPage() {
                 fontSize: 15,
               }}
             >
-              حوّل منتجك إلى إعلان جاهز للنشر
+              أنشئ، تابع، وادِر تصاميم منتجاتك من مكان واحد.
             </p>
           </div>
 
@@ -835,10 +974,11 @@ export default function DesignsPage() {
               cursor: "pointer",
             }}
           >
-            ← المنتجات
+            📦 المنتجات
           </button>
         </header>
 
+        {/* الرسائل */}
         {error && (
           <div
             style={{
@@ -875,371 +1015,361 @@ export default function DesignsPage() {
           </div>
         )}
 
+        {/* الإحصائيات */}
         <div
-          className="design-layout"
           style={{
             display: "grid",
             gridTemplateColumns:
-              "minmax(0, 1.6fr) minmax(300px, .8fr)",
-            gap: 20,
-            alignItems: "start",
+              "repeat(auto-fit, minmax(145px, 1fr))",
+            gap: 12,
+            marginBottom: 20,
           }}
         >
-          <section>
-            {/* المنتج */}
+          <StatCard
+            icon="🎨"
+            title="إجمالي التصاميم"
+            value={designStats.total}
+          />
+
+          <StatCard
+            icon="✅"
+            title="مكتملة"
+            value={designStats.completed}
+          />
+
+          <StatCard
+            icon="⏳"
+            title="قيد الإنشاء"
+            value={designStats.processing}
+          />
+
+          <StatCard
+            icon="❌"
+            title="فشلت"
+            value={designStats.failed}
+          />
+
+          <StatCard
+            icon="📦"
+            title="المنتجات"
+            value={productStats.total}
+          />
+
+          <StatCard
+            icon="🔒"
+            title="منتجات مقفلة"
+            value={productStats.locked}
+          />
+        </div>
+
+        {/* مركز التحكم */}
+        <div
+          style={{
+            background: "#fff",
+            border:
+              "1px solid #e1e7e3",
+            borderRadius: 20,
+            padding: 18,
+            marginBottom: 20,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent:
+                "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 14,
+            }}
+          >
+            <div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 19,
+                }}
+              >
+                🗂️ تصاميم المحل
+              </h2>
+
+              <p
+                style={{
+                  margin:
+                    "6px 0 0",
+                  color:
+                    "#66736d",
+                  fontSize: 13,
+                }}
+              >
+                ابحث في التصاميم السابقة وتابع حالتها.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById(
+                    "design-generator"
+                  )
+                  ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  })
+              }
+              style={{
+                border: 0,
+                background:
+                  "#15803d",
+                color: "#fff",
+                borderRadius: 11,
+                padding:
+                  "11px 15px",
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              ➕ إنشاء تصميم
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 9,
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              value={search}
+              onChange={(e) =>
+                setSearch(
+                  e.target.value
+                )
+              }
+              placeholder="ابحث باسم المنتج أو البراند أو المقاس..."
+              style={{
+                flex:
+                  "1 1 280px",
+                minWidth: 220,
+                padding:
+                  "12px 14px",
+                borderRadius: 12,
+                border:
+                  "1px solid #cfd8d3",
+                outline: "none",
+                fontSize: 14,
+                boxSizing:
+                  "border-box",
+              }}
+            />
+
+            <FilterButton
+              active={
+                designFilter ===
+                "all"
+              }
+              onClick={() =>
+                setDesignFilter(
+                  "all"
+                )
+              }
+              text={`الكل (${designStats.total})`}
+            />
+
+            <FilterButton
+              active={
+                designFilter ===
+                "completed"
+              }
+              onClick={() =>
+                setDesignFilter(
+                  "completed"
+                )
+              }
+              text={`مكتمل (${designStats.completed})`}
+            />
+
+            <FilterButton
+              active={
+                designFilter ===
+                "processing"
+              }
+              onClick={() =>
+                setDesignFilter(
+                  "processing"
+                )
+              }
+              text={`قيد الإنشاء (${designStats.processing})`}
+            />
+
+            <FilterButton
+              active={
+                designFilter ===
+                "failed"
+              }
+              onClick={() =>
+                setDesignFilter(
+                  "failed"
+                )
+              }
+              text={`فشل (${designStats.failed})`}
+            />
+          </div>
+        </div>
+
+        {/* قائمة التصاميم */}
+        <section
+          style={{
+            marginBottom: 30,
+          }}
+        >
+          {filteredDesigns.length === 0 ? (
             <div
-              className="design-card"
               style={{
                 background: "#fff",
                 border:
                   "1px solid #e1e7e3",
                 borderRadius: 20,
-                padding: 20,
-                marginBottom: 18,
+                padding:
+                  "45px 20px",
+                textAlign:
+                  "center",
               }}
             >
+              <div
+                style={{
+                  fontSize: 50,
+                  marginBottom: 10,
+                }}
+              >
+                🎨
+              </div>
+
               <h2
                 style={{
-                  margin: "0 0 14px",
-                  fontSize: 19,
+                  margin:
+                    "0 0 8px",
                 }}
               >
-                1. اختر المنتج
+                لا توجد تصاميم
               </h2>
 
-              <select
-                value={
-                  selectedProductId
-                }
-                onChange={(e) =>
-                  handleProductChange(
-                    e.target.value
-                  )
-                }
+              <p
                 style={{
-                  width: "100%",
-                  padding: 14,
-                  borderRadius: 12,
-                  border:
-                    "1px solid #cfd8d3",
-                  fontSize: 15,
-                  background: "#fff",
-                  boxSizing:
-                    "border-box",
+                  margin: 0,
+                  color:
+                    "#66736d",
+                  lineHeight: 1.7,
                 }}
               >
-                {products.length === 0 && (
-                  <option value="">
-                    لا توجد منتجات
-                  </option>
-                )}
+                لم يتم العثور على تصاميم مطابقة للبحث أو الفلتر.
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fill, minmax(300px, 1fr))",
+                gap: 18,
+              }}
+            >
+              {filteredDesigns.map(
+                (design) => {
+                  const product =
+                    products.find(
+                      (item) =>
+                        item.id ===
+                        design.product_id
+                    );
 
-                {products.map(
-                  (product) => (
-                    <option
+                  const status =
+                    getDesignStatus(
+                      design.status
+                    );
+
+                  return (
+                    <DesignCard
                       key={
-                        product.id
+                        design.id
                       }
-                      value={
-                        product.id
+                      design={
+                        design
                       }
-                    >
-                      {product.name}
-                      {product.brand
-                        ? ` — ${product.brand}`
-                        : ""}
-                    </option>
-                  )
-                )}
-              </select>
-
-              {selectedProduct && (
-                <div
-                  style={{
-                    marginTop: 16,
-                    display: "flex",
-                    gap: 14,
-                    alignItems:
-                      "center",
-                    padding: 14,
-                    background:
-                      "#f8faf9",
-                    border:
-                      "1px solid #e6ebe8",
-                    borderRadius: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 82,
-                      height: 82,
-                      minWidth: 82,
-                      borderRadius: 14,
-                      background:
-                        "#fff",
-                      border:
-                        "1px solid #e1e7e3",
-                      overflow:
-                        "hidden",
-                      display:
-                        "flex",
-                      alignItems:
-                        "center",
-                      justifyContent:
-                        "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {selectedProduct.image_url ? (
-                      <img
-                        src={
-                          selectedProduct.image_url
-                        }
-                        alt={
-                          selectedProduct.name
-                        }
-                        style={{
-                          width:
-                            "100%",
-                          height:
-                            "100%",
-                          objectFit:
-                            "contain",
-                        }}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 28,
-                          lineHeight: 1,
-                        }}
-                      >
-                        📦
-                      </span>
-                    )}
-                  </div>
-
-                  <div
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 900,
-                        fontSize: 17,
-                        marginBottom: 6,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {
-                        selectedProduct.name
+                      product={
+                        product
                       }
-                    </div>
-
-                    <div
-                      style={{
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                        marginBottom: 8,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {selectedProduct.brand ||
-                        "بدون علامة"}{" "}
-                      {selectedProduct.category
-                        ? `• ${selectedProduct.category}`
-                        : ""}
-                    </div>
-
-                    {(() => {
-                      const status =
-                        getProductStatus(
-                          selectedProduct
-                        );
-
-                      return (
-                        <StatusBadge
-                          type={
-                            status.type
-                          }
-                        >
-                          {status.icon}{" "}
-                          {status.text}
-                        </StatusBadge>
-                      );
-                    })()}
-                  </div>
-                </div>
+                      status={
+                        status
+                      }
+                      onOpen={() =>
+                        router.push(
+                          `/designs/${design.id}`
+                        )
+                      }
+                    />
+                  );
+                }
               )}
             </div>
+          )}
+        </section>
 
-            {/* نوع التصميم */}
-            <div
-              className="design-card"
+        {/* مولد التصميم */}
+        <section
+          id="design-generator"
+          style={{
+            scrollMarginTop: 20,
+          }}
+        >
+          <div
+            style={{
+              marginBottom: 15,
+            }}
+          >
+            <h2
               style={{
-                background: "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 20,
-                marginBottom: 18,
+                margin: 0,
+                fontSize: 23,
               }}
             >
-              <h2
-                style={{
-                  margin: "0 0 14px",
-                  fontSize: 19,
-                }}
-              >
-                2. نوع التصميم
-              </h2>
+              🚀 إنشاء تصميم جديد
+            </h2>
 
-              <div
-                className="mode-grid"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "1fr 1fr",
-                  gap: 12,
-                }}
-              >
-                <button
-                  onClick={() =>
-                    setMode("simple")
-                  }
-                  style={{
-                    textAlign: "right",
-                    padding: 16,
-                    borderRadius: 16,
-                    cursor: "pointer",
-                    background:
-                      mode === "simple"
-                        ? "#f0fdf4"
-                        : "#fff",
-                    border:
-                      mode === "simple"
-                        ? "2px solid #16a34a"
-                        : "1px solid #d9e1dc",
-                    display: "flex",
-                    alignItems:
-                      "flex-start",
-                    gap: 13,
-                    minHeight: 102,
-                    boxSizing:
-                      "border-box",
-                  }}
-                >
-                  <IconBox size={46}>
-                    ⚡
-                  </IconBox>
+            <p
+              style={{
+                margin:
+                  "6px 0 0",
+                color:
+                  "#66736d",
+                fontSize: 13,
+              }}
+            >
+              اختر المنتج ثم حدد نوع التصميم والمقاس.
+            </p>
+          </div>
 
-                  <div
-                    style={{
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 900,
-                        fontSize: 17,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      عادي وسريع
-                    </div>
-
-                    <div
-                      style={{
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                        marginTop: 5,
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      قوالب جاهزة وتصميم سريع
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() =>
-                    setMode(
-                      "professional"
-                    )
-                  }
-                  style={{
-                    textAlign: "right",
-                    padding: 16,
-                    borderRadius: 16,
-                    cursor: "pointer",
-                    background:
-                      mode ===
-                      "professional"
-                        ? "#f0fdf4"
-                        : "#fff",
-                    border:
-                      mode ===
-                      "professional"
-                        ? "2px solid #16a34a"
-                        : "1px solid #d9e1dc",
-                    display: "flex",
-                    alignItems:
-                      "flex-start",
-                    gap: 13,
-                    minHeight: 102,
-                    boxSizing:
-                      "border-box",
-                  }}
-                >
-                  <IconBox
-                    size={46}
-                    background="#f5f3ff"
-                    color="#6d28d9"
-                  >
-                    💎
-                  </IconBox>
-
-                  <div
-                    style={{
-                      minWidth: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 900,
-                        fontSize: 17,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      احترافي
-                    </div>
-
-                    <div
-                      style={{
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                        marginTop: 5,
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      وصف حر وتحكم أكبر بالتصميم
-                    </div>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* القوالب */}
-            {mode === "simple" && (
+          <div
+            className="design-layout"
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "minmax(0, 1.6fr) minmax(300px, .8fr)",
+              gap: 20,
+              alignItems:
+                "start",
+            }}
+          >
+            <section>
+              {/* المنتج */}
               <div
                 className="design-card"
                 style={{
-                  background: "#fff",
+                  background:
+                    "#fff",
                   border:
                     "1px solid #e1e7e3",
                   borderRadius: 20,
@@ -1249,719 +1379,110 @@ export default function DesignsPage() {
               >
                 <h2
                   style={{
-                    margin: "0 0 6px",
+                    margin:
+                      "0 0 14px",
                     fontSize: 19,
                   }}
                 >
-                  3. اختر قالباً
+                  1. اختر المنتج
                 </h2>
 
-                <p
-                  style={{
-                    color: "#66736d",
-                    fontSize: 13,
-                    margin: "0 0 16px",
-                    lineHeight: 1.7,
-                  }}
-                >
-                  اختر الشكل المناسب للإعلان بدون الحاجة لكتابة وصف طويل.
-                </p>
-
-                <div
-                  className="template-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(2, minmax(0, 1fr))",
-                    gap: 12,
-                  }}
-                >
-                  {TEMPLATES.map(
-                    (template) => {
-                      const active =
-                        selectedTemplate ===
-                        template.id;
-
-                      return (
-                        <button
-                          key={
-                            template.id
-                          }
-                          onClick={() =>
-                            setSelectedTemplate(
-                              template.id
-                            )
-                          }
-                          style={{
-                            textAlign:
-                              "right",
-                            background:
-                              active
-                                ? "#f0fdf4"
-                                : "#fff",
-                            border:
-                              active
-                                ? "2px solid #16a34a"
-                                : "1px solid #d9e1dc",
-                            borderRadius: 15,
-                            padding: 14,
-                            cursor:
-                              "pointer",
-                            display:
-                              "flex",
-                            alignItems:
-                              "flex-start",
-                            gap: 12,
-                            minHeight: 92,
-                            boxSizing:
-                              "border-box",
-                          }}
-                        >
-                          <IconBox
-                            size={44}
-                            background={
-                              active
-                                ? "#dcfce7"
-                                : "#f5f7f6"
-                            }
-                            color={
-                              active
-                                ? "#15803d"
-                                : "#4b6357"
-                            }
-                          >
-                            {
-                              template.icon
-                            }
-                          </IconBox>
-
-                          <div
-                            style={{
-                              minWidth: 0,
-                              flex: 1,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontWeight: 900,
-                                lineHeight:
-                                  1.4,
-                              }}
-                            >
-                              {
-                                template.title
-                              }
-                            </div>
-
-                            <div
-                              style={{
-                                color:
-                                  "#66736d",
-                                fontSize: 12,
-                                lineHeight:
-                                  1.6,
-                                marginTop: 4,
-                              }}
-                            >
-                              {
-                                template.description
-                              }
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* الاحترافي */}
-            {mode === "professional" && (
-              <div
-                className="design-card"
-                style={{
-                  background: "#fff",
-                  border:
-                    "1px solid #e1e7e3",
-                  borderRadius: 20,
-                  padding: 20,
-                  marginBottom: 18,
-                }}
-              >
-                <h2
-                  style={{
-                    margin: "0 0 6px",
-                    fontSize: 19,
-                  }}
-                >
-                  3. صمّم بالطريقة اللي تبيها
-                </h2>
-
-                <p
-                  style={{
-                    color: "#66736d",
-                    fontSize: 13,
-                    margin: "0 0 16px",
-                    lineHeight: 1.7,
-                  }}
-                >
-                  اكتب وصفك، والذكاء الاصطناعي يحوّله لاحقاً إلى تصميم إعلاني.
-                </p>
-
-                <textarea
-                  value={description}
+                <select
+                  value={
+                    selectedProductId
+                  }
                   onChange={(e) =>
-                    setDescription(
+                    handleProductChange(
                       e.target.value
                     )
                   }
-                  placeholder="مثال: أبغي خلفية سوداء فخمة، المنتج في المنتصف وواضح، إضاءة زرقاء خفيفة من الخلف، شعار المحل فوق، والسعر 299 درهم بشكل أنيق."
                   style={{
-                    width: "100%",
-                    minHeight: 150,
-                    resize: "vertical",
-                    padding: 15,
-                    borderRadius: 14,
+                    width:
+                      "100%",
+                    padding: 14,
+                    borderRadius: 12,
                     border:
                       "1px solid #cfd8d3",
                     fontSize: 15,
-                    lineHeight: 1.8,
+                    background:
+                      "#fff",
                     boxSizing:
                       "border-box",
-                    outline: "none",
-                    fontFamily:
-                      "inherit",
-                  }}
-                />
-
-                <div
-                  style={{
-                    marginTop: 18,
-                    fontWeight: 900,
-                    marginBottom: 10,
                   }}
                 >
-                  الستايل
-                </div>
-
-                <div
-                  className="style-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(3, minmax(0, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {STYLES.map(
-                    (style) => {
-                      const active =
-                        selectedStyle ===
-                        style.id;
-
-                      return (
-                        <button
-                          key={
-                            style.id
-                          }
-                          onClick={() =>
-                            setSelectedStyle(
-                              style.id
-                            )
-                          }
-                          style={{
-                            padding:
-                              "11px 10px",
-                            borderRadius: 12,
-                            cursor:
-                              "pointer",
-                            background:
-                              active
-                                ? "#f0fdf4"
-                                : "#fff",
-                            border:
-                              active
-                                ? "2px solid #16a34a"
-                                : "1px solid #d9e1dc",
-                            fontWeight: 800,
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            justifyContent:
-                              "center",
-                            gap: 7,
-                            minHeight: 45,
-                          }}
-                        >
-                          <span
-                            style={{
-                              display:
-                                "inline-flex",
-                              alignItems:
-                                "center",
-                              justifyContent:
-                                "center",
-                              lineHeight:
-                                1,
-                              fontSize: 17,
-                            }}
-                          >
-                            {
-                              style.icon
-                            }
-                          </span>
-
-                          <span>
-                            {
-                              style.title
-                            }
-                          </span>
-                        </button>
-                      );
-                    }
+                  {products.length ===
+                    0 && (
+                    <option value="">
+                      لا توجد منتجات
+                    </option>
                   )}
-                </div>
 
-                <div
-                  style={{
-                    marginTop: 18,
-                    fontWeight: 900,
-                    marginBottom: 10,
-                  }}
-                >
-                  الخلفية
-                </div>
-
-                <div
-                  className="background-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(3, minmax(0, 1fr))",
-                    gap: 10,
-                  }}
-                >
-                  {BACKGROUNDS.map(
-                    (background) => {
-                      const active =
-                        selectedBackground ===
-                        background.id;
-
-                      return (
-                        <button
-                          key={
-                            background.id
-                          }
-                          onClick={() =>
-                            setSelectedBackground(
-                              background.id
-                            )
-                          }
-                          style={{
-                            padding:
-                              "12px 10px",
-                            borderRadius: 12,
-                            cursor:
-                              "pointer",
-                            background:
-                              active
-                                ? "#f0fdf4"
-                                : "#fff",
-                            border:
-                              active
-                                ? "2px solid #16a34a"
-                                : "1px solid #d9e1dc",
-                            fontWeight: 800,
-                            minHeight: 45,
-                          }}
-                        >
-                          {
-                            background.title
-                          }
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* المقاسات */}
-            <div
-              className="design-card"
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 20,
-                marginBottom: 18,
-              }}
-            >
-              <h2
-                style={{
-                  margin: "0 0 14px",
-                  fontSize: 19,
-                }}
-              >
-                4. مقاس الإعلان
-              </h2>
-
-              <div
-                className="format-grid"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(2, minmax(0, 1fr))",
-                  gap: 10,
-                }}
-              >
-                {FORMATS.map(
-                  (format) => {
-                    const active =
-                      selectedFormat ===
-                      format.id;
-
-                    return (
-                      <button
+                  {products.map(
+                    (product) => (
+                      <option
                         key={
-                          format.id
+                          product.id
                         }
-                        onClick={() =>
-                          setSelectedFormat(
-                            format.id
-                          )
+                        value={
+                          product.id
                         }
-                        style={{
-                          textAlign:
-                            "right",
-                          padding: 13,
-                          borderRadius: 14,
-                          cursor:
-                            "pointer",
-                          background:
-                            active
-                              ? "#f0fdf4"
-                              : "#fff",
-                          border:
-                            active
-                              ? "2px solid #16a34a"
-                              : "1px solid #d9e1dc",
-                          display:
-                            "flex",
-                          alignItems:
-                            "center",
-                          gap: 12,
-                          minHeight: 72,
-                          boxSizing:
-                            "border-box",
-                        }}
                       >
-                        <IconBox
-                          size={42}
-                          background={
-                            active
-                              ? "#dcfce7"
-                              : "#f5f7f6"
-                          }
-                        >
-                          {
-                            format.icon
-                          }
-                        </IconBox>
+                        {
+                          product.name
+                        }
+                        {product.brand
+                          ? ` — ${product.brand}`
+                          : ""}
+                      </option>
+                    )
+                  )}
+                </select>
 
-                        <div
-                          style={{
-                            minWidth: 0,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontWeight: 900,
-                              lineHeight:
-                                1.4,
-                            }}
-                          >
-                            {
-                              format.title
-                            }
-                          </div>
-
-                          <div
-                            style={{
-                              color:
-                                "#66736d",
-                              fontSize: 12,
-                              marginTop: 3,
-                              lineHeight:
-                                1.5,
-                            }}
-                          >
-                            {
-                              format.description
-                            }
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  }
-                )}
-              </div>
-            </div>
-
-            {/* تأكيد المسؤولية */}
-            {selectedProductUnclear &&
-              selectedProduct && (
-                <div
-                  style={{
-                    background:
-                      "#fffbeb",
-                    border:
-                      "1px solid #fedf89",
-                    borderRadius: 18,
-                    padding: 18,
-                    marginBottom: 18,
-                  }}
-                >
-                  <div
-                    style={{
-                      display:
-                        "flex",
-                      alignItems:
-                        "flex-start",
-                      gap: 12,
-                    }}
-                  >
-                    <IconBox
-                      size={42}
-                      background="#fef3c7"
-                      color="#92400e"
-                    >
-                      🟡
-                    </IconBox>
-
-                    <div
-                      style={{
-                        minWidth: 0,
-                        flex: 1,
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 900,
-                          color:
-                            "#92400e",
-                          marginBottom: 7,
-                        }}
-                      >
-                        يحتاج تأكيد المنتج
-                      </div>
-
-                      <div
-                        style={{
-                          color:
-                            "#92400e",
-                          fontSize: 13,
-                          lineHeight: 1.8,
-                          marginBottom: 12,
-                        }}
-                      >
-                        بعض معلومات المنتج غير مكتملة أو لم يتم التحقق منها بشكل كافٍ. يمكنك المتابعة بعد تأكيد أنك مسؤول عن صحة معلومات المنتج ومشروعيته.
-                      </div>
-
-                      {!responsibilityAccepted ? (
-                        <button
-                          onClick={
-                            acceptResponsibility
-                          }
-                          disabled={
-                            saving
-                          }
-                          style={{
-                            background:
-                              "#15803d",
-                            color:
-                              "#fff",
-                            border: 0,
-                            borderRadius: 11,
-                            padding:
-                              "11px 15px",
-                            cursor:
-                              saving
-                                ? "not-allowed"
-                                : "pointer",
-                            fontWeight: 900,
-                          }}
-                        >
-                          {saving
-                            ? "جاري الحفظ..."
-                            : "أؤكد المسؤولية ويمكنني المتابعة"}
-                        </button>
-                      ) : (
-                        <StatusBadge type="ready">
-                          ✓ تم تأكيد المسؤولية
-                        </StatusBadge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-            {/* إنشاء التصميم */}
-            <button
-              onClick={createDesign}
-              disabled={
-                saving ||
-                !selectedProduct ||
-                selectedProductLocked ||
-                (selectedProductUnclear &&
-                  !responsibilityAccepted)
-              }
-              style={{
-                width: "100%",
-                border: 0,
-                borderRadius: 16,
-                padding: 17,
-                background:
-                  saving ||
-                  !selectedProduct ||
-                  selectedProductLocked ||
-                  (selectedProductUnclear &&
-                    !responsibilityAccepted)
-                    ? "#aab5ae"
-                    : "#15803d",
-                color: "#fff",
-                fontSize: 17,
-                fontWeight: 900,
-                cursor:
-                  saving ||
-                  !selectedProduct ||
-                  selectedProductLocked ||
-                  (selectedProductUnclear &&
-                    !responsibilityAccepted)
-                    ? "not-allowed"
-                    : "pointer",
-              }}
-            >
-              {saving
-                ? "جاري تجهيز التصميم..."
-                : "🎨 إنشاء التصميم"}
-            </button>
-          </section>
-
-          {/* الجانب */}
-          <aside>
-            {/* هوية المحل */}
-            <div
-              className="design-card"
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 18,
-                marginBottom: 18,
-              }}
-            >
-              <button
-                onClick={() =>
-                  setShowIdentity(
-                    !showIdentity
-                  )
-                }
-                style={{
-                  width: "100%",
-                  border: 0,
-                  background:
-                    "transparent",
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  alignItems:
-                    "center",
-                  cursor: "pointer",
-                  padding: 0,
-                  color:
-                    "#17201c",
-                }}
-              >
-                <span
-                  style={{
-                    fontWeight: 900,
-                    fontSize: 17,
-                    display:
-                      "flex",
-                    alignItems:
-                      "center",
-                    gap: 9,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 10,
-                      background:
-                        "#f0fdf4",
-                      display:
-                        "inline-flex",
-                      alignItems:
-                        "center",
-                      justifyContent:
-                        "center",
-                      fontSize: 18,
-                      flexShrink: 0,
-                    }}
-                  >
-                    🏪
-                  </span>
-
-                  <span>
-                    هوية المحل
-                  </span>
-                </span>
-
-                <span
-                  style={{
-                    fontSize: 18,
-                    lineHeight: 1,
-                    flexShrink: 0,
-                  }}
-                >
-                  {showIdentity
-                    ? "⌃"
-                    : "⌄"}
-                </span>
-              </button>
-
-              {showIdentity &&
-                shop && (
+                {selectedProduct && (
                   <div
                     style={{
                       marginTop: 16,
+                      display:
+                        "flex",
+                      gap: 14,
+                      alignItems:
+                        "center",
+                      padding: 14,
+                      background:
+                        "#f8faf9",
+                      border:
+                        "1px solid #e6ebe8",
+                      borderRadius: 16,
                     }}
                   >
-                    {shop.logo_url && (
-                      <div
-                        style={{
-                          width: 70,
-                          height: 70,
-                          borderRadius: 15,
-                          overflow:
-                            "hidden",
-                          border:
-                            "1px solid #e1e7e3",
-                          marginBottom: 12,
-                        }}
-                      >
+                    <div
+                      style={{
+                        width: 82,
+                        height: 82,
+                        minWidth: 82,
+                        borderRadius: 14,
+                        background:
+                          "#fff",
+                        border:
+                          "1px solid #e1e7e3",
+                        overflow:
+                          "hidden",
+                        display:
+                          "flex",
+                        alignItems:
+                          "center",
+                        justifyContent:
+                          "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {selectedProduct.image_url ? (
                         <img
                           src={
-                            shop.logo_url
+                            selectedProduct.image_url
                           }
                           alt={
-                            shop.name
+                            selectedProduct.name
                           }
                           style={{
                             width:
@@ -1972,708 +1493,849 @@ export default function DesignsPage() {
                               "contain",
                           }}
                         />
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: 28,
+                          }}
+                        >
+                          📦
+                        </span>
+                      )}
+                    </div>
+
+                    <div
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: 900,
+                          fontSize: 17,
+                          marginBottom: 6,
+                        }}
+                      >
+                        {
+                          selectedProduct.name
+                        }
                       </div>
-                    )}
 
-                    <div
-                      style={{
-                        fontWeight: 900,
-                        fontSize: 18,
-                        lineHeight: 1.4,
-                      }}
-                    >
-                      {
-                        shop.name
-                      }
-                    </div>
+                      <div
+                        style={{
+                          color:
+                            "#66736d",
+                          fontSize: 13,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {selectedProduct.brand ||
+                          "بدون علامة"}{" "}
+                        {selectedProduct.category
+                          ? `• ${selectedProduct.category}`
+                          : ""}
+                      </div>
 
-                    <div
-                      style={{
-                        marginTop: 12,
-                        display: "grid",
-                        gap: 8,
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                      }}
-                    >
-                      {shop.phone && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            ☎️
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
+                      {(() => {
+                        const status =
+                          getProductStatus(
+                            selectedProduct
+                          );
+
+                        return (
+                          <StatusBadge
+                            type={
+                              status.type
+                            }
                           >
                             {
-                              shop.phone
-                            }
-                          </span>
-                        </div>
-                      )}
-
-                      {shop.whatsapp && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            💬
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
-                          >
+                              status.icon
+                            }{" "}
                             {
-                              shop.whatsapp
+                              status.text
                             }
-                          </span>
-                        </div>
-                      )}
-
-                      {shop.instagram && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            📸
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
-                          >
-                            {
-                              shop.instagram
-                            }
-                          </span>
-                        </div>
-                      )}
-
-                      {shop.tiktok && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            🎵
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
-                          >
-                            {
-                              shop.tiktok
-                            }
-                          </span>
-                        </div>
-                      )}
-
-                      {shop.snapchat && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            👻
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
-                          >
-                            {
-                              shop.snapchat
-                            }
-                          </span>
-                        </div>
-                      )}
-
-                      {shop.website && (
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap: 8,
-                            minWidth: 0,
-                          }}
-                        >
-                          <span>
-                            🌐
-                          </span>
-                          <span
-                            style={{
-                              overflow:
-                                "hidden",
-                              textOverflow:
-                                "ellipsis",
-                            }}
-                          >
-                            {
-                              shop.website
-                            }
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: 14,
-                        padding: 10,
-                        background:
-                          "#f0fdf4",
-                        color:
-                          "#166534",
-                        borderRadius: 11,
-                        fontSize: 12,
-                        lineHeight: 1.7,
-                      }}
-                    >
-                      سيتم استخدام هوية المحل تلقائياً في التصميم عندما تكون البيانات متوفرة.
+                          </StatusBadge>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}
-            </div>
+              </div>
 
-            {/* قواعد التصميم */}
-            <div
-              className="design-card"
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 18,
-                marginBottom: 18,
-              }}
-            >
-              <h3
-                style={{
-                  margin: "0 0 14px",
-                  fontSize: 17,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                }}
-              >
-                <span
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    background:
-                      "#eff6ff",
-                    display:
-                      "inline-flex",
-                    alignItems:
-                      "center",
-                    justifyContent:
-                      "center",
-                    fontSize: 17,
-                    flexShrink: 0,
-                  }}
-                >
-                  🛡️
-                </span>
-
-                <span>
-                  قواعد التصميم
-                </span>
-              </h3>
-
+              {/* نوع التصميم */}
               <div
+                className="design-card"
                 style={{
-                  display: "grid",
-                  gap: 11,
-                  color: "#56625c",
-                  fontSize: 13,
-                  lineHeight: 1.6,
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 20,
+                  marginBottom: 18,
                 }}
               >
-                <div
+                <h2
                   style={{
-                    display:
-                      "flex",
-                    gap: 8,
-                    alignItems:
-                      "flex-start",
+                    margin:
+                      "0 0 14px",
+                    fontSize: 19,
                   }}
                 >
-                  <span
-                    style={{
-                      color:
-                        "#15803d",
-                      fontWeight: 900,
-                    }}
-                  >
-                    ✓
-                  </span>
-
-                  <span>
-                    المنتج هو محور الإعلان
-                  </span>
-                </div>
+                  2. نوع التصميم
+                </h2>
 
                 <div
+                  className="mode-grid"
                   style={{
                     display:
-                      "flex",
-                    gap: 8,
-                    alignItems:
-                      "flex-start",
+                      "grid",
+                    gridTemplateColumns:
+                      "1fr 1fr",
+                    gap: 12,
                   }}
                 >
-                  <span
-                    style={{
-                      color:
-                        "#15803d",
-                      fontWeight: 900,
-                    }}
-                  >
-                    ✓
-                  </span>
+                  <ModeButton
+                    active={
+                      mode ===
+                      "simple"
+                    }
+                    onClick={() =>
+                      setMode(
+                        "simple"
+                      )
+                    }
+                    icon="⚡"
+                    title="عادي وسريع"
+                    description="قوالب جاهزة وتصميم سريع"
+                  />
 
-                  <span>
-                    الحفاظ على هوية المنتج الأصلية
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    gap: 8,
-                    alignItems:
-                      "flex-start",
-                  }}
-                >
-                  <span
-                    style={{
-                      color:
-                        "#15803d",
-                      fontWeight: 900,
-                    }}
-                  >
-                    ✓
-                  </span>
-
-                  <span>
-                    عدم اختراع معلومات عن المنتج
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    gap: 8,
-                    alignItems:
-                      "flex-start",
-                  }}
-                >
-                  <span
-                    style={{
-                      color:
-                        "#15803d",
-                      fontWeight: 900,
-                    }}
-                  >
-                    ✓
-                  </span>
-
-                  <span>
-                    استخدام هوية المحل
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    gap: 8,
-                    alignItems:
-                      "flex-start",
-                  }}
-                >
-                  <span
-                    style={{
-                      color:
-                        "#15803d",
-                      fontWeight: 900,
-                    }}
-                  >
-                    ✓
-                  </span>
-
-                  <span>
-                    التصميم موجه للإعلان والنشر
-                  </span>
+                  <ModeButton
+                    active={
+                      mode ===
+                      "professional"
+                    }
+                    onClick={() =>
+                      setMode(
+                        "professional"
+                      )
+                    }
+                    icon="💎"
+                    title="احترافي"
+                    description="وصف حر وتحكم أكبر بالتصميم"
+                  />
                 </div>
               </div>
-            </div>
 
-            {/* آخر التصاميم */}
-            <div
-              className="design-card"
-              style={{
-                background: "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 18,
-              }}
-            >
-              <h3
-                style={{
-                  margin: "0 0 14px",
-                  fontSize: 17,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 9,
-                }}
-              >
-                <span
+              {/* القوالب */}
+              {mode ===
+                "simple" && (
+                <div
+                  className="design-card"
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
                     background:
-                      "#f5f3ff",
-                    display:
-                      "inline-flex",
-                    alignItems:
-                      "center",
-                    justifyContent:
-                      "center",
-                    fontSize: 17,
-                    flexShrink: 0,
+                      "#fff",
+                    border:
+                      "1px solid #e1e7e3",
+                    borderRadius: 20,
+                    padding: 20,
+                    marginBottom: 18,
                   }}
                 >
-                  🗂️
-                </span>
+                  <h2
+                    style={{
+                      margin:
+                        "0 0 6px",
+                      fontSize: 19,
+                    }}
+                  >
+                    3. اختر قالباً
+                  </h2>
 
-                <span>
-                  آخر التصاميم
-                </span>
-              </h3>
+                  <p
+                    style={{
+                      color:
+                        "#66736d",
+                      fontSize: 13,
+                      margin:
+                        "0 0 16px",
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    اختر الشكل المناسب للإعلان.
+                  </p>
 
-              {designs.length === 0 ? (
-                <div
-                  style={{
-                    color: "#7a857f",
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                  }}
-                >
-                  لا توجد تصاميم حتى الآن.
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 14,
-                  }}
-                >
-                  {designs
-                    .slice(0, 8)
-                    .map((design) => {
-                      const status =
-                        getDesignStatus(
-                          design.status
+                  <div
+                    className="template-grid"
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(2, minmax(0, 1fr))",
+                      gap: 12,
+                    }}
+                  >
+                    {TEMPLATES.map(
+                      (
+                        template
+                      ) => {
+                        const active =
+                          selectedTemplate ===
+                          template.id;
+
+                        return (
+                          <ChoiceButton
+                            key={
+                              template.id
+                            }
+                            active={
+                              active
+                            }
+                            onClick={() =>
+                              setSelectedTemplate(
+                                template.id
+                              )
+                            }
+                            icon={
+                              template.icon
+                            }
+                            title={
+                              template.title
+                            }
+                            description={
+                              template.description
+                            }
+                          />
                         );
-
-                      const product =
-                        products.find(
-                          (item) =>
-                            item.id ===
-                            design.product_id
-                        );
-
-                      return (
-                        <div
-                          key={
-                            design.id
-                          }
-                          style={{
-                            border:
-                              "1px solid #e5ebe7",
-                            borderRadius: 16,
-                            overflow:
-                              "hidden",
-                            background:
-                              "#fff",
-                          }}
-                        >
-                          {/* صورة التصميم */}
-                          {design.status ===
-                            "completed" &&
-                          design.image_url ? (
-                            <div
-                              style={{
-                                width:
-                                  "100%",
-                                background:
-                                  "#f5f7f6",
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "center",
-                                alignItems:
-                                  "center",
-                                padding: 10,
-                                boxSizing:
-                                  "border-box",
-                              }}
-                            >
-                              <img
-                                src={
-                                  design.image_url
-                                }
-                                alt={
-                                  product?.name ||
-                                  "التصميم"
-                                }
-                                style={{
-                                  display:
-                                    "block",
-                                  width:
-                                    "100%",
-                                  maxHeight: 420,
-                                  objectFit:
-                                    "contain",
-                                  borderRadius: 10,
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <div
-                              style={{
-                                minHeight:
-                                  180,
-                                background:
-                                  "#f8faf9",
-                                display:
-                                  "flex",
-                                alignItems:
-                                  "center",
-                                justifyContent:
-                                  "center",
-                                color:
-                                  "#7a857f",
-                                fontSize: 13,
-                              }}
-                            >
-                              {design.status ===
-                              "failed"
-                                ? "تعذر إنشاء التصميم"
-                                : "جاري تجهيز التصميم..."}
-                            </div>
-                          )}
-
-                          {/* معلومات التصميم */}
-                          <div
-                            style={{
-                              padding: 13,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontWeight: 900,
-                                fontSize: 14,
-                                marginBottom: 8,
-                                lineHeight:
-                                  1.5,
-                              }}
-                            >
-                              {product?.name ||
-                                "منتج"}
-                            </div>
-
-                            <div
-                              style={{
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "space-between",
-                                alignItems:
-                                  "center",
-                                gap: 8,
-                                flexWrap:
-                                  "wrap",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  color:
-                                    "#66736d",
-                                  fontSize: 12,
-                                }}
-                              >
-                                مقاس{" "}
-                                {design.format ||
-                                  "1:1"}
-                              </span>
-
-                              <StatusBadge
-                                type={
-                                  status.type
-                                }
-                              >
-                                {
-                                  status.icon
-                                }{" "}
-                                {
-                                  status.text
-                                }
-                              </StatusBadge>
-                            </div>
-
-                            {/* أزرار التصميم */}
-                            {design.status ===
-                              "completed" &&
-                              design.image_url && (
-                                <div
-                                  style={{
-                                    display:
-                                      "flex",
-                                    gap: 8,
-                                    marginTop: 12,
-                                  }}
-                                >
-                                  {/* مهم:
-                                      يفتح صفحة تفاصيل التصميم
-                                      بدلاً من فتح رابط الصورة مباشرة */}
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      router.push(
-                                        `/designs/${design.id}`
-                                      )
-                                    }
-                                    style={{
-                                      flex: 1,
-                                      textAlign:
-                                        "center",
-                                      background:
-                                        "#15803d",
-                                      color:
-                                        "#fff",
-                                      border:
-                                        "none",
-                                      borderRadius: 10,
-                                      padding:
-                                        "10px 12px",
-                                      fontSize: 13,
-                                      fontWeight: 900,
-                                      cursor:
-                                        "pointer",
-                                    }}
-                                  >
-                                    👁️ عرض التصميم
-                                  </button>
-
-                                  <a
-                                    href={
-                                      design.image_url
-                                    }
-                                    download
-                                    style={{
-                                      flex: 1,
-                                      textAlign:
-                                        "center",
-                                      textDecoration:
-                                        "none",
-                                      background:
-                                        "#f0fdf4",
-                                      color:
-                                        "#166534",
-                                      border:
-                                        "1px solid #bbf7d0",
-                                      borderRadius: 10,
-                                      padding:
-                                        "10px 12px",
-                                      fontSize: 13,
-                                      fontWeight: 900,
-                                    }}
-                                  >
-                                    ⬇️ تحميل
-                                  </a>
-                                </div>
-                              )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                      }
+                    )}
+                  </div>
                 </div>
               )}
-            </div>
-          </aside>
-        </div>
+
+              {/* الاحترافي */}
+              {mode ===
+                "professional" && (
+                <div
+                  className="design-card"
+                  style={{
+                    background:
+                      "#fff",
+                    border:
+                      "1px solid #e1e7e3",
+                    borderRadius: 20,
+                    padding: 20,
+                    marginBottom: 18,
+                  }}
+                >
+                  <h2
+                    style={{
+                      margin:
+                        "0 0 6px",
+                      fontSize: 19,
+                    }}
+                  >
+                    3. إعداد التصميم
+                  </h2>
+
+                  <textarea
+                    value={
+                      description
+                    }
+                    onChange={(e) =>
+                      setDescription(
+                        e.target.value
+                      )
+                    }
+                    placeholder="مثال: أبغي خلفية سوداء فخمة، المنتج في المنتصف وواضح، إضاءة زرقاء خفيفة من الخلف، شعار المحل فوق، والسعر 299 درهم بشكل أنيق."
+                    style={{
+                      width:
+                        "100%",
+                      minHeight: 150,
+                      resize:
+                        "vertical",
+                      padding: 15,
+                      borderRadius: 14,
+                      border:
+                        "1px solid #cfd8d3",
+                      fontSize: 15,
+                      lineHeight: 1.8,
+                      boxSizing:
+                        "border-box",
+                      fontFamily:
+                        "inherit",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      marginTop: 18,
+                      fontWeight: 900,
+                      marginBottom: 10,
+                    }}
+                  >
+                    الستايل
+                  </div>
+
+                  <div
+                    className="style-grid"
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(3, minmax(0, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {STYLES.map(
+                      (style) => {
+                        const active =
+                          selectedStyle ===
+                          style.id;
+
+                        return (
+                          <button
+                            key={
+                              style.id
+                            }
+                            type="button"
+                            onClick={() =>
+                              setSelectedStyle(
+                                style.id
+                              )
+                            }
+                            style={{
+                              padding:
+                                "11px 10px",
+                              borderRadius: 12,
+                              cursor:
+                                "pointer",
+                              background:
+                                active
+                                  ? "#f0fdf4"
+                                  : "#fff",
+                              border:
+                                active
+                                  ? "2px solid #16a34a"
+                                  : "1px solid #d9e1dc",
+                              fontWeight: 800,
+                              minHeight: 45,
+                            }}
+                          >
+                            {
+                              style.icon
+                            }{" "}
+                            {
+                              style.title
+                            }
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 18,
+                      fontWeight: 900,
+                      marginBottom: 10,
+                    }}
+                  >
+                    الخلفية
+                  </div>
+
+                  <div
+                    className="background-grid"
+                    style={{
+                      display:
+                        "grid",
+                      gridTemplateColumns:
+                        "repeat(3, minmax(0, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {BACKGROUNDS.map(
+                      (
+                        background
+                      ) => {
+                        const active =
+                          selectedBackground ===
+                          background.id;
+
+                        return (
+                          <button
+                            key={
+                              background.id
+                            }
+                            type="button"
+                            onClick={() =>
+                              setSelectedBackground(
+                                background.id
+                              )
+                            }
+                            style={{
+                              padding:
+                                "12px 10px",
+                              borderRadius: 12,
+                              cursor:
+                                "pointer",
+                              background:
+                                active
+                                  ? "#f0fdf4"
+                                  : "#fff",
+                              border:
+                                active
+                                  ? "2px solid #16a34a"
+                                  : "1px solid #d9e1dc",
+                              fontWeight: 800,
+                              minHeight: 45,
+                            }}
+                          >
+                            {
+                              background.title
+                            }
+                          </button>
+                        );
+                      }
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* المقاس */}
+              <div
+                className="design-card"
+                style={{
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 20,
+                  marginBottom: 18,
+                }}
+              >
+                <h2
+                  style={{
+                    margin:
+                      "0 0 14px",
+                    fontSize: 19,
+                  }}
+                >
+                  4. مقاس الإعلان
+                </h2>
+
+                <div
+                  className="format-grid"
+                  style={{
+                    display:
+                      "grid",
+                    gridTemplateColumns:
+                      "repeat(2, minmax(0, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {FORMATS.map(
+                    (format) => {
+                      const active =
+                        selectedFormat ===
+                        format.id;
+
+                      return (
+                        <ChoiceButton
+                          key={
+                            format.id
+                          }
+                          active={
+                            active
+                          }
+                          onClick={() =>
+                            setSelectedFormat(
+                              format.id
+                            )
+                          }
+                          icon={
+                            format.icon
+                          }
+                          title={
+                            format.title
+                          }
+                          description={
+                            format.description
+                          }
+                        />
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+
+              {/* المسؤولية */}
+              {selectedProductUnclear &&
+                selectedProduct && (
+                  <div
+                    style={{
+                      background:
+                        "#fffbeb",
+                      border:
+                        "1px solid #fedf89",
+                      borderRadius: 18,
+                      padding: 18,
+                      marginBottom: 18,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display:
+                          "flex",
+                        alignItems:
+                          "flex-start",
+                        gap: 12,
+                      }}
+                    >
+                      <IconBox
+                        size={42}
+                        background="#fef3c7"
+                        color="#92400e"
+                      >
+                        🟡
+                      </IconBox>
+
+                      <div
+                        style={{
+                          flex: 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight: 900,
+                            color:
+                              "#92400e",
+                            marginBottom: 7,
+                          }}
+                        >
+                          يحتاج تأكيد المنتج
+                        </div>
+
+                        <div
+                          style={{
+                            color:
+                              "#92400e",
+                            fontSize: 13,
+                            lineHeight: 1.8,
+                            marginBottom: 12,
+                          }}
+                        >
+                          بعض معلومات المنتج غير مكتملة أو لم يتم التحقق منها بشكل كافٍ. يمكنك المتابعة بعد تأكيد مسؤوليتك عن صحة معلومات المنتج ومشروعيته.
+                        </div>
+
+                        {!responsibilityAccepted ? (
+                          <button
+                            type="button"
+                            onClick={
+                              acceptResponsibility
+                            }
+                            disabled={
+                              saving
+                            }
+                            style={{
+                              background:
+                                "#15803d",
+                              color:
+                                "#fff",
+                              border: 0,
+                              borderRadius: 11,
+                              padding:
+                                "11px 15px",
+                              cursor:
+                                saving
+                                  ? "not-allowed"
+                                  : "pointer",
+                              fontWeight: 900,
+                            }}
+                          >
+                            {saving
+                              ? "جاري الحفظ..."
+                              : "☑️ أؤكد المسؤولية ويمكنني المتابعة"}
+                          </button>
+                        ) : (
+                          <StatusBadge type="ready">
+                            ✓ تم تأكيد المسؤولية
+                          </StatusBadge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              {/* إنشاء */}
+              <button
+                type="button"
+                onClick={createDesign}
+                disabled={
+                  saving ||
+                  !selectedProduct ||
+                  selectedProductLocked ||
+                  (selectedProductUnclear &&
+                    !responsibilityAccepted)
+                }
+                style={{
+                  width: "100%",
+                  border: 0,
+                  borderRadius: 16,
+                  padding: 17,
+                  background:
+                    saving ||
+                    !selectedProduct ||
+                    selectedProductLocked ||
+                    (selectedProductUnclear &&
+                      !responsibilityAccepted)
+                      ? "#aab5ae"
+                      : "#15803d",
+                  color: "#fff",
+                  fontSize: 17,
+                  fontWeight: 900,
+                  cursor:
+                    saving ||
+                    !selectedProduct ||
+                    selectedProductLocked ||
+                    (selectedProductUnclear &&
+                      !responsibilityAccepted)
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                {saving
+                  ? "جاري تجهيز التصميم..."
+                  : "🎨 إنشاء التصميم"}
+              </button>
+            </section>
+
+            {/* الجانب */}
+            <aside>
+              {/* هوية المحل */}
+              <div
+                className="design-card"
+                style={{
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 18,
+                  marginBottom: 18,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowIdentity(
+                      !showIdentity
+                    )
+                  }
+                  style={{
+                    width: "100%",
+                    border: 0,
+                    background:
+                      "transparent",
+                    display:
+                      "flex",
+                    justifyContent:
+                      "space-between",
+                    alignItems:
+                      "center",
+                    cursor:
+                      "pointer",
+                    padding: 0,
+                    color:
+                      "#17201c",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 17,
+                    }}
+                  >
+                    🏪 هوية المحل
+                  </span>
+
+                  <span>
+                    {showIdentity
+                      ? "⌃"
+                      : "⌄"}
+                  </span>
+                </button>
+
+                {showIdentity &&
+                  shop && (
+                    <div
+                      style={{
+                        marginTop: 16,
+                      }}
+                    >
+                      {shop.logo_url && (
+                        <div
+                          style={{
+                            width: 70,
+                            height: 70,
+                            borderRadius: 15,
+                            overflow:
+                              "hidden",
+                            border:
+                              "1px solid #e1e7e3",
+                            marginBottom: 12,
+                          }}
+                        >
+                          <img
+                            src={
+                              shop.logo_url
+                            }
+                            alt={
+                              shop.name
+                            }
+                            style={{
+                              width:
+                                "100%",
+                              height:
+                                "100%",
+                              objectFit:
+                                "contain",
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          fontWeight: 900,
+                          fontSize: 18,
+                        }}
+                      >
+                        {shop.name}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display:
+                            "grid",
+                          gap: 8,
+                          color:
+                            "#66736d",
+                          fontSize: 13,
+                        }}
+                      >
+                        {shop.phone && (
+                          <div>
+                            ☎️{" "}
+                            {shop.phone}
+                          </div>
+                        )}
+
+                        {shop.whatsapp && (
+                          <div>
+                            💬{" "}
+                            {shop.whatsapp}
+                          </div>
+                        )}
+
+                        {shop.instagram && (
+                          <div>
+                            📸{" "}
+                            {shop.instagram}
+                          </div>
+                        )}
+
+                        {shop.tiktok && (
+                          <div>
+                            🎵{" "}
+                            {shop.tiktok}
+                          </div>
+                        )}
+
+                        {shop.snapchat && (
+                          <div>
+                            👻{" "}
+                            {shop.snapchat}
+                          </div>
+                        )}
+
+                        {shop.website && (
+                          <div>
+                            🌐{" "}
+                            {shop.website}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+              </div>
+
+              {/* قواعد */}
+              <div
+                className="design-card"
+                style={{
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 18,
+                  marginBottom: 18,
+                }}
+              >
+                <h3
+                  style={{
+                    margin:
+                      "0 0 14px",
+                    fontSize: 17,
+                  }}
+                >
+                  🛡️ قواعد التصميم
+                </h3>
+
+                <div
+                  style={{
+                    display:
+                      "grid",
+                    gap: 11,
+                    color:
+                      "#56625c",
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <div>
+                    ✓ المنتج هو محور الإعلان
+                  </div>
+
+                  <div>
+                    ✓ الحفاظ على هوية المنتج الأصلية
+                  </div>
+
+                  <div>
+                    ✓ عدم اختراع معلومات عن المنتج
+                  </div>
+
+                  <div>
+                    ✓ استخدام هوية المحل
+                  </div>
+
+                  <div>
+                    ✓ التصميم موجه للإعلان والنشر
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
       </div>
 
       <style jsx>{`
         button {
           font-family: Arial, sans-serif;
-          -webkit-tap-highlight-color: transparent;
-        }
-
-        a {
           -webkit-tap-highlight-color: transparent;
         }
 
@@ -2684,25 +2346,13 @@ export default function DesignsPage() {
         }
 
         @media (max-width: 650px) {
-          .mode-grid {
-            grid-template-columns: 1fr !important;
-          }
-
-          .template-grid {
-            grid-template-columns: 1fr !important;
-          }
-
+          .mode-grid,
+          .template-grid,
           .format-grid {
             grid-template-columns: 1fr !important;
           }
 
-          .style-grid {
-            grid-template-columns: repeat(
-              2,
-              minmax(0, 1fr)
-            ) !important;
-          }
-
+          .style-grid,
           .background-grid {
             grid-template-columns: repeat(
               2,
@@ -2724,5 +2374,462 @@ export default function DesignsPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+function DesignCard({
+  design,
+  product,
+  status,
+  onOpen,
+}) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border:
+          "1px solid #e1e7e3",
+        borderRadius: 20,
+        overflow: "hidden",
+        boxShadow:
+          "0 5px 20px rgba(0,0,0,0.04)",
+      }}
+    >
+      {design.status ===
+        "completed" &&
+      design.image_url ? (
+        <div
+          style={{
+            height: 260,
+            background: "#f5f7f6",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 12,
+          }}
+        >
+          <img
+            src={design.image_url}
+            alt={
+              product?.name ||
+              "التصميم"
+            }
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              borderRadius: 12,
+            }}
+          />
+        </div>
+      ) : (
+        <div
+          style={{
+            height: 260,
+            background: "#f8faf9",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#7a857f",
+            fontSize: 14,
+          }}
+        >
+          {design.status ===
+          "failed"
+            ? "❌ تعذر إنشاء التصميم"
+            : "⏳ جاري تجهيز التصميم..."}
+        </div>
+      )}
+
+      <div
+        style={{
+          padding: 17,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent:
+              "space-between",
+            alignItems:
+              "flex-start",
+            gap: 10,
+            marginBottom: 10,
+          }}
+        >
+          <div
+            style={{
+              minWidth: 0,
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 17,
+                lineHeight: 1.5,
+              }}
+            >
+              {product?.name ||
+                "منتج"}
+            </h3>
+
+            {product?.brand && (
+              <div
+                style={{
+                  color:
+                    "#66736d",
+                  fontSize: 12,
+                  marginTop: 4,
+                }}
+              >
+                {product.brand}
+              </div>
+            )}
+          </div>
+
+          <StatusBadge
+            type={status.type}
+          >
+            {status.icon}{" "}
+            {status.text}
+          </StatusBadge>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "1fr 1fr",
+            gap: 8,
+            marginBottom: 13,
+          }}
+        >
+          <InfoMini
+            title="المقاس"
+            value={
+              design.format ||
+              "1:1"
+            }
+          />
+
+          <InfoMini
+            title="التاريخ"
+            value={
+              design.created_at
+                ? new Date(
+                    design.created_at
+                  ).toLocaleDateString(
+                    "ar-AE"
+                  )
+                : "—"
+            }
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpen}
+          style={{
+            width: "100%",
+            border: 0,
+            borderRadius: 11,
+            padding: 12,
+            background:
+              "#15803d",
+            color: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+          }}
+        >
+          👁️ عرض التصميم
+        </button>
+
+        {design.status ===
+          "completed" &&
+          design.image_url && (
+            <a
+              href={
+                design.image_url
+              }
+              download
+              style={{
+                display:
+                  "block",
+                textAlign:
+                  "center",
+                marginTop: 8,
+                padding: 11,
+                borderRadius: 11,
+                background:
+                  "#f0fdf4",
+                color:
+                  "#166534",
+                border:
+                  "1px solid #bbf7d0",
+                textDecoration:
+                  "none",
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              ⬇️ تحميل التصميم
+            </a>
+          )}
+      </div>
+    </div>
+  );
+}
+
+function InfoMini({
+  title,
+  value,
+}) {
+  return (
+    <div
+      style={{
+        background:
+          "#f8faf9",
+        borderRadius: 10,
+        padding: 9,
+      }}
+    >
+      <div
+        style={{
+          color: "#7a857f",
+          fontSize: 11,
+          marginBottom: 3,
+        }}
+      >
+        {title}
+      </div>
+
+      <strong
+        style={{
+          fontSize: 12,
+        }}
+      >
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function StatCard({
+  icon,
+  title,
+  value,
+}) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border:
+          "1px solid #e1e7e3",
+        borderRadius: 16,
+        padding: 15,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 22,
+          marginBottom: 7,
+        }}
+      >
+        {icon}
+      </div>
+
+      <div
+        style={{
+          color: "#66736d",
+          fontSize: 12,
+          marginBottom: 4,
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          color: "#17201c",
+          fontSize: 23,
+          fontWeight: 900,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FilterButton({
+  active,
+  onClick,
+  text,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding:
+          "11px 13px",
+        borderRadius: 11,
+        border: active
+          ? "1px solid #15803d"
+          : "1px solid #e5e7eb",
+        background: active
+          ? "#15803d"
+          : "#fff",
+        color: active
+          ? "#fff"
+          : "#374151",
+        fontSize: 13,
+        fontWeight: "bold",
+        cursor: "pointer",
+        whiteSpace:
+          "nowrap",
+      }}
+    >
+      {text}
+    </button>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  icon,
+  title,
+  description,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: "right",
+        padding: 16,
+        borderRadius: 16,
+        cursor: "pointer",
+        background: active
+          ? "#f0fdf4"
+          : "#fff",
+        border: active
+          ? "2px solid #16a34a"
+          : "1px solid #d9e1dc",
+        display: "flex",
+        alignItems:
+          "flex-start",
+        gap: 13,
+        minHeight: 102,
+        boxSizing:
+          "border-box",
+      }}
+    >
+      <IconBox size={46}>
+        {icon}
+      </IconBox>
+
+      <div
+        style={{
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 900,
+            fontSize: 17,
+            lineHeight: 1.4,
+          }}
+        >
+          {title}
+        </div>
+
+        <div
+          style={{
+            color: "#66736d",
+            fontSize: 13,
+            marginTop: 5,
+            lineHeight: 1.6,
+          }}
+        >
+          {description}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function ChoiceButton({
+  active,
+  onClick,
+  icon,
+  title,
+  description,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: "right",
+        background: active
+          ? "#f0fdf4"
+          : "#fff",
+        border: active
+          ? "2px solid #16a34a"
+          : "1px solid #d9e1dc",
+        borderRadius: 15,
+        padding: 14,
+        cursor: "pointer",
+        display: "flex",
+        alignItems:
+          "flex-start",
+        gap: 12,
+        minHeight: 82,
+        boxSizing:
+          "border-box",
+      }}
+    >
+      <IconBox
+        size={44}
+        background={
+          active
+            ? "#dcfce7"
+            : "#f5f7f6"
+        }
+      >
+        {icon}
+      </IconBox>
+
+      <div
+        style={{
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            fontWeight: 900,
+            lineHeight: 1.4,
+          }}
+        >
+          {title}
+        </div>
+
+        {description && (
+          <div
+            style={{
+              color:
+                "#66736d",
+              fontSize: 12,
+              lineHeight: 1.6,
+              marginTop: 4,
+            }}
+          >
+            {description}
+          </div>
+        )}
+      </div>
+    </button>
   );
 }
