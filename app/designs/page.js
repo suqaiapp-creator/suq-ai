@@ -2596,31 +2596,37 @@ export default function DesignsPage() {
                                     marginTop: 12,
                                   }}
                                 >
-                                  <a
-                                    href={
-                                      design.image_url
+                                  {/* مهم:
+                                      يفتح صفحة تفاصيل التصميم
+                                      بدلاً من فتح رابط الصورة مباشرة */}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      router.push(
+                                        `/designs/${design.id}`
+                                      )
                                     }
-                                    target="_blank"
-                                    rel="noopener noreferrer"
                                     style={{
                                       flex: 1,
                                       textAlign:
                                         "center",
-                                      textDecoration:
-                                        "none",
                                       background:
                                         "#15803d",
                                       color:
                                         "#fff",
+                                      border:
+                                        "none",
                                       borderRadius: 10,
                                       padding:
                                         "10px 12px",
                                       fontSize: 13,
                                       fontWeight: 900,
+                                      cursor:
+                                        "pointer",
                                     }}
                                   >
                                     👁️ عرض التصميم
-                                  </a>
+                                  </button>
 
                                   <a
                                     href={
@@ -2664,6 +2670,7 @@ export default function DesignsPage() {
       <style jsx>{`
         button {
           font-family: Arial, sans-serif;
+          -webkit-tap-highlight-color: transparent;
         }
 
         a {
