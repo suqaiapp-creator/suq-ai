@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "../../lib/supabase/client";
 
 export default function LoginPage() {
@@ -12,39 +13,109 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    async function checkSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    checkExistingSession();
+  }, []);
 
-      if (session?.user) {
-        await checkPolicies(session.user.id);
+  async function checkExistingSession() {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setCheckingSession(false);
         return;
       }
 
-      setChecking(false);
+      const allowed = await checkAccountStatus(user.id);
+
+      if (!allowed) {
+        await supabase.auth.signOut();
+        setCheckingSession(false);
+        return;
+      }
+
+      await checkPolicies(user.id);
+    } catch (err) {
+      console.error(err);
+      setCheckingSession(false);
+    }
+  }
+
+  async function checkAccountStatus(userId) {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select(
+        "id, role, is_super_admin, account_status, suspension_reason"
+      )
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(profileError);
+      setError("تعذر التحقق من حالة الحساب.");
+      return false;
     }
 
-    checkSession();
-  }, [router, supabase]);
+    if (!profile) {
+      setError("لم يتم العثور على بيانات الحساب.");
+      return false;
+    }
+
+    if (
+      profile.is_super_admin === true ||
+      profile.role === "super_admin"
+    ) {
+      return true;
+    }
+
+    const status = profile.account_status || "active";
+
+    if (status === "blocked") {
+      setError(
+        profile.suspension_reason
+          ? `تم حظر حسابك. السبب: ${profile.suspension_reason}`
+          : "تم حظر حسابك. يرجى التواصل مع إدارة سوق AI."
+      );
+
+      return false;
+    }
+
+    if (status === "suspended") {
+      setError(
+        profile.suspension_reason
+          ? `تم إيقاف حسابك مؤقتًا. السبب: ${profile.suspension_reason}`
+          : "تم إيقاف حسابك مؤقتًا. يرجى التواصل مع إدارة سوق AI."
+      );
+
+      return false;
+    }
+
+    if (status !== "active") {
+      setError(
+        "حسابك غير متاح حاليًا. يرجى التواصل مع إدارة سوق AI."
+      );
+
+      return false;
+    }
+
+    return true;
+  }
 
   async function checkPolicies(userId) {
     try {
       const { data: policies, error: policiesError } =
         await supabase
           .from("legal_policies")
-          .select("id, version")
+          .select("id, version, title, policy_type")
           .eq("is_active", true);
 
       if (policiesError) {
-        console.error(policiesError);
-        router.replace("/dashboard");
-        return;
+        throw policiesError;
       }
 
       if (!policies || policies.length === 0) {
@@ -59,23 +130,23 @@ export default function LoginPage() {
           .eq("user_id", userId);
 
       if (acceptancesError) {
-        console.error(acceptancesError);
-        router.replace("/dashboard");
-        return;
+        throw acceptancesError;
       }
 
-      const acceptedMap = {};
-
-      (acceptances || []).forEach((item) => {
-        acceptedMap[item.policy_id] = item.policy_version;
-      });
-
-      const needsAcceptance = policies.some(
-        (policy) =>
-          acceptedMap[policy.id] !== policy.version
+      const acceptedMap = new Map(
+        (acceptances || []).map((item) => [
+          item.policy_id,
+          item.policy_version,
+        ])
       );
 
-      if (needsAcceptance) {
+      const missingPolicy = policies.some((policy) => {
+        const acceptedVersion = acceptedMap.get(policy.id);
+
+        return acceptedVersion !== policy.version;
+      });
+
+      if (missingPolicy) {
         router.replace("/policies");
         return;
       }
@@ -83,7 +154,12 @@ export default function LoginPage() {
       router.replace("/dashboard");
     } catch (err) {
       console.error(err);
-      router.replace("/dashboard");
+
+      // في حال وجود خطأ في فحص السياسات
+      // نمنع الانتقال التلقائي ونوضح للمستخدم المشكلة.
+      setError(
+        "تعذر التحقق من السياسات الحالية. حاول مرة أخرى."
+      );
     }
   }
 
@@ -91,15 +167,11 @@ export default function LoginPage() {
     e.preventDefault();
 
     setError("");
-    setMessage("");
 
-    if (!email.trim()) {
-      setError("اكتب البريد الإلكتروني.");
-      return;
-    }
+    const cleanEmail = email.trim();
 
-    if (!password) {
-      setError("اكتب كلمة المرور.");
+    if (!cleanEmail || !password) {
+      setError("يرجى إدخال البريد الإلكتروني وكلمة المرور.");
       return;
     }
 
@@ -108,82 +180,89 @@ export default function LoginPage() {
     try {
       const { data, error: loginError } =
         await supabase.auth.signInWithPassword({
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           password,
         });
 
       if (loginError) {
-        setError("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
-        setLoading(false);
-        return;
+        throw loginError;
       }
 
       if (!data?.user) {
-        setError("تعذر تسجيل الدخول. حاول مرة أخرى.");
-        setLoading(false);
+        throw new Error("تعذر تسجيل الدخول.");
+      }
+
+      const allowed = await checkAccountStatus(
+        data.user.id
+      );
+
+      if (!allowed) {
+        await supabase.auth.signOut();
         return;
       }
+
+      await supabase
+        .from("profiles")
+        .update({
+          last_login_at: new Date().toISOString(),
+        })
+        .eq("id", data.user.id);
 
       await checkPolicies(data.user.id);
     } catch (err) {
       console.error(err);
-      setError("حدث خطأ غير متوقع. حاول مرة أخرى.");
+
+      let message = "تعذر تسجيل الدخول.";
+
+      if (err?.message) {
+        if (
+          err.message.toLowerCase().includes("invalid login credentials")
+        ) {
+          message =
+            "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
+        } else if (
+          err.message.toLowerCase().includes("email not confirmed")
+        ) {
+          message =
+            "يرجى تأكيد البريد الإلكتروني قبل تسجيل الدخول.";
+        } else {
+          message = err.message;
+        }
+      }
+
+      setError(message);
+    } finally {
       setLoading(false);
     }
   }
 
-  async function handleForgotPassword() {
-    setError("");
-    setMessage("");
-
-    if (!email.trim()) {
-      setError("اكتب بريدك الإلكتروني أولاً.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const { error: resetError } =
-        await supabase.auth.resetPasswordForEmail(
-          email.trim().toLowerCase(),
-          {
-            redirectTo: `${window.location.origin}/reset-password`,
-          }
-        );
-
-      if (resetError) {
-        setError(resetError.message);
-        setLoading(false);
-        return;
-      }
-
-      setMessage(
-        "تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني."
-      );
-    } catch (err) {
-      console.error(err);
-      setError("تعذر إرسال رابط إعادة تعيين كلمة المرور.");
-    }
-
-    setLoading(false);
-  }
-
-  if (checking) {
+  if (checkingSession) {
     return (
       <main
         dir="rtl"
         style={{
           minHeight: "100vh",
+          background: "#f5f6f8",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#f7f8fa",
+          padding: 20,
           fontFamily: "Arial, sans-serif",
-          color: "#374151",
         }}
       >
-        جاري التحقق...
+        <div
+          style={{
+            background: "#fff",
+            padding: 35,
+            borderRadius: 20,
+            width: "100%",
+            maxWidth: 430,
+            textAlign: "center",
+            border: "1px solid #e8e8e8",
+          }}
+        >
+          جاري التحقق من الحساب...
+        </div>
       </main>
     );
   }
@@ -193,44 +272,46 @@ export default function LoginPage() {
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fa",
+        background: "#f5f6f8",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "24px",
+        padding: 20,
         fontFamily: "Arial, sans-serif",
       }}
     >
       <div
         style={{
           width: "100%",
-          maxWidth: "460px",
-          background: "#ffffff",
-          borderRadius: "24px",
-          padding: "32px 24px",
-          boxShadow: "0 10px 35px rgba(0,0,0,0.08)",
+          maxWidth: 430,
+          background: "#fff",
+          borderRadius: 24,
+          padding: 30,
+          border: "1px solid #e8e8e8",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
         }}
       >
         <div
           style={{
             textAlign: "center",
-            marginBottom: "28px",
+            marginBottom: 25,
           }}
         >
           <div
             style={{
-              fontSize: "42px",
-              marginBottom: "8px",
+              fontSize: 14,
+              color: "#777",
+              marginBottom: 6,
             }}
           >
-            🛍️
+            سوق AI
           </div>
 
           <h1
             style={{
               margin: 0,
-              fontSize: "28px",
-              color: "#111827",
+              fontSize: 28,
+              color: "#111",
             }}
           >
             تسجيل الدخول
@@ -238,159 +319,156 @@ export default function LoginPage() {
 
           <p
             style={{
-              marginTop: "10px",
-              color: "#6b7280",
-              fontSize: "15px",
-              lineHeight: "1.7",
+              color: "#777",
+              fontSize: 14,
+              marginTop: 9,
             }}
           >
-            ادخل إلى سوق AI لإدارة متجرك ومنتجاتك وتسويقك.
+            ادخل إلى حسابك لإدارة متجرك ومنتجاتك.
           </p>
         </div>
 
-        <form onSubmit={handleLogin}>
-          <label style={labelStyle}>
-            البريد الإلكتروني
-          </label>
-
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="example@email.com"
-            autoComplete="email"
-            style={inputStyle}
-          />
-
-          <label style={labelStyle}>
-            كلمة المرور
-          </label>
-
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="كلمة المرور"
-            autoComplete="current-password"
-            style={inputStyle}
-          />
-
-          <button
-            type="button"
-            onClick={handleForgotPassword}
-            disabled={loading}
+        {error && (
+          <div
             style={{
-              display: "block",
-              marginTop: "12px",
-              marginRight: "auto",
-              border: "none",
-              background: "transparent",
-              color: "#4b5563",
-              fontSize: "14px",
-              cursor: "pointer",
+              background: "#fff0f0",
+              border: "1px solid #f0bcbc",
+              color: "#9b1c1c",
+              borderRadius: 14,
+              padding: 14,
+              marginBottom: 18,
+              fontSize: 14,
+              lineHeight: 1.7,
             }}
           >
-            نسيت كلمة المرور؟
-          </button>
+            {error}
+          </div>
+        )}
 
-          {error && (
-            <div
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom: 16 }}>
+            <label
               style={{
-                marginTop: "18px",
-                padding: "12px",
-                borderRadius: "12px",
-                background: "#fef2f2",
-                color: "#b91c1c",
-                fontSize: "14px",
-                lineHeight: "1.7",
+                display: "block",
+                marginBottom: 7,
+                fontSize: 14,
+                fontWeight: "bold",
               }}
             >
-              {error}
-            </div>
-          )}
+              البريد الإلكتروني
+            </label>
 
-          {message && (
-            <div
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@email.com"
+              autoComplete="email"
+              disabled={loading}
               style={{
-                marginTop: "18px",
-                padding: "12px",
-                borderRadius: "12px",
-                background: "#ecfdf5",
-                color: "#047857",
-                fontSize: "14px",
-                lineHeight: "1.7",
+                width: "100%",
+                boxSizing: "border-box",
+                border: "1px solid #ddd",
+                borderRadius: 12,
+                padding: "13px 14px",
+                fontSize: 15,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 7,
+                fontSize: 14,
+                fontWeight: "bold",
               }}
             >
-              {message}
-            </div>
-          )}
+              كلمة المرور
+            </label>
+
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="كلمة المرور"
+              autoComplete="current-password"
+              disabled={loading}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                border: "1px solid #ddd",
+                borderRadius: 12,
+                padding: "13px 14px",
+                fontSize: 15,
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              textAlign: "left",
+              marginBottom: 20,
+            }}
+          >
+            <Link
+              href="/forgot-password"
+              style={{
+                color: "#555",
+                fontSize: 13,
+                textDecoration: "none",
+              }}
+            >
+              نسيت كلمة المرور؟
+            </Link>
+          </div>
 
           <button
             type="submit"
             disabled={loading}
             style={{
               width: "100%",
-              marginTop: "22px",
-              padding: "15px",
               border: "none",
-              borderRadius: "14px",
-              background: loading ? "#9ca3af" : "#111827",
-              color: "#ffffff",
-              fontSize: "17px",
+              background: "#111",
+              color: "#fff",
+              borderRadius: 12,
+              padding: "14px 18px",
+              fontSize: 16,
               fontWeight: "bold",
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading ? "default" : "pointer",
+              opacity: loading ? 0.65 : 1,
             }}
           >
-            {loading ? "جاري الدخول..." : "تسجيل الدخول"}
+            {loading ? "جاري تسجيل الدخول..." : "تسجيل الدخول"}
           </button>
         </form>
 
         <div
           style={{
             textAlign: "center",
-            marginTop: "22px",
-            color: "#6b7280",
-            fontSize: "14px",
+            marginTop: 22,
+            paddingTop: 20,
+            borderTop: "1px solid #eee",
+            fontSize: 14,
+            color: "#777",
           }}
         >
-          ما عندك حساب؟
-
-          <button
-            type="button"
-            onClick={() => router.push("/register")}
+          ليس لديك حساب؟{" "}
+          <Link
+            href="/register"
             style={{
-              border: "none",
-              background: "none",
-              color: "#111827",
+              color: "#111",
               fontWeight: "bold",
-              cursor: "pointer",
-              marginRight: "6px",
+              textDecoration: "none",
             }}
           >
             إنشاء حساب
-          </button>
+          </Link>
         </div>
       </div>
     </main>
   );
 }
-
-const labelStyle = {
-  display: "block",
-  marginBottom: "8px",
-  marginTop: "16px",
-  color: "#374151",
-  fontSize: "14px",
-  fontWeight: "bold",
-};
-
-const inputStyle = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "14px",
-  border: "1px solid #d1d5db",
-  borderRadius: "12px",
-  fontSize: "16px",
-  outline: "none",
-  background: "#ffffff",
-};
