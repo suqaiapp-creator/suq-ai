@@ -74,35 +74,53 @@ export default function AdminPage() {
         reviewResult,
         aiResult,
       ] = await Promise.all([
-        supabase.from("profiles").select("id", { count: "exact", head: true }),
+        supabase.from("profiles").select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-        supabase.from("shops").select("id", { count: "exact", head: true }),
+        supabase.from("shops").select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-        supabase.from("products").select("id", { count: "exact", head: true }),
+        supabase.from("products").select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-        supabase
-          .from("marketing_contents")
-          .select("id", { count: "exact", head: true }),
+        supabase.from("marketing_contents").select("id", {
+          count: "exact",
+          head: true,
+        }),
 
-        supabase
-          .from("ad_images")
-          .select("id", { count: "exact", head: true }),
+        supabase.from("ad_images").select("id", {
+          count: "exact",
+          head: true,
+        }),
 
         supabase
           .from("products")
-          .select("id", { count: "exact", head: true })
+          .select("id", {
+            count: "exact",
+            head: true,
+          })
           .or("verification_status.eq.locked,safety_status.eq.locked"),
 
         supabase
           .from("products")
-          .select("id", { count: "exact", head: true })
+          .select("id", {
+            count: "exact",
+            head: true,
+          })
           .or(
             "verification_status.eq.review,safety_status.eq.review"
           ),
 
-        supabase
-          .from("ai_usage")
-          .select("id", { count: "exact", head: true }),
+        supabase.from("ai_usage").select("id", {
+          count: "exact",
+          head: true,
+        }),
       ]);
 
       setStats({
@@ -163,6 +181,7 @@ export default function AdminPage() {
         fontFamily: "Arial, sans-serif",
       }}
     >
+      {/* Header */}
       <header
         style={{
           background: "#111",
@@ -182,7 +201,12 @@ export default function AdminPage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 13, opacity: 0.7 }}>
+            <div
+              style={{
+                fontSize: 13,
+                opacity: 0.7,
+              }}
+            >
               سوق AI
             </div>
 
@@ -201,8 +225,24 @@ export default function AdminPage() {
               display: "flex",
               alignItems: "center",
               gap: 10,
+              flexWrap: "wrap",
             }}
           >
+            <Link
+              href="/"
+              style={{
+                background: "#fff",
+                color: "#111",
+                borderRadius: 10,
+                padding: "9px 13px",
+                textDecoration: "none",
+                fontSize: 13,
+                fontWeight: "bold",
+              }}
+            >
+              🏠 الصفحة الرئيسية
+            </Link>
+
             <span
               style={{
                 background: "#fff",
@@ -240,6 +280,7 @@ export default function AdminPage() {
           padding: "25px 18px 50px",
         }}
       >
+        {/* Welcome */}
         <section
           style={{
             background: "#fff",
@@ -249,7 +290,12 @@ export default function AdminPage() {
             border: "1px solid #e8e8e8",
           }}
         >
-          <div style={{ fontSize: 13, color: "#777" }}>
+          <div
+            style={{
+              fontSize: 13,
+              color: "#777",
+            }}
+          >
             مرحبًا بك
           </div>
 
@@ -274,6 +320,7 @@ export default function AdminPage() {
           </div>
         </section>
 
+        {/* Statistics */}
         <section
           style={{
             display: "grid",
@@ -283,16 +330,64 @@ export default function AdminPage() {
             marginBottom: 25,
           }}
         >
-          <StatCard title="المستخدمون" value={stats.users} icon="👥" />
-          <StatCard title="المحلات" value={stats.shops} icon="🏪" />
-          <StatCard title="المنتجات" value={stats.products} icon="📦" />
-          <StatCard title="التسويق" value={stats.marketing} icon="📣" />
-          <StatCard title="التصاميم" value={stats.designs} icon="🎨" />
-          <StatCard title="عمليات AI" value={stats.ai} icon="🤖" />
-          <StatCard title="مراجعة" value={stats.review} icon="⚠️" />
-          <StatCard title="مقفلة" value={stats.locked} icon="🔒" />
+          <StatCard
+            title="المستخدمون"
+            value={stats.users}
+            icon="👥"
+            href="/admin/users"
+          />
+
+          <StatCard
+            title="المحلات"
+            value={stats.shops}
+            icon="🏪"
+            href="/admin/shops"
+          />
+
+          <StatCard
+            title="المنتجات"
+            value={stats.products}
+            icon="📦"
+            href="/admin/products"
+          />
+
+          <StatCard
+            title="التسويق"
+            value={stats.marketing}
+            icon="📣"
+            href="/dashboard"
+          />
+
+          <StatCard
+            title="التصاميم"
+            value={stats.designs}
+            icon="🎨"
+            href="/designs"
+          />
+
+          <StatCard
+            title="عمليات AI"
+            value={stats.ai}
+            icon="🤖"
+            href="/admin/ai-usage"
+          />
+
+          <StatCard
+            title="مراجعة"
+            value={stats.review}
+            icon="⚠️"
+            href="/admin/review"
+          />
+
+          <StatCard
+            title="مقفلة"
+            value={stats.locked}
+            icon="🔒"
+            href="/admin/review"
+          />
         </section>
 
+        {/* Administration */}
         <section>
           <h2
             style={{
@@ -315,52 +410,61 @@ export default function AdminPage() {
               icon="👥"
               title="المستخدمون"
               description="إدارة الحسابات وحالات المستخدمين"
+              href="/admin/users"
             />
 
             <AdminCard
               icon="🏪"
               title="المحلات"
               description="عرض وإدارة جميع المحلات"
+              href="/admin/shops"
             />
 
             <AdminCard
               icon="📦"
               title="المنتجات"
               description="مراجعة المنتجات وحالات التحقق"
+              href="/admin/products"
             />
 
             <AdminCard
               icon="🔒"
               title="المراجعة والمخالفات"
               description="المنتجات التي تحتاج مراجعة أو قفل"
+              href="/admin/review"
             />
 
             <AdminCard
               icon="🤖"
               title="استخدام الذكاء الاصطناعي"
               description="العمليات والتكلفة والاستهلاك"
+              href="/admin/ai-usage"
             />
 
             <AdminCard
               icon="📋"
               title="سجل النشاط"
               description="متابعة عمليات المستخدمين والإدارة"
+              href="/admin/activity"
             />
 
             <AdminCard
               icon="⚖️"
               title="السياسات القانونية"
               description="الشروط والخصوصية وسياسات المحتوى"
+              href="/admin/policies"
             />
 
             <AdminCard
               icon="⚙️"
               title="إعدادات النظام"
               description="إعدادات سوق AI والإدارة"
+              href="/admin/settings"
             />
           </div>
         </section>
 
+        {/* Quick Links */}
         <section
           style={{
             background: "#fff",
@@ -386,24 +490,45 @@ export default function AdminPage() {
               flexWrap: "wrap",
             }}
           >
+            <Link href="/" style={linkStyle}>
+              🏠 الصفحة الرئيسية
+            </Link>
+
             <Link href="/dashboard" style={linkStyle}>
               لوحة المحل
             </Link>
 
-            <Link href="/products" style={linkStyle}>
+            <Link href="/admin/users" style={linkStyle}>
+              المستخدمون
+            </Link>
+
+            <Link href="/admin/shops" style={linkStyle}>
+              المحلات
+            </Link>
+
+            <Link href="/admin/products" style={linkStyle}>
               المنتجات
             </Link>
 
-            <Link href="/designs" style={linkStyle}>
-              التصاميم
+            <Link href="/admin/review" style={linkStyle}>
+              المراجعة
             </Link>
 
-            <Link href="/setup-shop" style={linkStyle}>
-              بيانات المحل
+            <Link href="/admin/activity" style={linkStyle}>
+              سجل النشاط
+            </Link>
+
+            <Link href="/admin/ai-usage" style={linkStyle}>
+              استخدام AI
+            </Link>
+
+            <Link href="/admin/policies" style={linkStyle}>
+              السياسات
             </Link>
           </div>
         </section>
 
+        {/* System note */}
         <section
           style={{
             marginTop: 20,
@@ -416,83 +541,104 @@ export default function AdminPage() {
             fontSize: 14,
           }}
         >
-          <strong>ملاحظة:</strong> لوحة Super Admin أصبحت مرتبطة
-          ببيانات النظام الحقيقية. سنضيف لاحقًا صفحات الإدارة التفصيلية
-          للمستخدمين والمحلات والمنتجات والمراجعة وسجل النشاط.
+          <strong>حالة النظام:</strong> لوحة Super Admin مرتبطة
+          ببيانات النظام الحقيقية، ويمكن الوصول إلى أقسام الإدارة
+          مباشرة من هذه الصفحة.
         </section>
       </div>
     </main>
   );
 }
 
-function StatCard({ title, value, icon }) {
+function StatCard({ title, value, icon, href }) {
   return (
-    <div
+    <Link
+      href={href}
       style={{
-        background: "#fff",
-        border: "1px solid #e8e8e8",
-        borderRadius: 18,
-        padding: 18,
+        textDecoration: "none",
+        color: "inherit",
       }}
     >
-      <div style={{ fontSize: 26 }}>{icon}</div>
-
       <div
         style={{
-          fontSize: 28,
-          fontWeight: "bold",
-          marginTop: 8,
+          background: "#fff",
+          border: "1px solid #e8e8e8",
+          borderRadius: 18,
+          padding: 18,
+          cursor: "pointer",
+          transition: "0.2s",
+          height: "100%",
         }}
       >
-        {value}
-      </div>
+        <div style={{ fontSize: 26 }}>{icon}</div>
 
-      <div
-        style={{
-          color: "#666",
-          fontSize: 14,
-          marginTop: 4,
-        }}
-      >
-        {title}
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: "bold",
+            marginTop: 8,
+          }}
+        >
+          {value}
+        </div>
+
+        <div
+          style={{
+            color: "#666",
+            fontSize: 14,
+            marginTop: 4,
+          }}
+        >
+          {title}
+        </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
-function AdminCard({ icon, title, description }) {
+function AdminCard({ icon, title, description, href }) {
   return (
-    <div
+    <Link
+      href={href}
       style={{
-        background: "#fff",
-        border: "1px solid #e8e8e8",
-        borderRadius: 18,
-        padding: 20,
-        minHeight: 125,
+        textDecoration: "none",
+        color: "inherit",
       }}
     >
-      <div style={{ fontSize: 28 }}>{icon}</div>
-
-      <h3
+      <div
         style={{
-          margin: "10px 0 5px",
-          fontSize: 17,
+          background: "#fff",
+          border: "1px solid #e8e8e8",
+          borderRadius: 18,
+          padding: 20,
+          minHeight: 125,
+          cursor: "pointer",
+          transition: "0.2s",
         }}
       >
-        {title}
-      </h3>
+        <div style={{ fontSize: 28 }}>{icon}</div>
 
-      <p
-        style={{
-          margin: 0,
-          color: "#777",
-          fontSize: 13,
-          lineHeight: 1.6,
-        }}
-      >
-        {description}
-      </p>
-    </div>
+        <h3
+          style={{
+            margin: "10px 0 5px",
+            fontSize: 17,
+          }}
+        >
+          {title}
+        </h3>
+
+        <p
+          style={{
+            margin: 0,
+            color: "#777",
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          {description}
+        </p>
+      </div>
+    </Link>
   );
 }
 
