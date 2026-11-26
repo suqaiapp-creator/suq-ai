@@ -11,12 +11,20 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [accepted, setAccepted] = useState(false);
+  const [confirmPassword, setConfirmPassword] =
+    useState("");
 
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [accepted, setAccepted] =
+    useState(false);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
 
   async function handleRegister(e) {
     e.preventDefault();
@@ -35,45 +43,77 @@ export default function RegisterPage() {
     }
 
     if (password.length < 6) {
-      setError("كلمة المرور يجب أن تكون 6 أحرف على الأقل.");
+      setError(
+        "كلمة المرور يجب أن تكون 6 أحرف على الأقل."
+      );
       return;
     }
 
     if (password !== confirmPassword) {
-      setError("كلمتا المرور غير متطابقتين.");
+      setError(
+        "كلمتا المرور غير متطابقتين."
+      );
       return;
     }
 
     if (!accepted) {
-      setError("يجب الموافقة على الشروط والسياسات.");
+      setError(
+        "يجب الموافقة على الشروط والسياسات."
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
+      const { data, error: signUpError } =
+        await supabase.auth.signUp({
+          email: email
+            .trim()
+            .toLowerCase(),
+
+          password,
+
+          options: {
+            data: {
+              full_name:
+                fullName.trim(),
+
+              /*
+               * نستخدم هذه القيمة داخل
+               * Trigger إنشاء المستخدم
+               * لتسجيل الموافقة على
+               * السياسات النشطة.
+               */
+              accepted_policies: true,
+            },
+
+            emailRedirectTo:
+              `${window.location.origin}/login`,
           },
-          emailRedirectTo: `${window.location.origin}/login`,
-        },
-      });
+        });
 
       if (signUpError) {
-        setError(signUpError.message);
+        setError(
+          signUpError.message
+        );
         setLoading(false);
         return;
       }
 
+      /*
+       * إذا تم إنشاء جلسة مباشرة
+       */
       if (data?.session) {
-        router.push("/setup-shop");
+        router.push(
+          "/setup-shop"
+        );
         return;
       }
 
+      /*
+       * إذا كان تأكيد البريد مفعلاً
+       */
       setMessage(
         "تم إنشاء الحساب بنجاح. افتح بريدك الإلكتروني لتأكيد الحساب، وبعدها سجل الدخول."
       );
@@ -83,7 +123,11 @@ export default function RegisterPage() {
       }, 2500);
     } catch (err) {
       console.error(err);
-      setError("حدث خطأ غير متوقع. حاول مرة أخرى.");
+
+      setError(
+        "حدث خطأ غير متوقع. حاول مرة أخرى."
+      );
+
       setLoading(false);
     }
   }
@@ -98,7 +142,8 @@ export default function RegisterPage() {
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
-        fontFamily: "Arial, sans-serif",
+        fontFamily:
+          "Arial, sans-serif",
       }}
     >
       <div
@@ -107,11 +152,18 @@ export default function RegisterPage() {
           maxWidth: "460px",
           background: "#ffffff",
           borderRadius: "24px",
-          padding: "32px 24px",
-          boxShadow: "0 10px 35px rgba(0,0,0,0.08)",
+          padding:
+            "32px 24px",
+          boxShadow:
+            "0 10px 35px rgba(0,0,0,0.08)",
         }}
       >
-        <div style={{ textAlign: "center", marginBottom: "28px" }}>
+        <div
+          style={{
+            textAlign: "center",
+            marginBottom: "28px",
+          }}
+        >
           <div
             style={{
               fontSize: "42px",
@@ -136,51 +188,88 @@ export default function RegisterPage() {
               marginTop: "10px",
               color: "#6b7280",
               fontSize: "15px",
+              lineHeight: "1.7",
             }}
           >
-            ابدأ بإدارة متجرك وتسويق منتجاتك بالذكاء الاصطناعي
+            ابدأ بإدارة متجرك وتسويق
+            منتجاتك بالذكاء الاصطناعي
           </p>
         </div>
 
-        <form onSubmit={handleRegister}>
-          <label style={labelStyle}>الاسم الكامل</label>
+        <form
+          onSubmit={handleRegister}
+        >
+          <label
+            style={labelStyle}
+          >
+            الاسم الكامل
+          </label>
 
           <input
             type="text"
             value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            onChange={(e) =>
+              setFullName(
+                e.target.value
+              )
+            }
             placeholder="مثال: أحمد محمد"
+            autoComplete="name"
             style={inputStyle}
           />
 
-          <label style={labelStyle}>البريد الإلكتروني</label>
+          <label
+            style={labelStyle}
+          >
+            البريد الإلكتروني
+          </label>
 
           <input
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) =>
+              setEmail(
+                e.target.value
+              )
+            }
             placeholder="example@email.com"
             autoComplete="email"
             style={inputStyle}
           />
 
-          <label style={labelStyle}>كلمة المرور</label>
+          <label
+            style={labelStyle}
+          >
+            كلمة المرور
+          </label>
 
           <input
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) =>
+              setPassword(
+                e.target.value
+              )
+            }
             placeholder="6 أحرف على الأقل"
             autoComplete="new-password"
             style={inputStyle}
           />
 
-          <label style={labelStyle}>تأكيد كلمة المرور</label>
+          <label
+            style={labelStyle}
+          >
+            تأكيد كلمة المرور
+          </label>
 
           <input
             type="password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(e) =>
+              setConfirmPassword(
+                e.target.value
+              )
+            }
             placeholder="أعد كتابة كلمة المرور"
             autoComplete="new-password"
             style={inputStyle}
@@ -189,7 +278,8 @@ export default function RegisterPage() {
           <label
             style={{
               display: "flex",
-              alignItems: "flex-start",
+              alignItems:
+                "flex-start",
               gap: "10px",
               marginTop: "18px",
               fontSize: "14px",
@@ -201,7 +291,11 @@ export default function RegisterPage() {
             <input
               type="checkbox"
               checked={accepted}
-              onChange={(e) => setAccepted(e.target.checked)}
+              onChange={(e) =>
+                setAccepted(
+                  e.target.checked
+                )
+              }
               style={{
                 marginTop: "5px",
                 width: "18px",
@@ -210,8 +304,10 @@ export default function RegisterPage() {
             />
 
             <span>
-              أوافق على شروط الاستخدام وسياسة الخصوصية وسياسة المحتوى
-              والاستخدام بالذكاء الاصطناعي.
+              أوافق على شروط الاستخدام
+              وسياسة الخصوصية وسياسة
+              المحتوى والاستخدام
+              بالذكاء الاصطناعي.
             </span>
           </label>
 
@@ -221,9 +317,11 @@ export default function RegisterPage() {
                 marginTop: "18px",
                 padding: "12px",
                 borderRadius: "12px",
-                background: "#fef2f2",
+                background:
+                  "#fef2f2",
                 color: "#b91c1c",
                 fontSize: "14px",
+                lineHeight: "1.7",
               }}
             >
               {error}
@@ -236,7 +334,8 @@ export default function RegisterPage() {
                 marginTop: "18px",
                 padding: "12px",
                 borderRadius: "12px",
-                background: "#ecfdf5",
+                background:
+                  "#ecfdf5",
                 color: "#047857",
                 fontSize: "14px",
                 lineHeight: "1.7",
@@ -255,14 +354,20 @@ export default function RegisterPage() {
               padding: "15px",
               border: "none",
               borderRadius: "14px",
-              background: loading ? "#9ca3af" : "#111827",
+              background: loading
+                ? "#9ca3af"
+                : "#111827",
               color: "#ffffff",
               fontSize: "17px",
               fontWeight: "bold",
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading
+                ? "not-allowed"
+                : "pointer",
             }}
           >
-            {loading ? "جاري إنشاء الحساب..." : "إنشاء الحساب"}
+            {loading
+              ? "جاري إنشاء الحساب..."
+              : "إنشاء الحساب"}
           </button>
         </form>
 
@@ -275,9 +380,14 @@ export default function RegisterPage() {
           }}
         >
           لديك حساب بالفعل؟
+
           <button
             type="button"
-            onClick={() => router.push("/login")}
+            onClick={() =>
+              router.push(
+                "/login"
+              )
+            }
             style={{
               border: "none",
               background: "none",
@@ -308,7 +418,8 @@ const inputStyle = {
   width: "100%",
   boxSizing: "border-box",
   padding: "14px",
-  border: "1px solid #d1d5db",
+  border:
+    "1px solid #d1d5db",
   borderRadius: "12px",
   fontSize: "16px",
   outline: "none",
