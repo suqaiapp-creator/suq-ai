@@ -13,6 +13,9 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [actionUserId, setActionUserId] = useState(null);
+
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   useEffect(() => {
     loadUsers();
@@ -31,6 +34,8 @@ export default function AdminUsersPage() {
         router.replace("/login");
         return;
       }
+
+      setCurrentUserId(user.id);
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
@@ -70,18 +75,24 @@ export default function AdminUsersPage() {
             .eq("owner_id", profile.id)
             .maybeSingle();
 
-          const { count: productCount } = await supabase
-            .from("products")
-            .select("id", {
-              count: "exact",
-              head: true,
-            })
-            .eq("shop_id", shop?.id || "00000000-0000-0000-0000-000000000000");
+          let productCount = 0;
+
+          if (shop?.id) {
+            const { count } = await supabase
+              .from("products")
+              .select("id", {
+                count: "exact",
+                head: true,
+              })
+              .eq("shop_id", shop.id);
+
+            productCount = count || 0;
+          }
 
           return {
             ...profile,
             shop,
-            productCount: productCount || 0,
+            productCount,
           };
         })
       );
@@ -92,6 +103,147 @@ export default function AdminUsersPage() {
       setError("تعذر تحميل المستخدمين.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function changeAccountStatus(targetUser, newStatus) {
+    if (!targetUser?.id) return;
+
+    if (targetUser.id === currentUserId) {
+      alert("لا يمكنك تغيير حالة حساب Super Admin الحالي.");
+      return;
+    }
+
+    let reason = null;
+
+    if (newStatus === "suspended") {
+      reason = window.prompt(
+        "اكتب سبب إيقاف الحساب:"
+      );
+
+      if (reason === null) {
+        return;
+      }
+
+      reason = reason.trim();
+
+      if (!reason) {
+        alert("يجب كتابة سبب الإيقاف.");
+        return;
+      }
+    }
+
+    if (newStatus === "blocked") {
+      reason = window.prompt(
+        "اكتب سبب حظر الحساب:"
+      );
+
+      if (reason === null) {
+        return;
+      }
+
+      reason = reason.trim();
+
+      if (!reason) {
+        alert("يجب كتابة سبب الحظر.");
+        return;
+      }
+    }
+
+    if (newStatus === "active") {
+      const confirmed = window.confirm(
+        `هل تريد إعادة تفعيل حساب "${targetUser.full_name || "هذا المستخدم"}"؟`
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (newStatus === "suspended") {
+      const confirmed = window.confirm(
+        `هل تريد إيقاف حساب "${targetUser.full_name || "هذا المستخدم"}"؟`
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    if (newStatus === "blocked") {
+      const confirmed = window.confirm(
+        `هل تريد حظر حساب "${targetUser.full_name || "هذا المستخدم"}"؟`
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setActionUserId(targetUser.id);
+    setError("");
+
+    try {
+      const { error: rpcError } = await supabase.rpc(
+        "set_account_status",
+        {
+          p_user_id: targetUser.id,
+          p_status: newStatus,
+          p_reason: reason,
+        }
+      );
+
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      const {
+        data: { user: adminUser },
+      } = await supabase.auth.getUser();
+
+      const actionText =
+        newStatus === "active"
+          ? "تفعيل حساب مستخدم"
+          : newStatus === "suspended"
+          ? "إيقاف حساب مستخدم"
+          : "حظر حساب مستخدم";
+
+      await supabase.from("activity_logs").insert({
+        user_id: targetUser.id,
+        action: "account_status_changed",
+        entity_type: "profile",
+        entity_id: targetUser.id,
+        description: actionText,
+        metadata: {
+          actor_id: adminUser?.id || null,
+          target_user_id: targetUser.id,
+          target_user_name: targetUser.full_name || null,
+          status: newStatus,
+          reason: reason || null,
+        },
+      });
+
+      await loadUsers();
+
+      alert(
+        newStatus === "active"
+          ? "تم تفعيل الحساب بنجاح."
+          : newStatus === "suspended"
+          ? "تم إيقاف الحساب بنجاح."
+          : "تم حظر الحساب بنجاح."
+      );
+    } catch (err) {
+      console.error(err);
+
+      const message =
+        err?.message ||
+        err?.error_description ||
+        "تعذر تغيير حالة الحساب.";
+
+      setError(message);
+      alert("تعذر تغيير حالة الحساب.");
+    } finally {
+      setActionUserId(null);
     }
   }
 
@@ -163,7 +315,12 @@ export default function AdminUsersPage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 13, opacity: 0.7 }}>
+            <div
+              style={{
+                fontSize: 13,
+                opacity: 0.7,
+              }}
+            >
               سوق AI
             </div>
 
@@ -225,7 +382,7 @@ export default function AdminUsersPage() {
               fontSize: 14,
             }}
           >
-            عرض جميع الحسابات المسجلة في سوق AI.
+            عرض وإدارة جميع الحسابات المسجلة في سوق AI.
           </p>
 
           <div
@@ -239,7 +396,7 @@ export default function AdminUsersPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="بحث بالاسم أو المحل..."
+              placeholder="بحث بالاسم أو المحل أو الحالة..."
               style={{
                 flex: 1,
                 minWidth: 220,
@@ -253,6 +410,7 @@ export default function AdminUsersPage() {
 
             <button
               onClick={loadUsers}
+              disabled={loading}
               style={{
                 border: "none",
                 background: "#111",
@@ -261,6 +419,7 @@ export default function AdminUsersPage() {
                 padding: "13px 18px",
                 fontSize: 14,
                 cursor: "pointer",
+                opacity: loading ? 0.6 : 1,
               }}
             >
               تحديث
@@ -331,7 +490,7 @@ export default function AdminUsersPage() {
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
-                  minWidth: 850,
+                  minWidth: 1150,
                 }}
               >
                 <thead>
@@ -344,72 +503,212 @@ export default function AdminUsersPage() {
                     <th style={thStyle}>المحل</th>
                     <th style={thStyle}>الدور</th>
                     <th style={thStyle}>الحالة</th>
+                    <th style={thStyle}>تفاصيل الحالة</th>
                     <th style={thStyle}>المنتجات</th>
                     <th style={thStyle}>تاريخ التسجيل</th>
+                    <th style={thStyle}>الإدارة</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredUsers.map((user) => (
-                    <tr key={user.id}>
-                      <td style={tdStyle}>
-                        <div
-                          style={{
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {user.full_name || "بدون اسم"}
-                        </div>
+                  {filteredUsers.map((user) => {
+                    const isCurrentAdmin =
+                      user.id === currentUserId;
 
-                        <div
-                          style={{
-                            color: "#888",
-                            fontSize: 12,
-                            marginTop: 4,
-                            direction: "ltr",
-                            textAlign: "right",
-                          }}
-                        >
-                          {user.id}
-                        </div>
-                      </td>
+                    const status =
+                      user.account_status || "active";
 
-                      <td style={tdStyle}>
-                        {user.shop?.name || "لم ينشئ محل"}
-                      </td>
+                    const isActionLoading =
+                      actionUserId === user.id;
 
-                      <td style={tdStyle}>
-                        <StatusBadge
-                          text={
-                            user.is_super_admin
-                              ? "Super Admin"
-                              : user.role || "owner"
-                          }
-                        />
-                      </td>
+                    return (
+                      <tr key={user.id}>
+                        <td style={tdStyle}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {user.full_name || "بدون اسم"}
+                          </div>
 
-                      <td style={tdStyle}>
-                        <StatusBadge
-                          text={
-                            user.account_status === "suspended"
-                              ? "موقوف"
-                              : "نشط"
-                          }
-                          danger={
-                            user.account_status === "suspended"
-                          }
-                        />
-                      </td>
+                          <div
+                            style={{
+                              color: "#888",
+                              fontSize: 12,
+                              marginTop: 4,
+                              direction: "ltr",
+                              textAlign: "right",
+                            }}
+                          >
+                            {user.id}
+                          </div>
+                        </td>
 
-                      <td style={tdStyle}>
-                        {user.productCount}
-                      </td>
+                        <td style={tdStyle}>
+                          {user.shop?.name || "لم ينشئ محل"}
+                        </td>
 
-                      <td style={tdStyle}>
-                        {formatDate(user.created_at)}
-                      </td>
-                    </tr>
-                  ))}
+                        <td style={tdStyle}>
+                          <StatusBadge
+                            text={
+                              user.is_super_admin
+                                ? "Super Admin"
+                                : user.role || "owner"
+                            }
+                            type={
+                              user.is_super_admin
+                                ? "admin"
+                                : "default"
+                            }
+                          />
+                        </td>
+
+                        <td style={tdStyle}>
+                          <AccountStatusBadge
+                            status={status}
+                          />
+                        </td>
+
+                        <td style={tdStyle}>
+                          {status === "active" ? (
+                            <span
+                              style={{
+                                color: "#777",
+                                fontSize: 13,
+                              }}
+                            >
+                              لا توجد ملاحظات
+                            </span>
+                          ) : (
+                            <div>
+                              {user.suspension_reason && (
+                                <div
+                                  style={{
+                                    color: "#555",
+                                    fontSize: 13,
+                                    lineHeight: 1.6,
+                                    maxWidth: 230,
+                                  }}
+                                >
+                                  <strong>السبب:</strong>{" "}
+                                  {user.suspension_reason}
+                                </div>
+                              )}
+
+                              {user.suspended_at && (
+                                <div
+                                  style={{
+                                    color: "#888",
+                                    fontSize: 12,
+                                    marginTop: 5,
+                                  }}
+                                >
+                                  {status === "blocked"
+                                    ? "تاريخ الحظر: "
+                                    : "تاريخ الإيقاف: "}
+                                  {formatDateTime(
+                                    user.suspended_at
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        <td style={tdStyle}>
+                          {user.productCount}
+                        </td>
+
+                        <td style={tdStyle}>
+                          {formatDate(user.created_at)}
+                        </td>
+
+                        <td style={tdStyle}>
+                          {isCurrentAdmin ? (
+                            <span
+                              style={{
+                                display: "inline-block",
+                                background: "#f1f1f1",
+                                color: "#777",
+                                padding: "7px 10px",
+                                borderRadius: 9,
+                                fontSize: 12,
+                              }}
+                            >
+                              حسابك الحالي
+                            </span>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 7,
+                                flexWrap: "wrap",
+                                minWidth: 240,
+                              }}
+                            >
+                              {status !== "active" && (
+                                <button
+                                  onClick={() =>
+                                    changeAccountStatus(
+                                      user,
+                                      "active"
+                                    )
+                                  }
+                                  disabled={isActionLoading}
+                                  style={actionButtonStyle(
+                                    "#277227"
+                                  )}
+                                >
+                                  {isActionLoading
+                                    ? "..."
+                                    : "تفعيل"}
+                                </button>
+                              )}
+
+                              {status !== "suspended" && (
+                                <button
+                                  onClick={() =>
+                                    changeAccountStatus(
+                                      user,
+                                      "suspended"
+                                    )
+                                  }
+                                  disabled={isActionLoading}
+                                  style={actionButtonStyle(
+                                    "#9a6700"
+                                  )}
+                                >
+                                  {isActionLoading
+                                    ? "..."
+                                    : "إيقاف"}
+                                </button>
+                              )}
+
+                              {status !== "blocked" && (
+                                <button
+                                  onClick={() =>
+                                    changeAccountStatus(
+                                      user,
+                                      "blocked"
+                                    )
+                                  }
+                                  disabled={isActionLoading}
+                                  style={actionButtonStyle(
+                                    "#a51d1d"
+                                  )}
+                                >
+                                  {isActionLoading
+                                    ? "..."
+                                    : "حظر"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -420,21 +719,64 @@ export default function AdminUsersPage() {
   );
 }
 
-function StatusBadge({ text, danger = false }) {
+function StatusBadge({
+  text,
+  type = "default",
+}) {
+  const styles = {
+    admin: {
+      background: "#eee8ff",
+      color: "#5b35a8",
+    },
+    default: {
+      background: "#eef2f7",
+      color: "#45515f",
+    },
+  };
+
+  const current = styles[type] || styles.default;
+
   return (
     <span
       style={{
         display: "inline-block",
         padding: "6px 10px",
         borderRadius: 999,
-        background: danger ? "#ffe8e8" : "#eef7ee",
-        color: danger ? "#a51d1d" : "#277227",
+        background: current.background,
+        color: current.color,
         fontSize: 12,
         fontWeight: "bold",
       }}
     >
       {text}
     </span>
+  );
+}
+
+function AccountStatusBadge({ status }) {
+  if (status === "blocked") {
+    return (
+      <StatusBadge
+        text="محظور"
+        type="blocked"
+      />
+    );
+  }
+
+  if (status === "suspended") {
+    return (
+      <StatusBadge
+        text="موقوف"
+        type="suspended"
+      />
+    );
+  }
+
+  return (
+    <StatusBadge
+      text="نشط"
+      type="active"
+    />
   );
 }
 
@@ -450,6 +792,35 @@ function formatDate(date) {
   } catch {
     return "-";
   }
+}
+
+function formatDateTime(date) {
+  if (!date) return "-";
+
+  try {
+    return new Date(date).toLocaleString("ar-AE", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "-";
+  }
+}
+
+function actionButtonStyle(color) {
+  return {
+    border: `1px solid ${color}`,
+    background: "#fff",
+    color,
+    borderRadius: 9,
+    padding: "7px 11px",
+    fontSize: 12,
+    fontWeight: "bold",
+    cursor: "pointer",
+  };
 }
 
 const thStyle = {
