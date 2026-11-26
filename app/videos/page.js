@@ -13,24 +13,28 @@ const STATUS = {
     background: "#fef3c7",
     icon: "⏳",
   },
+
   processing: {
     title: "جاري التوليد",
     color: "#1d4ed8",
     background: "#dbeafe",
     icon: "⚙️",
   },
+
   completed: {
     title: "مكتمل",
     color: "#166534",
     background: "#dcfce7",
     icon: "✓",
   },
+
   failed: {
     title: "فشل",
     color: "#991b1b",
     background: "#fee2e2",
     icon: "✕",
   },
+
   cancelled: {
     title: "ملغي",
     color: "#6b7280",
@@ -56,7 +60,6 @@ export default function VideosPage() {
 
   const [videos, setVideos] = useState([]);
   const [products, setProducts] = useState([]);
-
   const [shop, setShop] = useState(null);
 
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,10 @@ export default function VideosPage() {
     setError("");
 
     try {
+      // -----------------------------------------
+      // المستخدم الحالي
+      // -----------------------------------------
+
       const {
         data: { user },
         error: userError,
@@ -81,12 +88,18 @@ export default function VideosPage() {
         return;
       }
 
-      const { data: shopData, error: shopError } =
-        await supabase
-          .from("shops")
-          .select("*")
-          .eq("owner_id", user.id)
-          .maybeSingle();
+      // -----------------------------------------
+      // المحل المرتبط بالمستخدم
+      // -----------------------------------------
+
+      const {
+        data: shopData,
+        error: shopError,
+      } = await supabase
+        .from("shops")
+        .select("*")
+        .eq("owner_id", user.id)
+        .maybeSingle();
 
       if (shopError) {
         throw shopError;
@@ -101,13 +114,22 @@ export default function VideosPage() {
 
       setShop(shopData);
 
-      const { data: productData, error: productError } =
-        await supabase
-          .from("products")
-          .select(
-            "id, name, brand, image_url, price, currency"
-          )
-          .eq("shop_id", shopData.id);
+      // -----------------------------------------
+      // المنتجات الخاصة بالمحل
+      // -----------------------------------------
+
+      const {
+        data: productData,
+        error: productError,
+      } = await supabase
+        .from("products")
+        .select(
+          "id, name, brand, image_url, price, currency"
+        )
+        .eq("shop_id", shopData.id)
+        .order("created_at", {
+          ascending: false,
+        });
 
       if (productError) {
         throw productError;
@@ -115,14 +137,24 @@ export default function VideosPage() {
 
       setProducts(productData || []);
 
-      const { data: videoData, error: videoError } =
-        await supabase
-          .from("ad_videos")
-          .select("*")
-          .eq("shop_id", shopData.id)
-          .order("created_at", {
-            ascending: false,
-          });
+      // -----------------------------------------
+      // الفيديوهات الخاصة بالمحل
+      //
+      // مهم:
+      // لا نستخدم user_id هنا.
+      // الربط يكون عن طريق shop_id.
+      // -----------------------------------------
+
+      const {
+        data: videoData,
+        error: videoError,
+      } = await supabase
+        .from("ad_videos")
+        .select("*")
+        .eq("shop_id", shopData.id)
+        .order("created_at", {
+          ascending: false,
+        });
 
       if (videoError) {
         throw videoError;
@@ -130,7 +162,10 @@ export default function VideosPage() {
 
       setVideos(videoData || []);
     } catch (err) {
-      console.error(err);
+      console.error(
+        "LOAD VIDEOS ERROR:",
+        err
+      );
 
       setError(
         err?.message ||
@@ -145,6 +180,10 @@ export default function VideosPage() {
     loadVideos();
   }, []);
 
+  // -----------------------------------------
+  // البحث عن المنتج المرتبط بالفيديو
+  // -----------------------------------------
+
   function getProduct(productId) {
     return (
       products.find(
@@ -153,6 +192,10 @@ export default function VideosPage() {
       ) || null
     );
   }
+
+  // -----------------------------------------
+  // حالة الفيديو
+  // -----------------------------------------
 
   function getStatus(status) {
     return (
@@ -164,6 +207,10 @@ export default function VideosPage() {
       }
     );
   }
+
+  // -----------------------------------------
+  // التاريخ
+  // -----------------------------------------
 
   function formatDate(value) {
     if (!value) {
@@ -181,6 +228,14 @@ export default function VideosPage() {
     } catch {
       return value;
     }
+  }
+
+  // -----------------------------------------
+  // إعادة التحميل
+  // -----------------------------------------
+
+  async function handleRefresh() {
+    await loadVideos();
   }
 
   return (
@@ -201,7 +256,9 @@ export default function VideosPage() {
           margin: "0 auto",
         }}
       >
+        {/* ---------------------------------- */}
         {/* HEADER */}
+        {/* ---------------------------------- */}
 
         <div
           style={{
@@ -237,30 +294,59 @@ export default function VideosPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              router.push(
-                "/videos/new"
-              )
-            }
+          <div
             style={{
-              background: "#15803d",
-              color: "#fff",
-              border: "none",
-              borderRadius: 12,
-              padding:
-                "13px 18px",
-              fontSize: 15,
-              fontWeight: 900,
-              cursor: "pointer",
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            ＋ إنشاء فيديو جديد
-          </button>
+            <button
+              type="button"
+              onClick={handleRefresh}
+              style={{
+                background: "#fff",
+                color: "#166534",
+                border:
+                  "1px solid #bbf7d0",
+                borderRadius: 12,
+                padding:
+                  "13px 16px",
+                fontSize: 14,
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              ↻ تحديث
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  "/videos/new"
+                )
+              }
+              style={{
+                background: "#15803d",
+                color: "#fff",
+                border: "none",
+                borderRadius: 12,
+                padding:
+                  "13px 18px",
+                fontSize: 15,
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              ＋ إنشاء فيديو جديد
+            </button>
+          </div>
         </div>
 
+        {/* ---------------------------------- */}
         {/* SHOP */}
+        {/* ---------------------------------- */}
 
         {shop && (
           <div
@@ -323,14 +409,15 @@ export default function VideosPage() {
                   marginTop: 3,
                 }}
               >
-                {videos.length}{" "}
-                فيديو
+                {videos.length} فيديو
               </div>
             </div>
           </div>
         )}
 
+        {/* ---------------------------------- */}
         {/* ERROR */}
+        {/* ---------------------------------- */}
 
         {error && (
           <div
@@ -349,7 +436,9 @@ export default function VideosPage() {
           </div>
         )}
 
+        {/* ---------------------------------- */}
         {/* LOADING */}
+        {/* ---------------------------------- */}
 
         {loading ? (
           <div
@@ -366,7 +455,9 @@ export default function VideosPage() {
             جاري تحميل الفيديوهات...
           </div>
         ) : videos.length === 0 ? (
+          /* -------------------------------- */
           /* EMPTY */
+          /* -------------------------------- */
 
           <div
             style={{
@@ -434,7 +525,9 @@ export default function VideosPage() {
             </button>
           </div>
         ) : (
+          /* -------------------------------- */
           /* VIDEO GRID */
+          /* -------------------------------- */
 
           <div
             style={{
@@ -455,6 +548,14 @@ export default function VideosPage() {
                   video.status
                 );
 
+              const isProcessing =
+                video.status ===
+                "processing";
+
+              const isCompleted =
+                video.status ===
+                "completed";
+
               return (
                 <article
                   key={video.id}
@@ -469,7 +570,9 @@ export default function VideosPage() {
                       "0 2px 8px rgba(0,0,0,0.04)",
                   }}
                 >
+                  {/* -------------------------------- */}
                   {/* THUMBNAIL */}
+                  {/* -------------------------------- */}
 
                   <div
                     style={{
@@ -487,7 +590,23 @@ export default function VideosPage() {
                         "hidden",
                     }}
                   >
-                    {video.thumbnail_url ? (
+                    {isCompleted &&
+                    video.video_url ? (
+                      <video
+                        src={
+                          video.video_url
+                        }
+                        muted
+                        playsInline
+                        preload="metadata"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit:
+                            "cover",
+                        }}
+                      />
+                    ) : video.thumbnail_url ? (
                       <img
                         src={
                           video.thumbnail_url
@@ -575,9 +694,35 @@ export default function VideosPage() {
                         0}{" "}
                       ث
                     </div>
+
+                    {/* PROCESSING */}
+
+                    {isProcessing && (
+                      <div
+                        style={{
+                          position:
+                            "absolute",
+                          inset: 0,
+                          display: "flex",
+                          alignItems:
+                            "center",
+                          justifyContent:
+                            "center",
+                          background:
+                            "rgba(255,255,255,0.18)",
+                          backdropFilter:
+                            "blur(2px)",
+                          fontSize: 38,
+                        }}
+                      >
+                        ⚙️
+                      </div>
+                    )}
                   </div>
 
+                  {/* -------------------------------- */}
                   {/* CONTENT */}
+                  {/* -------------------------------- */}
 
                   <div
                     style={{
@@ -658,7 +803,9 @@ export default function VideosPage() {
                       )}
                     </div>
 
-                    {/* ACTIONS */}
+                    {/* -------------------------------- */}
+                    {/* ACTION */}
+                    {/* -------------------------------- */}
 
                     <button
                       type="button"
@@ -680,7 +827,9 @@ export default function VideosPage() {
                         cursor: "pointer",
                       }}
                     >
-                      👁️ عرض الفيديو
+                      {isCompleted
+                        ? "▶️ مشاهدة الفيديو"
+                        : "👁️ عرض الفيديو"}
                     </button>
                   </div>
                 </article>
