@@ -10,14 +10,14 @@ const supabase = createClient(
 );
 
 export async function POST(request) {
+  let videoId = null;
+
   try {
     const body = await request.json();
 
-    const {
-      video_id,
-    } = body || {};
+    videoId = body?.video_id || null;
 
-    if (!video_id) {
+    if (!videoId) {
       return NextResponse.json(
         {
           success: false,
@@ -27,16 +27,18 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 1. جلب الفيديو
-     */
+    // -----------------------------------------
+    // جلب الفيديو
+    // -----------------------------------------
 
-    const { data: video, error: videoError } =
-      await supabase
-        .from("ad_videos")
-        .select("*")
-        .eq("id", video_id)
-        .maybeSingle();
+    const {
+      data: video,
+      error: videoError,
+    } = await supabase
+      .from("ad_videos")
+      .select("*")
+      .eq("id", videoId)
+      .maybeSingle();
 
     if (videoError) {
       throw videoError;
@@ -52,15 +54,14 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 2. منع إعادة تشغيل فيديو قيد المعالجة
-     */
+    // -----------------------------------------
+    // إذا الفيديو قيد المعالجة
+    // -----------------------------------------
 
     if (video.status === "processing") {
       return NextResponse.json({
         success: true,
-        message:
-          "الفيديو قيد المعالجة بالفعل.",
+        message: "الفيديو قيد المعالجة بالفعل.",
         video: {
           id: video.id,
           status: video.status,
@@ -69,17 +70,19 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * 3. جلب المنتج
-     */
+    // -----------------------------------------
+    // جلب المنتج
+    // -----------------------------------------
 
-    const { data: product, error: productError } =
-      await supabase
-        .from("products")
-        .select("*")
-        .eq("id", video.product_id)
-        .eq("shop_id", video.shop_id)
-        .maybeSingle();
+    const {
+      data: product,
+      error: productError,
+    } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", video.product_id)
+      .eq("shop_id", video.shop_id)
+      .maybeSingle();
 
     if (productError) {
       throw productError;
@@ -96,9 +99,9 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 4. فحص الأمان
-     */
+    // -----------------------------------------
+    // حماية المنتج
+    // -----------------------------------------
 
     if (
       product.safety_status === "locked" ||
@@ -127,16 +130,18 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 5. جلب المحل
-     */
+    // -----------------------------------------
+    // جلب المحل
+    // -----------------------------------------
 
-    const { data: shop, error: shopError } =
-      await supabase
-        .from("shops")
-        .select("*")
-        .eq("id", video.shop_id)
-        .maybeSingle();
+    const {
+      data: shop,
+      error: shopError,
+    } = await supabase
+      .from("shops")
+      .select("*")
+      .eq("id", video.shop_id)
+      .maybeSingle();
 
     if (shopError) {
       throw shopError;
@@ -153,9 +158,9 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 6. جلب التصميم إن وجد
-     */
+    // -----------------------------------------
+    // جلب التصميم إذا تم اختياره
+    // -----------------------------------------
 
     let design = null;
 
@@ -177,9 +182,9 @@ export async function POST(request) {
       design = designData || null;
     }
 
-    /*
-     * 7. تجهيز Prompt منظم
-     */
+    // -----------------------------------------
+    // بناء بيانات الفيديو
+    // -----------------------------------------
 
     const structuredPrompt = {
       product: {
@@ -236,9 +241,9 @@ export async function POST(request) {
         video.prompt || null,
     };
 
-    /*
-     * 8. تجهيز بيانات المحرك
-     */
+    // -----------------------------------------
+    // إرسال الطلب لمحرك الفيديو
+    // -----------------------------------------
 
     const engineResult =
       await generateVideo({
@@ -253,32 +258,42 @@ export async function POST(request) {
         },
       });
 
-    /*
-     * 9. المحرك غير مفعّل
-     *
-     * هذا هو الوضع الحالي.
-     */
+    // -----------------------------------------
+    // المحرك غير مفعّل
+    // -----------------------------------------
 
     if (
       engineResult?.enabled === false
     ) {
-      const { data: updatedVideo, error: updateError } =
-        await supabase
-          .from("ad_videos")
-          .update({
-            prompt:
-              JSON.stringify(
-                structuredPrompt
-              ),
+      const {
+        data: updatedVideo,
+        error: updateError,
+      } = await supabase
+        .from("ad_videos")
+        .update({
+          prompt:
+            JSON.stringify(
+              structuredPrompt
+            ),
 
-            status: "pending",
+          status: "pending",
 
-            updated_at:
-              new Date().toISOString(),
-          })
-          .eq("id", video.id)
-          .select()
-          .single();
+          provider: null,
+
+          provider_task_id: null,
+
+          generation_started_at: null,
+
+          error_message: null,
+
+          error_code: null,
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq("id", video.id)
+        .select()
+        .single();
 
       if (updateError) {
         throw updateError;
@@ -303,57 +318,61 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * 10. المحرك مفعّل
-     */
+    // -----------------------------------------
+    // التأكد من وجود Task ID
+    // -----------------------------------------
 
-    const { data: processingVideo, error: processingError } =
-      await supabase
-        .from("ad_videos")
-        .update({
-          prompt:
-            JSON.stringify(
-              structuredPrompt
-            ),
+    if (!engineResult?.taskId) {
+      throw new Error(
+        "محرك الفيديو لم يرجع رقم المهمة."
+      );
+    }
 
-          status: "processing",
+    // -----------------------------------------
+    // حفظ حالة المعالجة + Task ID
+    // -----------------------------------------
 
-          generation_started_at:
-            new Date().toISOString(),
+    const {
+      data: processingVideo,
+      error: processingError,
+    } = await supabase
+      .from("ad_videos")
+      .update({
+        prompt:
+          JSON.stringify(
+            structuredPrompt
+          ),
 
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq("id", video.id)
-        .select()
-        .single();
+        status: "processing",
+
+        provider:
+          engineResult.engine ||
+          "runway",
+
+        provider_task_id:
+          engineResult.taskId,
+
+        generation_started_at:
+          new Date().toISOString(),
+
+        error_message: null,
+
+        error_code: null,
+
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq("id", video.id)
+      .select()
+      .single();
 
     if (processingError) {
       throw processingError;
     }
 
-    /*
-     * 11. حفظ Task ID
-     *
-     * نستخدم error_code مؤقتاً لتخزين
-     * معرف مهمة المزود.
-     *
-     * لاحقاً نضيف video_provider_task_id
-     * كعمود مستقل.
-     */
-
-    if (engineResult.taskId) {
-      await supabase
-        .from("ad_videos")
-        .update({
-          error_code:
-            `provider_task:${engineResult.taskId}`,
-
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq("id", video.id);
-    }
+    // -----------------------------------------
+    // الرد
+    // -----------------------------------------
 
     return NextResponse.json({
       success: true,
@@ -363,8 +382,15 @@ export async function POST(request) {
 
       video: {
         id: processingVideo.id,
+
         status:
           processingVideo.status,
+
+        provider:
+          processingVideo.provider,
+
+        provider_task_id:
+          processingVideo.provider_task_id,
       },
 
       engine_enabled: true,
@@ -373,12 +399,11 @@ export async function POST(request) {
         true,
 
       task_id:
-        engineResult.taskId ||
-        null,
+        engineResult.taskId,
 
       engine:
         engineResult.engine ||
-        null,
+        "runway",
 
       model:
         engineResult.model ||
@@ -390,16 +415,12 @@ export async function POST(request) {
       error
     );
 
-    /*
-     * نحاول تسجيل الفشل في قاعدة البيانات
-     * إذا كان لدينا video_id.
-     */
+    // -----------------------------------------
+    // تسجيل الخطأ
+    // -----------------------------------------
 
-    try {
-      const body =
-        await request.clone().json();
-
-      if (body?.video_id) {
+    if (videoId) {
+      try {
         await supabase
           .from("ad_videos")
           .update({
@@ -415,13 +436,13 @@ export async function POST(request) {
             updated_at:
               new Date().toISOString(),
           })
-          .eq("id", body.video_id);
+          .eq("id", videoId);
+      } catch (logError) {
+        console.error(
+          "VIDEO ERROR LOGGING FAILED:",
+          logError
+        );
       }
-    } catch (logError) {
-      console.error(
-        "VIDEO ERROR LOGGING FAILED:",
-        logError
-      );
     }
 
     return NextResponse.json(
