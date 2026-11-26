@@ -18,6 +18,12 @@ export async function generateDesignImage({
   prompt,
   format = "1:1",
 }) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY غير موجود في إعدادات Vercel."
+    );
+  }
+
   if (!productImageUrl) {
     throw new Error("صورة المنتج مطلوبة.");
   }
@@ -26,15 +32,24 @@ export async function generateDesignImage({
     throw new Error("تعليمات التصميم مطلوبة.");
   }
 
-  const size =
-    SIZE_MAP[format] || SIZE_MAP["1:1"];
+  const size = SIZE_MAP[format] || SIZE_MAP["1:1"];
 
-  const imageResponse =
-    await fetch(productImageUrl);
+  // تحميل صورة المنتج
+  let imageResponse;
+
+  try {
+    imageResponse = await fetch(productImageUrl);
+  } catch (error) {
+    throw new Error(
+      `تعذر الاتصال بصورة المنتج: ${
+        error?.message || "خطأ غير معروف"
+      }`
+    );
+  }
 
   if (!imageResponse.ok) {
     throw new Error(
-      "تعذر الوصول إلى صورة المنتج."
+      `تعذر الوصول إلى صورة المنتج. HTTP ${imageResponse.status}`
     );
   }
 
@@ -42,17 +57,24 @@ export async function generateDesignImage({
     await imageResponse.arrayBuffer()
   );
 
+  if (!imageBuffer.length) {
+    throw new Error("صورة المنتج فارغة.");
+  }
+
   const contentType =
     imageResponse.headers.get("content-type") ||
     "image/png";
 
-  const extension =
+  let extension = "png";
+
+  if (
     contentType.includes("jpeg") ||
     contentType.includes("jpg")
-      ? "jpg"
-      : contentType.includes("webp")
-      ? "webp"
-      : "png";
+  ) {
+    extension = "jpg";
+  } else if (contentType.includes("webp")) {
+    extension = "webp";
+  }
 
   const inputFile = new File(
     [imageBuffer],
@@ -62,20 +84,66 @@ export async function generateDesignImage({
     }
   );
 
-  const result =
-    await openai.images.edit({
+  // تجهيز تعليمات التصميم
+  const finalPrompt =
+    typeof prompt === "string"
+      ? prompt
+      : `
+Create a professional advertising design using the provided product image.
+
+IMPORTANT:
+- Preserve the exact identity of the product.
+- Preserve the original product shape.
+- Do not change the product logo or branding.
+- Do not invent product specifications.
+- Do not invent prices.
+- Do not invent offers.
+- Do not add unsupported claims.
+- Keep the product clearly visible.
+- Create a clean professional advertising composition.
+- Make advertising text readable.
+
+DESIGN DATA:
+${JSON.stringify(prompt, null, 2)}
+`;
+
+  // إنشاء التصميم
+  let result;
+
+  try {
+    result = await openai.images.edit({
       model: MODEL,
       image: inputFile,
-      prompt: JSON.stringify(prompt),
+      prompt: finalPrompt,
       size,
       quality: "auto",
     });
+  } catch (error) {
+    console.error(
+      "OPENAI IMAGE GENERATION ERROR:",
+      error
+    );
+
+    throw new Error(
+      `فشل إنشاء التصميم: ${
+        error?.message ||
+        error?.error?.message ||
+        "خطأ غير معروف من OpenAI"
+      }`
+    );
+  }
 
   const image = result?.data?.[0];
 
-  if (!image?.b64_json) {
+  if (!image) {
     throw new Error(
-      "لم يتم استلام الصورة الناتجة."
+      "OpenAI لم يرجع نتيجة للصورة."
+    );
+  }
+
+  if (!image.b64_json) {
+    throw new Error(
+      "تم إنشاء الطلب ولكن لم يتم استلام بيانات الصورة."
     );
   }
 
