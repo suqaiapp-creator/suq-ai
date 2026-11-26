@@ -22,8 +22,8 @@ export default function LoginPage() {
         data: { session },
       } = await supabase.auth.getSession();
 
-      if (session) {
-        router.replace("/dashboard");
+      if (session?.user) {
+        await checkPolicies(session.user.id);
         return;
       }
 
@@ -32,6 +32,60 @@ export default function LoginPage() {
 
     checkSession();
   }, [router, supabase]);
+
+  async function checkPolicies(userId) {
+    try {
+      const { data: policies, error: policiesError } =
+        await supabase
+          .from("legal_policies")
+          .select("id, version")
+          .eq("is_active", true);
+
+      if (policiesError) {
+        console.error(policiesError);
+        router.replace("/dashboard");
+        return;
+      }
+
+      if (!policies || policies.length === 0) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      const { data: acceptances, error: acceptancesError } =
+        await supabase
+          .from("policy_acceptances")
+          .select("policy_id, policy_version")
+          .eq("user_id", userId);
+
+      if (acceptancesError) {
+        console.error(acceptancesError);
+        router.replace("/dashboard");
+        return;
+      }
+
+      const acceptedMap = {};
+
+      (acceptances || []).forEach((item) => {
+        acceptedMap[item.policy_id] = item.policy_version;
+      });
+
+      const needsAcceptance = policies.some(
+        (policy) =>
+          acceptedMap[policy.id] !== policy.version
+      );
+
+      if (needsAcceptance) {
+        router.replace("/policies");
+        return;
+      }
+
+      router.replace("/dashboard");
+    } catch (err) {
+      console.error(err);
+      router.replace("/dashboard");
+    }
+  }
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -52,7 +106,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const { error: loginError } =
+      const { data, error: loginError } =
         await supabase.auth.signInWithPassword({
           email: email.trim().toLowerCase(),
           password,
@@ -64,7 +118,13 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace("/dashboard");
+      if (!data?.user) {
+        setError("تعذر تسجيل الدخول. حاول مرة أخرى.");
+        setLoading(false);
+        return;
+      }
+
+      await checkPolicies(data.user.id);
     } catch (err) {
       console.error(err);
       setError("حدث خطأ غير متوقع. حاول مرة أخرى.");
