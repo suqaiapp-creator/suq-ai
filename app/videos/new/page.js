@@ -8,26 +8,22 @@ const VIDEO_TYPES = [
   {
     id: "product_ad",
     title: "إعلان منتج",
-    description:
-      "فيديو إعلاني احترافي يركز على المنتج.",
+    description: "فيديو إعلاني احترافي يركز على المنتج.",
   },
   {
     id: "product_showcase",
     title: "عرض منتج",
-    description:
-      "إظهار المنتج بطريقة جذابة وواضحة.",
+    description: "إظهار المنتج بطريقة جذابة وواضحة.",
   },
   {
     id: "sale",
     title: "خصم وعرض",
-    description:
-      "فيديو مناسب للعروض والخصومات.",
+    description: "فيديو مناسب للعروض والخصومات.",
   },
   {
     id: "social",
     title: "سوشيال ميديا",
-    description:
-      "فيديو قصير مناسب لمنصات التواصل.",
+    description: "فيديو قصير مناسب لمنصات التواصل.",
   },
 ];
 
@@ -35,20 +31,17 @@ const FORMATS = [
   {
     id: "9:16",
     title: "عمودي",
-    description:
-      "TikTok / Reels / Stories",
+    description: "TikTok / Reels / Stories",
   },
   {
     id: "1:1",
     title: "مربع",
-    description:
-      "منشورات السوشيال",
+    description: "منشورات السوشيال",
   },
   {
     id: "16:9",
     title: "أفقي",
-    description:
-      "YouTube / شاشة",
+    description: "YouTube / شاشة",
   },
 ];
 
@@ -127,44 +120,23 @@ export default function NewVideoPage() {
   const [products, setProducts] = useState([]);
   const [designs, setDesigns] = useState([]);
 
-  const [selectedProductId, setSelectedProductId] =
-    useState("");
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [selectedDesignId, setSelectedDesignId] = useState("");
 
-  const [selectedDesignId, setSelectedDesignId] =
-    useState("");
+  const [videoType, setVideoType] = useState("product_ad");
+  const [format, setFormat] = useState("9:16");
+  const [duration, setDuration] = useState(10);
+  const [style, setStyle] = useState("modern");
+  const [background, setBackground] = useState("dark");
+  const [mode, setMode] = useState("professional");
 
-  const [videoType, setVideoType] =
-    useState("product_ad");
+  const [description, setDescription] = useState("");
 
-  const [format, setFormat] =
-    useState("9:16");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const [duration, setDuration] =
-    useState(10);
-
-  const [style, setStyle] =
-    useState("modern");
-
-  const [background, setBackground] =
-    useState("dark");
-
-  const [mode, setMode] =
-    useState("professional");
-
-  const [description, setDescription] =
-    useState("");
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [saving, setSaving] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [success, setSuccess] =
-    useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     loadData();
@@ -205,9 +177,7 @@ export default function NewVideoPage() {
       }
 
       if (!shopData) {
-        setError(
-          "لا يوجد محل مرتبط بهذا الحساب."
-        );
+        setError("لا يوجد محل مرتبط بهذا الحساب.");
         return;
       }
 
@@ -263,14 +233,10 @@ export default function NewVideoPage() {
     return (
       products.find(
         (product) =>
-          product.id ===
-          selectedProductId
+          product.id === selectedProductId
       ) || null
     );
-  }, [
-    products,
-    selectedProductId,
-  ]);
+  }, [products, selectedProductId]);
 
   const productDesigns = useMemo(() => {
     if (!selectedProductId) {
@@ -279,26 +245,18 @@ export default function NewVideoPage() {
 
     return designs.filter(
       (design) =>
-        design.product_id ===
-        selectedProductId
+        design.product_id === selectedProductId
     );
-  }, [
-    designs,
-    selectedProductId,
-  ]);
+  }, [designs, selectedProductId]);
 
   const selectedDesign = useMemo(() => {
     return (
       designs.find(
         (design) =>
-          design.id ===
-          selectedDesignId
+          design.id === selectedDesignId
       ) || null
     );
-  }, [
-    designs,
-    selectedDesignId,
-  ]);
+  }, [designs, selectedDesignId]);
 
   function handleProductChange(value) {
     setSelectedProductId(value);
@@ -312,9 +270,7 @@ export default function NewVideoPage() {
     setSuccess("");
 
     if (!user) {
-      setError(
-        "يجب تسجيل الدخول أولاً."
-      );
+      setError("يجب تسجيل الدخول أولاً.");
       return;
     }
 
@@ -329,10 +285,8 @@ export default function NewVideoPage() {
     }
 
     if (
-      selectedProduct.safety_status ===
-        "locked" ||
-      selectedProduct.safety_status ===
-        "violation"
+      selectedProduct.safety_status === "locked" ||
+      selectedProduct.safety_status === "violation"
     ) {
       setError(
         "هذا المنتج مقفل ولا يمكن إنشاء فيديو له حالياً."
@@ -340,10 +294,7 @@ export default function NewVideoPage() {
       return;
     }
 
-    if (
-      selectedProduct.safety_status ===
-      "review"
-    ) {
+    if (selectedProduct.safety_status === "review") {
       setError(
         "هذا المنتج يحتاج إلى مراجعة قبل إنشاء الفيديو."
       );
@@ -353,34 +304,38 @@ export default function NewVideoPage() {
     setSaving(true);
 
     try {
+      /*
+       * مهم:
+       * لا نرسل user_id لأن جدول ad_videos
+       * لا يحتوي على هذا العمود.
+       *
+       * الملكية تعتمد على:
+       * auth user -> shops.owner_id -> ad_videos.shop_id
+       */
+
       const payload = {
-        user_id: user.id,
         shop_id: shop.id,
-        product_id:
-          selectedProduct.id,
-        design_id:
-          selectedDesignId || null,
+
+        product_id: selectedProduct.id,
+
+        design_id: selectedDesignId || null,
 
         title:
           `${selectedProduct.name || "منتج"} - فيديو إعلاني`,
 
         mode,
 
-        video_type:
-          videoType,
+        video_type: videoType,
 
         format,
 
-        duration_seconds:
-          duration,
+        duration_seconds: duration,
 
         style,
 
         background,
 
-        prompt:
-          description.trim() ||
-          null,
+        prompt: description.trim() || null,
 
         status: "pending",
       };
@@ -404,9 +359,7 @@ export default function NewVideoPage() {
 
       setTimeout(() => {
         if (data?.id) {
-          router.push(
-            `/videos/${data.id}`
-          );
+          router.push(`/videos/${data.id}`);
         } else {
           router.push("/videos");
         }
@@ -430,8 +383,7 @@ export default function NewVideoPage() {
         style={{
           minHeight: "100vh",
           padding: 24,
-          fontFamily:
-            "Arial, sans-serif",
+          fontFamily: "Arial, sans-serif",
         }}
       >
         <div
@@ -454,10 +406,8 @@ export default function NewVideoPage() {
       style={{
         minHeight: "100vh",
         background: "#f7f8f7",
-        padding:
-          "24px 16px 50px",
-        fontFamily:
-          "Arial, Tahoma, sans-serif",
+        padding: "24px 16px 50px",
+        fontFamily: "Arial, Tahoma, sans-serif",
       }}
     >
       <div
@@ -469,8 +419,7 @@ export default function NewVideoPage() {
         <div
           style={{
             display: "flex",
-            justifyContent:
-              "space-between",
+            justifyContent: "space-between",
             alignItems: "center",
             gap: 16,
             marginBottom: 24,
@@ -490,29 +439,23 @@ export default function NewVideoPage() {
 
             <p
               style={{
-                margin:
-                  "8px 0 0",
+                margin: "8px 0 0",
                 color: "#666",
               }}
             >
-              أنشئ فيديو إعلاني بالذكاء
-              الاصطناعي باستخدام منتجك
-              وتصميمك.
+              أنشئ فيديو إعلاني بالذكاء الاصطناعي
+              باستخدام منتجك وتصميمك.
             </p>
           </div>
 
           <button
             type="button"
-            onClick={() =>
-              router.push("/videos")
-            }
+            onClick={() => router.push("/videos")}
             style={{
-              border:
-                "1px solid #ddd",
+              border: "1px solid #ddd",
               background: "#fff",
               borderRadius: 10,
-              padding:
-                "10px 16px",
+              padding: "10px 16px",
               fontWeight: 800,
               cursor: "pointer",
             }}
@@ -526,8 +469,7 @@ export default function NewVideoPage() {
             style={{
               background: "#fee2e2",
               color: "#991b1b",
-              border:
-                "1px solid #fecaca",
+              border: "1px solid #fecaca",
               borderRadius: 12,
               padding: 14,
               marginBottom: 16,
@@ -543,8 +485,7 @@ export default function NewVideoPage() {
             style={{
               background: "#dcfce7",
               color: "#166534",
-              border:
-                "1px solid #bbf7d0",
+              border: "1px solid #bbf7d0",
               borderRadius: 12,
               padding: 14,
               marginBottom: 16,
@@ -561,8 +502,7 @@ export default function NewVideoPage() {
             gridTemplateColumns:
               "minmax(0, 1fr) 320px",
             gap: 20,
-            alignItems:
-              "start",
+            alignItems: "start",
           }}
         >
           <section
@@ -570,8 +510,7 @@ export default function NewVideoPage() {
               background: "#fff",
               borderRadius: 16,
               padding: 20,
-              border:
-                "1px solid #e5e7eb",
+              border: "1px solid #e5e7eb",
             }}
           >
             <h2
@@ -585,20 +524,15 @@ export default function NewVideoPage() {
             </h2>
 
             <select
-              value={
-                selectedProductId
-              }
+              value={selectedProductId}
               onChange={(event) =>
-                handleProductChange(
-                  event.target.value
-                )
+                handleProductChange(event.target.value)
               }
               style={{
                 width: "100%",
                 padding: 13,
                 borderRadius: 10,
-                border:
-                  "1px solid #d1d5db",
+                border: "1px solid #d1d5db",
                 fontSize: 15,
                 background: "#fff",
               }}
@@ -607,20 +541,17 @@ export default function NewVideoPage() {
                 اختر المنتج
               </option>
 
-              {products.map(
-                (product) => (
-                  <option
-                    key={product.id}
-                    value={product.id}
-                  >
-                    {product.name}
-
-                    {product.brand
-                      ? ` - ${product.brand}`
-                      : ""}
-                  </option>
-                )
-              )}
+              {products.map((product) => (
+                <option
+                  key={product.id}
+                  value={product.id}
+                >
+                  {product.name}
+                  {product.brand
+                    ? ` - ${product.brand}`
+                    : ""}
+                </option>
+              ))}
             </select>
 
             {selectedProduct && (
@@ -629,32 +560,23 @@ export default function NewVideoPage() {
                   marginTop: 14,
                   padding: 14,
                   borderRadius: 12,
-                  background:
-                    "#f9fafb",
-                  border:
-                    "1px solid #e5e7eb",
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
                 }}
               >
                 <strong>
-                  {
-                    selectedProduct.name
-                  }
+                  {selectedProduct.name}
                 </strong>
 
-                {selectedProduct.price !=
-                  null && (
+                {selectedProduct.price != null && (
                   <div
                     style={{
                       marginTop: 5,
                       color: "#555",
                     }}
                   >
-                    السعر:{" "}
-                    {
-                      selectedProduct.price
-                    }{" "}
-                    {selectedProduct.currency ||
-                      "AED"}
+                    السعر: {selectedProduct.price}{" "}
+                    {selectedProduct.currency || "AED"}
                   </div>
                 )}
 
@@ -667,13 +589,12 @@ export default function NewVideoPage() {
                       fontWeight: 800,
                     }}
                   >
-                    ⚠️ المنتج يحتاج
-                    مراجعة.
+                    ⚠️ المنتج يحتاج مراجعة.
                   </div>
                 )}
 
                 {(selectedProduct.safety_status ===
-                    "locked" ||
+                  "locked" ||
                   selectedProduct.safety_status ===
                     "violation") && (
                   <div
@@ -683,8 +604,7 @@ export default function NewVideoPage() {
                       fontWeight: 800,
                     }}
                   >
-                    🔒 هذا المنتج
-                    مقفل.
+                    🔒 هذا المنتج مقفل.
                   </div>
                 )}
               </div>
@@ -692,11 +612,9 @@ export default function NewVideoPage() {
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -710,42 +628,32 @@ export default function NewVideoPage() {
             </h2>
 
             <select
-              value={
-                selectedDesignId
-              }
+              value={selectedDesignId}
               onChange={(event) =>
-                setSelectedDesignId(
-                  event.target.value
-                )
+                setSelectedDesignId(event.target.value)
               }
               style={{
                 width: "100%",
                 padding: 13,
                 borderRadius: 10,
-                border:
-                  "1px solid #d1d5db",
+                border: "1px solid #d1d5db",
                 fontSize: 15,
                 background: "#fff",
               }}
             >
               <option value="">
-                بدون تصميم سابق — أنشئ
-                من صورة المنتج
+                بدون تصميم سابق — أنشئ من صورة المنتج
               </option>
 
-              {productDesigns.map(
-                (design) => (
-                  <option
-                    key={design.id}
-                    value={design.id}
-                  >
-                    {design.format ||
-                      "تصميم"}{" "}
-                    —{" "}
-                    {design.status}
-                  </option>
-                )
-              )}
+              {productDesigns.map((design) => (
+                <option
+                  key={design.id}
+                  value={design.id}
+                >
+                  {design.format || "تصميم"} —{" "}
+                  {design.status}
+                </option>
+              ))}
             </select>
 
             {selectedDesign?.image_url && (
@@ -753,24 +661,18 @@ export default function NewVideoPage() {
                 style={{
                   marginTop: 14,
                   borderRadius: 12,
-                  overflow:
-                    "hidden",
-                  border:
-                    "1px solid #e5e7eb",
-                  background:
-                    "#f9fafb",
+                  overflow: "hidden",
+                  border: "1px solid #e5e7eb",
+                  background: "#f9fafb",
                 }}
               >
                 <img
-                  src={
-                    selectedDesign.image_url
-                  }
+                  src={selectedDesign.image_url}
                   alt="التصميم المختار"
                   style={{
                     width: "100%",
                     maxHeight: 320,
-                    objectFit:
-                      "contain",
+                    objectFit: "contain",
                     display: "block",
                   }}
                 />
@@ -779,11 +681,9 @@ export default function NewVideoPage() {
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -804,73 +704,57 @@ export default function NewVideoPage() {
                 gap: 10,
               }}
             >
-              {VIDEO_TYPES.map(
-                (type) => {
-                  const active =
-                    videoType ===
-                    type.id;
+              {VIDEO_TYPES.map((type) => {
+                const active =
+                  videoType === type.id;
 
-                  return (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() =>
-                        setVideoType(
-                          type.id
-                        )
-                      }
+                return (
+                  <button
+                    key={type.id}
+                    type="button"
+                    onClick={() =>
+                      setVideoType(type.id)
+                    }
+                    style={{
+                      textAlign: "right",
+                      padding: 14,
+                      border: active
+                        ? "2px solid #15803d"
+                        : "1px solid #ddd",
+                      borderRadius: 12,
+                      background: active
+                        ? "#f0fdf4"
+                        : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div
                       style={{
-                        textAlign:
-                          "right",
-                        padding: 14,
-                        border: active
-                          ? "2px solid #15803d"
-                          : "1px solid #ddd",
-                        borderRadius: 12,
-                        background:
-                          active
-                            ? "#f0fdf4"
-                            : "#fff",
-                        cursor:
-                          "pointer",
+                        fontWeight: 900,
                       }}
                     >
-                      <div
-                        style={{
-                          fontWeight:
-                            900,
-                        }}
-                      >
-                        {
-                          type.title
-                        }
-                      </div>
+                      {type.title}
+                    </div>
 
-                      <div
-                        style={{
-                          marginTop: 5,
-                          fontSize: 13,
-                          color:
-                            "#666",
-                        }}
-                      >
-                        {
-                          type.description
-                        }
-                      </div>
-                    </button>
-                  );
-                }
-              )}
+                    <div
+                      style={{
+                        marginTop: 5,
+                        fontSize: 13,
+                        color: "#666",
+                      }}
+                    >
+                      {type.description}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -893,24 +777,19 @@ export default function NewVideoPage() {
             >
               <button
                 type="button"
-                onClick={() =>
-                  setMode("simple")
-                }
+                onClick={() => setMode("simple")}
                 style={{
                   padding: 15,
                   borderRadius: 12,
                   border:
-                    mode ===
-                    "simple"
+                    mode === "simple"
                       ? "2px solid #15803d"
                       : "1px solid #ddd",
                   background:
-                    mode ===
-                    "simple"
+                    mode === "simple"
                       ? "#f0fdf4"
                       : "#fff",
-                  cursor:
-                    "pointer",
+                  cursor: "pointer",
                   fontWeight: 900,
                 }}
               >
@@ -923,33 +802,28 @@ export default function NewVideoPage() {
                     marginTop: 5,
                   }}
                 >
-                  الذكاء الاصطناعي يحدد
-                  المشاهد تلقائياً
+                  الذكاء الاصطناعي يحدد المشاهد
+                  تلقائياً
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() =>
-                  setMode(
-                    "professional"
-                  )
+                  setMode("professional")
                 }
                 style={{
                   padding: 15,
                   borderRadius: 12,
                   border:
-                    mode ===
-                    "professional"
+                    mode === "professional"
                       ? "2px solid #15803d"
                       : "1px solid #ddd",
                   background:
-                    mode ===
-                    "professional"
+                    mode === "professional"
                       ? "#f0fdf4"
                       : "#fff",
-                  cursor:
-                    "pointer",
+                  cursor: "pointer",
                   fontWeight: 900,
                 }}
               >
@@ -962,19 +836,16 @@ export default function NewVideoPage() {
                     marginTop: 5,
                   }}
                 >
-                  تحكم أكبر في أسلوب
-                  الفيديو
+                  تحكم أكبر في أسلوب الفيديو
                 </div>
               </button>
             </div>
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -995,80 +866,65 @@ export default function NewVideoPage() {
                 gap: 10,
               }}
             >
-              {FORMATS.map(
-                (item) => {
-                  const active =
-                    format ===
-                    item.id;
+              {FORMATS.map((item) => {
+                const active =
+                  format === item.id;
 
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() =>
-                        setFormat(
-                          item.id
-                        )
-                      }
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      setFormat(item.id)
+                    }
+                    style={{
+                      padding: 14,
+                      borderRadius: 12,
+                      border: active
+                        ? "2px solid #15803d"
+                        : "1px solid #ddd",
+                      background: active
+                        ? "#f0fdf4"
+                        : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div
                       style={{
-                        padding: 14,
-                        borderRadius: 12,
-                        border: active
-                          ? "2px solid #15803d"
-                          : "1px solid #ddd",
-                        background:
-                          active
-                            ? "#f0fdf4"
-                            : "#fff",
-                        cursor:
-                          "pointer",
+                        fontWeight: 900,
                       }}
                     >
-                      <div
-                        style={{
-                          fontWeight:
-                            900,
-                        }}
-                      >
-                        {item.id}
-                      </div>
+                      {item.id}
+                    </div>
 
-                      <div
-                        style={{
-                          fontSize: 13,
-                          marginTop: 4,
-                        }}
-                      >
-                        {
-                          item.title
-                        }
-                      </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        marginTop: 4,
+                      }}
+                    >
+                      {item.title}
+                    </div>
 
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color:
-                            "#777",
-                          marginTop: 4,
-                        }}
-                      >
-                        {
-                          item.description
-                        }
-                      </div>
-                    </button>
-                  );
-                }
-              )}
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "#777",
+                        marginTop: 4,
+                      }}
+                    >
+                      {item.description}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -1085,61 +941,46 @@ export default function NewVideoPage() {
               style={{
                 display: "flex",
                 gap: 10,
-                flexWrap:
-                  "wrap",
+                flexWrap: "wrap",
               }}
             >
-              {DURATIONS.map(
-                (item) => {
-                  const active =
-                    duration ===
-                    item.id;
+              {DURATIONS.map((item) => {
+                const active =
+                  duration === item.id;
 
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() =>
-                        setDuration(
-                          item.id
-                        )
-                      }
-                      style={{
-                        padding:
-                          "12px 18px",
-                        borderRadius: 10,
-                        border: active
-                          ? "2px solid #15803d"
-                          : "1px solid #ddd",
-                        background:
-                          active
-                            ? "#f0fdf4"
-                            : "#fff",
-                        cursor:
-                          "pointer",
-                        fontWeight:
-                          800,
-                      }}
-                    >
-                      {
-                        item.title
-                      }
-                    </button>
-                  );
-                }
-              )}
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() =>
+                      setDuration(item.id)
+                    }
+                    style={{
+                      padding: "12px 18px",
+                      borderRadius: 10,
+                      border: active
+                        ? "2px solid #15803d"
+                        : "1px solid #ddd",
+                      background: active
+                        ? "#f0fdf4"
+                        : "#fff",
+                      cursor: "pointer",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {item.title}
+                  </button>
+                );
+              })}
             </div>
 
-            {mode ===
-              "professional" && (
+            {mode === "professional" && (
               <>
                 <hr
                   style={{
-                    margin:
-                      "24px 0",
+                    margin: "24px 0",
                     border: 0,
-                    borderTop:
-                      "1px solid #eee",
+                    borderTop: "1px solid #eee",
                   }}
                 />
 
@@ -1154,56 +995,40 @@ export default function NewVideoPage() {
 
                 <div
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gridTemplateColumns:
                       "repeat(3, minmax(0, 1fr))",
                     gap: 10,
                   }}
                 >
-                  {STYLES.map(
-                    (item) => {
-                      const active =
-                        style ===
-                        item.id;
+                  {STYLES.map((item) => {
+                    const active =
+                      style === item.id;
 
-                      return (
-                        <button
-                          key={
-                            item.id
-                          }
-                          type="button"
-                          onClick={() =>
-                            setStyle(
-                              item.id
-                            )
-                          }
-                          style={{
-                            padding:
-                              13,
-                            borderRadius:
-                              10,
-                            border:
-                              active
-                                ? "2px solid #15803d"
-                                : "1px solid #ddd",
-                            background:
-                              active
-                                ? "#f0fdf4"
-                                : "#fff",
-                            cursor:
-                              "pointer",
-                            fontWeight:
-                              800,
-                          }}
-                        >
-                          {
-                            item.title
-                          }
-                        </button>
-                      );
-                    }
-                  )}
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() =>
+                          setStyle(item.id)
+                        }
+                        style={{
+                          padding: 13,
+                          borderRadius: 10,
+                          border: active
+                            ? "2px solid #15803d"
+                            : "1px solid #ddd",
+                          background: active
+                            ? "#f0fdf4"
+                            : "#fff",
+                          cursor: "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {item.title}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <h2
@@ -1218,67 +1043,49 @@ export default function NewVideoPage() {
 
                 <div
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gridTemplateColumns:
                       "repeat(5, minmax(0, 1fr))",
                     gap: 8,
                   }}
                 >
-                  {BACKGROUNDS.map(
-                    (item) => {
-                      const active =
-                        background ===
-                        item.id;
+                  {BACKGROUNDS.map((item) => {
+                    const active =
+                      background === item.id;
 
-                      return (
-                        <button
-                          key={
-                            item.id
-                          }
-                          type="button"
-                          onClick={() =>
-                            setBackground(
-                              item.id
-                            )
-                          }
-                          style={{
-                            padding:
-                              "11px 8px",
-                            borderRadius:
-                              10,
-                            border:
-                              active
-                                ? "2px solid #15803d"
-                                : "1px solid #ddd",
-                            background:
-                              active
-                                ? "#f0fdf4"
-                                : "#fff",
-                            cursor:
-                              "pointer",
-                            fontWeight:
-                              800,
-                          }}
-                        >
-                          {
-                            item.title
-                          }
-                        </button>
-                      );
-                    }
-                  )}
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() =>
+                          setBackground(item.id)
+                        }
+                        style={{
+                          padding: "11px 8px",
+                          borderRadius: 10,
+                          border: active
+                            ? "2px solid #15803d"
+                            : "1px solid #ddd",
+                          background: active
+                            ? "#f0fdf4"
+                            : "#fff",
+                          cursor: "pointer",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {item.title}
+                      </button>
+                    );
+                  })}
                 </div>
               </>
             )}
 
             <hr
               style={{
-                margin:
-                  "24px 0",
+                margin: "24px 0",
                 border: 0,
-                borderTop:
-                  "1px solid #eee",
+                borderTop: "1px solid #eee",
               }}
             />
 
@@ -1294,22 +1101,17 @@ export default function NewVideoPage() {
             <textarea
               value={description}
               onChange={(event) =>
-                setDescription(
-                  event.target.value
-                )
+                setDescription(event.target.value)
               }
               placeholder="مثال: أريد فيديو فاخر للسماعات مع حركة كاميرا بسيطة وإظهار المنتج بوضوح ثم عرض السعر وبيانات المحل."
               rows={5}
               style={{
                 width: "100%",
-                boxSizing:
-                  "border-box",
+                boxSizing: "border-box",
                 padding: 14,
                 borderRadius: 12,
-                border:
-                  "1px solid #d1d5db",
-                resize:
-                  "vertical",
+                border: "1px solid #d1d5db",
+                resize: "vertical",
                 fontSize: 14,
                 lineHeight: 1.7,
               }}
@@ -1317,9 +1119,7 @@ export default function NewVideoPage() {
 
             <button
               type="button"
-              onClick={
-                createVideoRequest
-              }
+              onClick={createVideoRequest}
               disabled={saving}
               style={{
                 width: "100%",
@@ -1327,17 +1127,15 @@ export default function NewVideoPage() {
                 padding: 16,
                 border: "none",
                 borderRadius: 12,
-                background:
-                  saving
-                    ? "#86b89a"
-                    : "#15803d",
+                background: saving
+                  ? "#86b89a"
+                  : "#15803d",
                 color: "#fff",
                 fontSize: 17,
                 fontWeight: 900,
-                cursor:
-                  saving
-                    ? "not-allowed"
-                    : "pointer",
+                cursor: saving
+                  ? "not-allowed"
+                  : "pointer",
               }}
             >
               {saving
@@ -1351,8 +1149,7 @@ export default function NewVideoPage() {
               background: "#fff",
               borderRadius: 16,
               padding: 18,
-              border:
-                "1px solid #e5e7eb",
+              border: "1px solid #e5e7eb",
               position: "sticky",
               top: 16,
             }}
@@ -1395,18 +1192,15 @@ export default function NewVideoPage() {
                 value={
                   VIDEO_TYPES.find(
                     (item) =>
-                      item.id ===
-                      videoType
-                  )?.title ||
-                  videoType
+                      item.id === videoType
+                  )?.title || videoType
                 }
               />
 
               <InfoRow
                 label="الوضع"
                 value={
-                  mode ===
-                  "professional"
+                  mode === "professional"
                     ? "احترافي"
                     : "عادي"
                 }
@@ -1427,10 +1221,8 @@ export default function NewVideoPage() {
                 value={
                   STYLES.find(
                     (item) =>
-                      item.id ===
-                      style
-                  )?.title ||
-                  style
+                      item.id === style
+                  )?.title || style
                 }
               />
 
@@ -1439,10 +1231,8 @@ export default function NewVideoPage() {
                 value={
                   BACKGROUNDS.find(
                     (item) =>
-                      item.id ===
-                      background
-                  )?.title ||
-                  background
+                      item.id === background
+                  )?.title || background
                 }
               />
             </div>
@@ -1452,10 +1242,8 @@ export default function NewVideoPage() {
                 marginTop: 18,
                 padding: 14,
                 borderRadius: 12,
-                background:
-                  "#f0fdf4",
-                border:
-                  "1px solid #bbf7d0",
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
                 color: "#166534",
                 fontSize: 13,
                 lineHeight: 1.7,
@@ -1481,10 +1269,8 @@ export default function NewVideoPage() {
                 marginTop: 12,
                 padding: 14,
                 borderRadius: 12,
-                background:
-                  "#f9fafb",
-                border:
-                  "1px solid #e5e7eb",
+                background: "#f9fafb",
+                border: "1px solid #e5e7eb",
                 color: "#555",
                 fontSize: 12,
                 lineHeight: 1.7,
@@ -1499,11 +1285,10 @@ export default function NewVideoPage() {
                   marginTop: 5,
                 }}
               >
-                تجهيز الطلب لا يبدأ
-                توليد الفيديو فعلياً في
-                هذه المرحلة. سيتم ربط
-                محرك الفيديو بالذكاء
-                الاصطناعي لاحقاً.
+                تجهيز الطلب لا يبدأ توليد
+                الفيديو فعلياً في هذه المرحلة.
+                سيتم تشغيل محرك الفيديو بعد
+                تجهيز الطلب.
               </div>
             </div>
           </aside>
@@ -1513,20 +1298,15 @@ export default function NewVideoPage() {
   );
 }
 
-function InfoRow({
-  label,
-  value,
-}) {
+function InfoRow({ label, value }) {
   return (
     <div
       style={{
         display: "flex",
-        justifyContent:
-          "space-between",
+        justifyContent: "space-between",
         gap: 10,
         paddingBottom: 9,
-        borderBottom:
-          "1px solid #f0f0f0",
+        borderBottom: "1px solid #f0f0f0",
         fontSize: 13,
       }}
     >
