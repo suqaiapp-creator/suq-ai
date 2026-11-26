@@ -116,7 +116,7 @@ export async function POST(request) {
 
     if (userError || !user) {
       console.error(
-        "Auth error:",
+        "AUTH ERROR:",
         userError
       );
 
@@ -159,7 +159,7 @@ export async function POST(request) {
     } = body || {};
 
     /*
-     * 3. التحقق من البيانات الأساسية
+     * 3. التحقق من البيانات
      */
 
     if (!productId) {
@@ -203,11 +203,11 @@ export async function POST(request) {
       .from("products")
       .select("*")
       .eq("id", productId)
-      .single();
+      .maybeSingle();
 
     if (productError || !product) {
       console.error(
-        "Product fetch error:",
+        "PRODUCT FETCH ERROR:",
         productError
       );
 
@@ -215,15 +215,18 @@ export async function POST(request) {
         {
           success: false,
           error: "المنتج غير موجود.",
-          details:
-            productError?.message || null,
+          debug: {
+            productId,
+            error:
+              productError?.message || null,
+          },
         },
         { status: 404 }
       );
     }
 
     /*
-     * 5. التأكد من ارتباط المنتج بمحل
+     * 5. التأكد من وجود shop_id
      */
 
     if (!product.shop_id) {
@@ -232,16 +235,22 @@ export async function POST(request) {
           success: false,
           error:
             "هذا المنتج غير مرتبط بمحل.",
-          productId: product.id,
-          productName: product.name,
-          shopId: null,
+          debug: {
+            productId: product.id,
+            productName: product.name,
+            shopId: null,
+            currentUserId: user.id,
+          },
         },
         { status: 400 }
       );
     }
 
     /*
-     * 6. جلب المحل المرتبط فعلياً بالمنتج
+     * 6. جلب المحل
+     *
+     * مهم:
+     * نربط المحل بالمستخدم الحالي مباشرة.
      */
 
     const {
@@ -249,21 +258,56 @@ export async function POST(request) {
       error: shopError,
     } = await supabase
       .from("shops")
-      .select(
-        "id, owner_id, name, description, logo_url, phone, whatsapp, email, instagram, tiktok, snapchat, website, address, emirate, country, currency, working_hours, status"
-      )
+      .select("*")
       .eq("id", product.shop_id)
+      .eq("owner_id", user.id)
       .maybeSingle();
 
-    /*
-     * إذا لم نجد المحل، نرجع معلومات تشخيصية
-     * بدون استدعاء OpenAI.
-     */
-
-    if (shopError || !shop) {
+    if (shopError) {
       console.error(
-        "Shop fetch error:",
-        shopError
+        "SHOP QUERY ERROR:",
+        {
+          message: shopError.message,
+          details: shopError.details,
+          hint: shopError.hint,
+          code: shopError.code,
+          productShopId: product.shop_id,
+          currentUserId: user.id,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "تعذر الوصول إلى بيانات المحل.",
+          debug: {
+            productId: product.id,
+            productShopId: product.shop_id,
+            currentUserId: user.id,
+            shopQueryError:
+              shopError.message || null,
+            shopQueryCode:
+              shopError.code || null,
+            shopQueryDetails:
+              shopError.details || null,
+            shopQueryHint:
+              shopError.hint || null,
+          },
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!shop) {
+      console.error(
+        "SHOP NOT FOUND FOR PRODUCT:",
+        {
+          productId: product.id,
+          productName: product.name,
+          productShopId: product.shop_id,
+          currentUserId: user.id,
+        }
       );
 
       return NextResponse.json(
@@ -274,9 +318,9 @@ export async function POST(request) {
             productId: product.id,
             productName: product.name,
             productShopId: product.shop_id,
-            shopQueryError:
-              shopError?.message || null,
             currentUserId: user.id,
+            reason:
+              "لم يتم العثور على محل يطابق shop_id و owner_id معاً.",
           },
         },
         { status: 404 }
@@ -284,7 +328,7 @@ export async function POST(request) {
     }
 
     /*
-     * 7. التأكد أن المستخدم هو صاحب المحل
+     * 7. التحقق النهائي من ملكية المحل
      */
 
     if (shop.owner_id !== user.id) {
@@ -294,7 +338,7 @@ export async function POST(request) {
           error:
             "غير مصرح لك باستخدام هذا المنتج.",
           debug: {
-            productShopId: shop.id,
+            shopId: shop.id,
             shopOwnerId: shop.owner_id,
             currentUserId: user.id,
           },
@@ -304,7 +348,7 @@ export async function POST(request) {
     }
 
     /*
-     * 8. فحص حالة المنتج
+     * 8. فحص المنتج المقفل
      */
 
     const isLocked =
@@ -326,14 +370,15 @@ export async function POST(request) {
     }
 
     /*
-     * 9. التحقق من وضوح المنتج
+     * 9. فحص وضوح المنتج
      *
-     * عدم وضوح المعلومات ليس مخالفة.
+     * عدم وضوح المنتج ليس مخالفة.
      */
 
     const isUnclear =
       product.verification_status === "review" ||
       product.verification_status === "unverified" ||
+      product.ai_status === "pending" ||
       product.confidence === "low" ||
       product.confidence === "medium" ||
       !product.brand ||
@@ -355,7 +400,7 @@ export async function POST(request) {
 
       if (acceptanceError) {
         console.error(
-          "Responsibility acceptance error:",
+          "RESPONSIBILITY ACCEPTANCE ERROR:",
           acceptanceError
         );
 
@@ -383,7 +428,7 @@ export async function POST(request) {
     }
 
     /*
-     * 10. التحقق من صورة المنتج
+     * 10. التحقق من الصورة
      */
 
     if (!product.image_url) {
@@ -398,19 +443,20 @@ export async function POST(request) {
     }
 
     /*
-     * 11. بناء تعليمات التصميم
+     * 11. بناء Prompt التصميم
      */
 
-    const designPrompt = buildDesignPrompt({
-      product,
-      shop,
-      mode,
-      template,
-      style,
-      background,
-      format,
-      description,
-    });
+    const designPrompt =
+      buildDesignPrompt({
+        product,
+        shop,
+        mode,
+        template,
+        style,
+        background,
+        format,
+        description,
+      });
 
     /*
      * 12. إنشاء سجل التصميم
@@ -441,7 +487,7 @@ export async function POST(request) {
 
     if (insertError || !design) {
       console.error(
-        "Create design error:",
+        "CREATE DESIGN ERROR:",
         insertError
       );
 
@@ -460,7 +506,7 @@ export async function POST(request) {
     designId = design.id;
 
     /*
-     * 13. تغيير الحالة إلى generating
+     * 13. حالة التوليد
      */
 
     const {
@@ -478,7 +524,7 @@ export async function POST(request) {
 
     if (generatingError) {
       console.error(
-        "Generating status error:",
+        "GENERATING STATUS ERROR:",
         generatingError
       );
 
@@ -502,7 +548,9 @@ export async function POST(request) {
     }
 
     /*
-     * 14. إنشاء الصورة
+     * 14. توليد الصورة
+     *
+     * هنا فقط يتم استدعاء OpenAI.
      */
 
     try {
@@ -521,7 +569,7 @@ export async function POST(request) {
       }
 
       /*
-       * 15. تحويل الصورة
+       * 15. تحويل Base64
        */
 
       const imageBuffer = Buffer.from(
@@ -536,7 +584,7 @@ export async function POST(request) {
       }
 
       /*
-       * 16. حفظ الصورة في Storage
+       * 16. حفظ الصورة
        */
 
       const storagePath =
@@ -562,7 +610,7 @@ export async function POST(request) {
       }
 
       /*
-       * 17. الحصول على رابط الصورة
+       * 17. رابط الصورة
        */
 
       const {
@@ -581,7 +629,7 @@ export async function POST(request) {
       }
 
       /*
-       * 18. تحديث التصميم كمكتمل
+       * 18. إكمال التصميم
        */
 
       const completedAt =
@@ -616,7 +664,8 @@ export async function POST(request) {
           userId: user.id,
           shopId: shop.id,
           productId: product.id,
-          operation: "design_generation",
+          operation:
+            "design_generation",
           model:
             generated.model ||
             "gpt-image-2",
@@ -636,7 +685,7 @@ export async function POST(request) {
         });
       } catch (usageError) {
         console.error(
-          "AI usage logging error:",
+          "AI USAGE LOGGING ERROR:",
           usageError
         );
       }
@@ -687,7 +736,7 @@ export async function POST(request) {
         });
       } catch (usageError) {
         console.error(
-          "AI usage logging failed:",
+          "AI USAGE LOGGING FAILED:",
           usageError
         );
       }
