@@ -1,47 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "../../../lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
-
-const supabase = createClient();
+import Link from "next/link";
+import { createClient } from "../../../lib/supabase/client";
 
 export default function ProductIntelligencePage() {
   const params = useParams();
   const router = useRouter();
+  const supabase = createClient();
 
   const id = params.id;
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [reanalyzing, setReanalyzing] = useState(false);
-
-  const [user, setUser] = useState(null);
-  const [shop, setShop] = useState(null);
   const [product, setProduct] = useState(null);
-
-  const [form, setForm] = useState({
-    name: "",
-    brand: "",
-    category: "",
-    price: "",
-    description: "",
-    specifications: "",
-    features: "",
-    uses: "",
-    target_audience: "",
-    manufacturer: "",
-    country_of_origin: "",
-    size_or_volume: "",
-    ingredients: "",
-    warnings: "",
-    storage: "",
-    warranty: "",
-    verification_notes: "",
-    confidence: "",
-  });
-
-  const [message, setMessage] = useState("");
+  const [shop, setShop] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     loadProduct();
@@ -49,415 +23,208 @@ export default function ProductIntelligencePage() {
 
   async function loadProduct() {
     setLoading(true);
-    setMessage("");
+    setError("");
 
     try {
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) {
+      if (userError || !user) {
         router.replace("/login");
         return;
       }
 
-      setUser(user);
-
-      const { data: shopData, error: shopError } = await supabase
-        .from("shops")
+      const { data, error: productError } = await supabase
+        .from("products")
         .select("*")
-        .eq("owner_id", user.id)
+        .eq("id", id)
         .maybeSingle();
+
+      if (productError) {
+        throw productError;
+      }
+
+      if (!data) {
+        setError("المنتج غير موجود.");
+        return;
+      }
+
+      const { data: shopData, error: shopError } =
+        await supabase
+          .from("shops")
+          .select("*")
+          .eq("id", data.shop_id)
+          .eq("owner_id", user.id)
+          .maybeSingle();
 
       if (shopError) {
         throw shopError;
       }
 
       if (!shopData) {
-        router.replace("/setup-shop");
+        setError("غير مصرح لك بعرض هذا المنتج.");
         return;
       }
 
+      setProduct(data);
       setShop(shopData);
-
-      const { data: productData, error: productError } =
-        await supabase
-          .from("products")
-          .select("*")
-          .eq("id", id)
-          .eq("shop_id", shopData.id)
-          .maybeSingle();
-
-      if (productError) {
-        throw productError;
-      }
-
-      if (!productData) {
-        router.replace("/products");
-        return;
-      }
-
-      setProduct(productData);
-
-      setForm({
-        name: productData.name || "",
-        brand: productData.brand || "",
-        category: productData.category || "",
-        price:
-          productData.price !== null &&
-          productData.price !== undefined
-            ? productData.price
-            : "",
-        description: productData.description || "",
-        specifications: productData.specifications || "",
-        features: productData.features || "",
-        uses: productData.uses || "",
-        target_audience:
-          productData.target_audience || "",
-        manufacturer:
-          productData.manufacturer || "",
-        country_of_origin:
-          productData.country_of_origin || "",
-        size_or_volume:
-          productData.size_or_volume || "",
-        ingredients:
-          productData.ingredients || "",
-        warnings: productData.warnings || "",
-        storage: productData.storage || "",
-        warranty: productData.warranty || "",
-        verification_notes:
-          productData.verification_notes || "",
-        confidence:
-          productData.confidence || "",
-      });
-    } catch (error) {
-      console.error(error);
-      setMessage(
-        error?.message ||
-          "حدث خطأ أثناء تحميل معلومات المنتج."
+    } catch (err) {
+      console.error(err);
+      setError(
+        err.message || "حدث خطأ أثناء تحميل بيانات المنتج."
       );
     } finally {
       setLoading(false);
     }
   }
 
-  function updateField(field, value) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-  }
-
-  async function saveProduct() {
-    if (!product || !shop || saving) return;
-
-    if (!form.name.trim()) {
-      setMessage("اسم المنتج مطلوب.");
-      return;
-    }
-
-    setSaving(true);
-    setMessage("");
-
-    try {
-      const updateData = {
-        name: form.name.trim(),
-        brand: form.brand.trim() || null,
-        category: form.category.trim() || null,
-
-        price:
-          form.price === ""
-            ? null
-            : Number(form.price),
-
-        description:
-          form.description.trim() || null,
-
-        specifications:
-          form.specifications.trim() || null,
-
-        features:
-          form.features.trim() || null,
-
-        uses:
-          form.uses.trim() || null,
-
-        target_audience:
-          form.target_audience.trim() || null,
-
-        manufacturer:
-          form.manufacturer.trim() || null,
-
-        country_of_origin:
-          form.country_of_origin.trim() || null,
-
-        size_or_volume:
-          form.size_or_volume.trim() || null,
-
-        ingredients:
-          form.ingredients.trim() || null,
-
-        warnings:
-          form.warnings.trim() || null,
-
-        storage:
-          form.storage.trim() || null,
-
-        warranty:
-          form.warranty.trim() || null,
-
-        verification_notes:
-          form.verification_notes.trim() || null,
-
-        confidence:
-          form.confidence.trim() || null,
-
-        updated_at: new Date().toISOString(),
-      };
-
-      const { data, error } = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", product.id)
-        .eq("shop_id", shop.id)
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      setProduct(data);
-
-      setMessage(
-        "تم حفظ معلومات المنتج بنجاح."
-      );
-    } catch (error) {
-      console.error(error);
-
-      setMessage(
-        error?.message ||
-          "حدث خطأ أثناء حفظ معلومات المنتج."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function reanalyzeProduct() {
-    if (!product || !shop || reanalyzing) return;
-
-    const isLocked =
-      product.verification_status === "locked" ||
-      product.safety_status === "locked";
-
-    if (isLocked) {
-      setMessage(
-        "🔒 المنتج مقفول ولا يمكن إعادة تحليله حاليًا."
-      );
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "إعادة التحليل ستستخدم رصيد OpenAI. هل تريد المتابعة؟"
+  function isLocked() {
+    return (
+      product?.verification_status === "locked" ||
+      product?.safety_status === "locked"
     );
+  }
 
-    if (!confirmed) {
-      return;
+  function isViolation() {
+    return (
+      product?.safety_status === "violation" ||
+      product?.safety_level === "critical"
+    );
+  }
+
+  function isUnclear() {
+    if (!product) return false;
+
+    if (
+      product.verification_status === "review" ||
+      product.verification_status === "unverified"
+    ) {
+      return true;
     }
 
-    setReanalyzing(true);
-    setMessage("");
+    if (
+      product.confidence === "low" ||
+      product.confidence === "منخفض" ||
+      product.confidence === "medium" ||
+      product.confidence === "متوسط"
+    ) {
+      return true;
+    }
 
-    try {
-      const response = await fetch(
-        "/api/analyze-product",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            product_name: product.name,
-            brand: product.brand,
-            category: product.category,
-            barcode: product.barcode,
-            image_url: product.image_url,
-          }),
-        }
-      );
+    if (
+      product.name &&
+      (!product.brand ||
+        !product.category ||
+        !product.description)
+    ) {
+      return true;
+    }
 
-      const result = await response.json();
+    return false;
+  }
 
-      if (!response.ok) {
-        throw new Error(
-          result?.error ||
-            "فشل إعادة تحليل المنتج."
-        );
-      }
-
-      const analyzed =
-        result.product ||
-        result.data ||
-        result;
-
-      const updateData = {
-        name:
-          analyzed.product_name ||
-          product.name,
-
-        brand:
-          analyzed.brand ||
-          product.brand ||
-          null,
-
-        category:
-          analyzed.category ||
-          product.category ||
-          null,
-
-        description:
-          analyzed.full_description ||
-          analyzed.short_description ||
-          product.description ||
-          null,
-
-        specifications:
-          analyzed.specifications ||
-          product.specifications ||
-          null,
-
-        features:
-          analyzed.features ||
-          product.features ||
-          null,
-
-        uses:
-          analyzed.uses ||
-          product.uses ||
-          null,
-
-        target_audience:
-          analyzed.target_audience ||
-          product.target_audience ||
-          null,
-
-        manufacturer:
-          analyzed.manufacturer ||
-          product.manufacturer ||
-          null,
-
-        country_of_origin:
-          analyzed.country_of_origin ||
-          product.country_of_origin ||
-          null,
-
-        size_or_volume:
-          analyzed.size_or_volume ||
-          product.size_or_volume ||
-          null,
-
-        ingredients:
-          analyzed.ingredients ||
-          product.ingredients ||
-          null,
-
-        warnings:
-          analyzed.warnings ||
-          product.warnings ||
-          null,
-
-        storage:
-          analyzed.storage ||
-          product.storage ||
-          null,
-
-        warranty:
-          analyzed.warranty ||
-          product.warranty ||
-          null,
-
-        verification_notes:
-          analyzed.verification_notes ||
-          product.verification_notes ||
-          null,
-
-        confidence:
-          analyzed.confidence ||
-          product.confidence ||
-          null,
-
-        ai_status: "completed",
-
-        updated_at: new Date().toISOString(),
+  function statusInfo() {
+    if (isLocked()) {
+      return {
+        title: "المنتج مقفل",
+        icon: "🔴",
+        background: "#fee4e2",
+        color: "#b42318",
+        border: "#f3b5b0",
       };
+    }
 
-      const { data, error } = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", product.id)
-        .eq("shop_id", shop.id)
-        .select()
-        .single();
+    if (isViolation()) {
+      return {
+        title: "توجد مخالفة أو خطورة",
+        icon: "🔴",
+        background: "#fff1f0",
+        color: "#b42318",
+        border: "#f3b5b0",
+      };
+    }
 
-      if (error) {
-        throw error;
+    if (isUnclear()) {
+      return {
+        title: "معلومات غير واضحة",
+        icon: "🟡",
+        background: "#fff8df",
+        color: "#8a5a00",
+        border: "#f0d98a",
+      };
+    }
+
+    return {
+      title: "المنتج واضح وموثّق",
+      icon: "🟢",
+      background: "#e8f7ee",
+      color: "#16794a",
+      border: "#9ad5b4",
+    };
+  }
+
+  function formatSources(sources) {
+    if (!sources) return [];
+
+    if (Array.isArray(sources)) {
+      return sources;
+    }
+
+    if (typeof sources === "string") {
+      try {
+        const parsed = JSON.parse(sources);
+
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+
+        return [parsed];
+      } catch {
+        return [sources];
+      }
+    }
+
+    if (typeof sources === "object") {
+      return Object.values(sources);
+    }
+
+    return [];
+  }
+
+  function sourceLabel(source) {
+    if (typeof source === "string") {
+      return source;
+    }
+
+    if (!source || typeof source !== "object") {
+      return "";
+    }
+
+    return (
+      source.title ||
+      source.name ||
+      source.url ||
+      source.source ||
+      source.domain ||
+      "مصدر"
+    );
+  }
+
+  function sourceUrl(source) {
+    if (!source || typeof source !== "object") {
+      if (
+        typeof source === "string" &&
+        /^https?:\/\//i.test(source)
+      ) {
+        return source;
       }
 
-      setProduct(data);
-
-      setForm({
-        name: data.name || "",
-        brand: data.brand || "",
-        category: data.category || "",
-        price:
-          data.price !== null &&
-          data.price !== undefined
-            ? data.price
-            : "",
-        description:
-          data.description || "",
-        specifications:
-          data.specifications || "",
-        features:
-          data.features || "",
-        uses:
-          data.uses || "",
-        target_audience:
-          data.target_audience || "",
-        manufacturer:
-          data.manufacturer || "",
-        country_of_origin:
-          data.country_of_origin || "",
-        size_or_volume:
-          data.size_or_volume || "",
-        ingredients:
-          data.ingredients || "",
-        warnings:
-          data.warnings || "",
-        storage:
-          data.storage || "",
-        warranty:
-          data.warranty || "",
-        verification_notes:
-          data.verification_notes || "",
-        confidence:
-          data.confidence || "",
-      });
-
-      setMessage(
-        "تم إعادة تحليل المنتج وحفظ المعلومات الجديدة."
-      );
-    } catch (error) {
-      console.error(error);
-
-      setMessage(
-        error?.message ||
-          "حدث خطأ أثناء إعادة تحليل المنتج."
-      );
-    } finally {
-      setReanalyzing(false);
+      return "";
     }
+
+    return source.url || "";
   }
 
   if (loading) {
@@ -466,481 +233,679 @@ export default function ProductIntelligencePage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          padding: 30,
-          textAlign: "center",
+          background: "#f6f8f7",
+          padding: "40px 20px",
           fontFamily: "Arial, sans-serif",
         }}
       >
-        جاري تحميل معلومات المنتج...
+        <div
+          style={{
+            maxWidth: 1000,
+            margin: "0 auto",
+            background: "#fff",
+            borderRadius: 20,
+            padding: 30,
+            textAlign: "center",
+          }}
+        >
+          جاري تحميل تحليل المنتج...
+        </div>
       </main>
     );
   }
 
   if (!product) {
-    return null;
+    return (
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          background: "#f6f8f7",
+          padding: "40px 20px",
+          fontFamily: "Arial, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 800,
+            margin: "0 auto",
+            background: "#fff",
+            borderRadius: 20,
+            padding: 30,
+            textAlign: "center",
+          }}
+        >
+          <h2>المنتج غير موجود</h2>
+
+          {error && (
+            <p style={{ color: "#b42318" }}>
+              {error}
+            </p>
+          )}
+
+          <Link
+            href="/products"
+            style={{
+              display: "inline-block",
+              marginTop: 15,
+              padding: "12px 20px",
+              borderRadius: 10,
+              background: "#16834b",
+              color: "#fff",
+              textDecoration: "none",
+            }}
+          >
+            العودة للمنتجات
+          </Link>
+        </div>
+      </main>
+    );
   }
 
-  const isLocked =
-    product.verification_status === "locked" ||
-    product.safety_status === "locked";
+  const status = statusInfo();
+  const sources = formatSources(product.sources);
+
+  const confidence =
+    product.confidence ||
+    product.verification_status ||
+    "غير محدد";
+
+  const verificationDate =
+    product.verification_checked_at ||
+    product.last_checked_at ||
+    product.updated_at;
 
   return (
     <main
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fa",
-        padding: "24px 14px 60px",
+        background: "#f6f8f7",
+        padding: "25px 16px 50px",
         fontFamily: "Arial, sans-serif",
       }}
     >
       <div
         style={{
-          maxWidth: 950,
+          maxWidth: 1100,
           margin: "0 auto",
         }}
       >
-        <button
-          type="button"
-          onClick={() =>
-            router.push("/products")
-          }
+        {/* Header */}
+        <div
           style={{
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: 15,
-            marginBottom: 15,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 15,
+            flexWrap: "wrap",
+            marginBottom: 20,
           }}
         >
-          ← العودة للمنتجات
-        </button>
+          <div>
+            <Link
+              href="/products"
+              style={{
+                color: "#16834b",
+                textDecoration: "none",
+                fontWeight: 700,
+              }}
+            >
+              ← العودة للمنتجات
+            </Link>
 
+            <h1
+              style={{
+                margin: "12px 0 5px",
+                fontSize: 30,
+              }}
+            >
+              🧠 ذكاء المنتج
+            </h1>
+
+            <p
+              style={{
+                margin: 0,
+                color: "#666",
+              }}
+            >
+              {shop?.name || "المحل"}
+            </p>
+          </div>
+
+          <div
+            style={{
+              padding: "12px 18px",
+              borderRadius: 14,
+              background: status.background,
+              color: status.color,
+              border: `1px solid ${status.border}`,
+              fontWeight: 800,
+            }}
+          >
+            {status.icon} {status.title}
+          </div>
+        </div>
+
+        {/* رسالة الحالة */}
         <div
+          style={{
+            background: status.background,
+            border: `1px solid ${status.border}`,
+            color: status.color,
+            borderRadius: 18,
+            padding: 20,
+            marginBottom: 20,
+          }}
+        >
+          {isLocked() ? (
+            <>
+              <strong>🔒 المنتج مقفل</strong>
+
+              <p style={{ marginBottom: 0 }}>
+                لا يمكن استخدام هذا المنتج في التسويق أو التصميم
+                أو الفيديو أو النشر حتى تتم مراجعته من Super Admin.
+              </p>
+
+              {product.safety_reason && (
+                <p
+                  style={{
+                    marginBottom: 0,
+                    marginTop: 10,
+                  }}
+                >
+                  <strong>السبب:</strong>{" "}
+                  {product.safety_reason}
+                </p>
+              )}
+            </>
+          ) : isViolation() ? (
+            <>
+              <strong>⚠️ توجد ملاحظة على المنتج</strong>
+
+              <p style={{ marginBottom: 0 }}>
+                توجد إشارة إلى مخالفة أو مستوى خطورة مرتفع.
+              </p>
+
+              {product.safety_reason && (
+                <p
+                  style={{
+                    marginBottom: 0,
+                    marginTop: 10,
+                  }}
+                >
+                  <strong>التفاصيل:</strong>{" "}
+                  {product.safety_reason}
+                </p>
+              )}
+            </>
+          ) : isUnclear() ? (
+            <>
+              <strong>
+                ⚠️ المعلومات غير مكتملة أو غير مؤكدة
+              </strong>
+
+              <p style={{ marginBottom: 0 }}>
+                يمكنك إكمال البيانات من صفحة تعديل المنتج.
+                وعند استخدام المنتج في التسويق أو التصميم سيطلب
+                منك النظام تأكيد مسؤوليتك عنه.
+              </p>
+            </>
+          ) : (
+            <>
+              <strong>
+                ✅ المنتج واضح ويمكن استخدام بياناته
+              </strong>
+
+              <p style={{ marginBottom: 0 }}>
+                المعلومات المتوفرة عن المنتج مناسبة للاستخدام
+                داخل النظام وفق حالة التحقق الحالية.
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* المنتج */}
+        <section
           style={{
             background: "#fff",
             borderRadius: 20,
             padding: 22,
-            boxShadow:
-              "0 5px 25px rgba(0,0,0,0.06)",
+            marginBottom: 20,
+            boxShadow: "0 4px 18px rgba(0,0,0,0.05)",
           }}
         >
-          <h1 style={{ marginTop: 0 }}>
-            🧠 معلومات المنتج الذكية
-          </h1>
-
-          <p style={{ color: "#666" }}>
-            المنتج:{" "}
-            <strong>{product.name}</strong>
-          </p>
-
-          {isLocked && (
-            <div
-              style={{
-                background: "#fff3cd",
-                border:
-                  "1px solid #ffe08a",
-                borderRadius: 14,
-                padding: 15,
-                marginBottom: 20,
-                lineHeight: 1.8,
-              }}
-            >
-              🔒 <strong>المنتج مقفول</strong>
-              <br />
-              يمكن مراجعة المعلومات، لكن حالة
-              القفل لن تتغير من هذه الصفحة.
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "minmax(260px, 350px) minmax(0, 1fr)",
+              gap: 25,
+              alignItems: "start",
+            }}
+          >
+            <div>
+              {product.image_url ? (
+                <img
+                  src={product.image_url}
+                  alt={product.name}
+                  style={{
+                    width: "100%",
+                    height: 300,
+                    objectFit: "contain",
+                    background: "#f7f7f7",
+                    borderRadius: 18,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: 300,
+                    borderRadius: 18,
+                    background: "#f1f3f2",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#777",
+                  }}
+                >
+                  لا توجد صورة
+                </div>
+              )}
             </div>
-          )}
 
-          {product.image_url && (
-            <div
-              style={{
-                textAlign: "center",
-                marginBottom: 25,
-              }}
-            >
-              <img
-                src={product.image_url}
-                alt={product.name}
+            <div>
+              <h2
                 style={{
-                  width: "100%",
-                  maxWidth: 300,
-                  height: 300,
-                  objectFit: "contain",
-                  borderRadius: 18,
-                  border: "1px solid #eee",
-                  background: "#fafafa",
+                  marginTop: 0,
+                  fontSize: 28,
                 }}
-              />
+              >
+                {product.name}
+              </h2>
+
+              {product.brand && (
+                <p>
+                  <strong>العلامة التجارية:</strong>{" "}
+                  {product.brand}
+                </p>
+              )}
+
+              {product.category && (
+                <p>
+                  <strong>التصنيف:</strong>{" "}
+                  {product.category}
+                </p>
+              )}
+
+              {product.model_number && (
+                <p>
+                  <strong>رقم الموديل:</strong>{" "}
+                  {product.model_number}
+                </p>
+              )}
+
+              {product.barcode && (
+                <p>
+                  <strong>الباركود:</strong>{" "}
+                  {product.barcode}
+                </p>
+              )}
+
+              {product.price !== null &&
+                product.price !== undefined && (
+                  <p>
+                    <strong>السعر:</strong>{" "}
+                    {product.price}{" "}
+                    {product.currency || "AED"}
+                  </p>
+                )}
+
+              <p>
+                <strong>نوع المنتج:</strong>{" "}
+                {product.product_type === "imported"
+                  ? "مستورد"
+                  : "محلي"}
+              </p>
+
+              {product.description && (
+                <div
+                  style={{
+                    marginTop: 20,
+                    padding: 16,
+                    borderRadius: 14,
+                    background: "#f7faf8",
+                  }}
+                >
+                  <strong>الوصف</strong>
+
+                  <p
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      marginBottom: 0,
+                    }}
+                  >
+                    {product.description}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
+        </section>
+
+        {/* مؤشرات الذكاء */}
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(3, minmax(0, 1fr))",
+            gap: 15,
+            marginBottom: 20,
+          }}
+        >
+          <InfoCard
+            title="حالة الذكاء"
+            value={product.ai_status || "غير محدد"}
+          />
+
+          <InfoCard
+            title="درجة الثقة"
+            value={confidence}
+          />
+
+          <InfoCard
+            title="التحقق"
+            value={
+              verificationDate
+                ? new Date(
+                    verificationDate
+                  ).toLocaleDateString("ar-AE")
+                : "غير محدد"
+            }
+          />
+        </section>
+
+        {/* التفاصيل */}
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: 22,
+            marginBottom: 20,
+            boxShadow: "0 4px 18px rgba(0,0,0,0.05)",
+          }}
+        >
+          <h2 style={{ marginTop: 0 }}>
+            معلومات المنتج
+          </h2>
 
           <div
             style={{
               display: "grid",
               gridTemplateColumns:
-                "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: 14,
+                "repeat(2, minmax(0, 1fr))",
+              gap: 15,
             }}
           >
-            <Field
-              label="اسم المنتج"
-              value={form.name}
-              onChange={(value) =>
-                updateField("name", value)
-              }
+            <Detail
+              title="الشركة المصنعة"
+              value={product.manufacturer}
             />
 
-            <Field
-              label="العلامة التجارية"
-              value={form.brand}
-              onChange={(value) =>
-                updateField("brand", value)
-              }
+            <Detail
+              title="بلد المنشأ"
+              value={product.country_of_origin}
             />
 
-            <Field
-              label="التصنيف"
-              value={form.category}
-              onChange={(value) =>
-                updateField("category", value)
-              }
+            <Detail
+              title="الحجم / الكمية"
+              value={product.size_or_volume}
             />
 
-            <Field
-              label="السعر"
-              type="number"
-              value={form.price}
-              onChange={(value) =>
-                updateField("price", value)
-              }
+            <Detail
+              title="الفئة المستهدفة"
+              value={product.target_audience}
+            />
+
+            <Detail
+              title="الاستخدامات"
+              value={product.uses}
+            />
+
+            <Detail
+              title="المميزات"
+              value={product.features}
+            />
+
+            <Detail
+              title="المواصفات"
+              value={product.specifications}
+            />
+
+            <Detail
+              title="المكونات"
+              value={product.ingredients}
+            />
+
+            <Detail
+              title="التحذيرات"
+              value={product.warnings}
+            />
+
+            <Detail
+              title="التخزين"
+              value={product.storage}
+            />
+
+            <Detail
+              title="الضمان"
+              value={product.warranty}
             />
           </div>
+        </section>
 
-          <TextArea
-            label="الوصف"
-            value={form.description}
-            onChange={(value) =>
-              updateField("description", value)
-            }
-          />
+        {/* مصادر */}
+        <section
+          style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: 22,
+            marginBottom: 20,
+            boxShadow: "0 4px 18px rgba(0,0,0,0.05)",
+          }}
+        >
+          <h2 style={{ marginTop: 0 }}>
+            🔎 مصادر التحقق
+          </h2>
 
-          <TextArea
-            label="المواصفات"
-            value={form.specifications}
-            onChange={(value) =>
-              updateField(
-                "specifications",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="المميزات"
-            value={form.features}
-            onChange={(value) =>
-              updateField("features", value)
-            }
-          />
-
-          <TextArea
-            label="الاستخدامات"
-            value={form.uses}
-            onChange={(value) =>
-              updateField("uses", value)
-            }
-          />
-
-          <TextArea
-            label="الجمهور المستهدف"
-            value={form.target_audience}
-            onChange={(value) =>
-              updateField(
-                "target_audience",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="الشركة المصنعة"
-            value={form.manufacturer}
-            onChange={(value) =>
-              updateField(
-                "manufacturer",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="بلد المنشأ"
-            value={form.country_of_origin}
-            onChange={(value) =>
-              updateField(
-                "country_of_origin",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="الحجم / السعة"
-            value={form.size_or_volume}
-            onChange={(value) =>
-              updateField(
-                "size_or_volume",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="المكونات"
-            value={form.ingredients}
-            onChange={(value) =>
-              updateField(
-                "ingredients",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="التحذيرات"
-            value={form.warnings}
-            onChange={(value) =>
-              updateField(
-                "warnings",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="طريقة التخزين"
-            value={form.storage}
-            onChange={(value) =>
-              updateField(
-                "storage",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="الضمان"
-            value={form.warranty}
-            onChange={(value) =>
-              updateField(
-                "warranty",
-                value
-              )
-            }
-          />
-
-          <TextArea
-            label="ملاحظات التحقق"
-            value={form.verification_notes}
-            onChange={(value) =>
-              updateField(
-                "verification_notes",
-                value
-              )
-            }
-          />
-
-          <Field
-            label="درجة الثقة"
-            value={form.confidence}
-            onChange={(value) =>
-              updateField(
-                "confidence",
-                value
-              )
-            }
-          />
-
-          {message && (
+          {sources.length === 0 ? (
+            <p style={{ color: "#777" }}>
+              لا توجد مصادر محفوظة لهذا المنتج.
+            </p>
+          ) : (
             <div
               style={{
-                marginTop: 20,
-                padding: 14,
-                borderRadius: 12,
-                background: "#eef7ee",
-                lineHeight: 1.7,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
               }}
             >
-              {message}
+              {sources.map((source, index) => {
+                const label = sourceLabel(source);
+                const url = sourceUrl(source);
+
+                if (!label) return null;
+
+                return (
+                  <div
+                    key={index}
+                    style={{
+                      padding: 14,
+                      borderRadius: 12,
+                      background: "#f7faf8",
+                      border: "1px solid #e0e8e3",
+                    }}
+                  >
+                    {url ? (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: "#16834b",
+                          fontWeight: 700,
+                          textDecoration: "none",
+                        }}
+                      >
+                        {label}
+                      </a>
+                    ) : (
+                      <span>{label}</span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
+        </section>
 
-          <div
+        {/* أزرار */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <Link
+            href={`/edit-product/${product.id}`}
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 10,
-              marginTop: 25,
+              flex: 1,
+              minWidth: 180,
+              textAlign: "center",
+              padding: "15px 20px",
+              borderRadius: 14,
+              background: "#eef1ef",
+              color: "#333",
+              textDecoration: "none",
+              fontWeight: 800,
             }}
           >
-            <button
-              type="button"
-              onClick={saveProduct}
-              disabled={saving}
-              style={{
-                ...primaryButton,
-                opacity: saving ? 0.6 : 1,
-              }}
-            >
-              {saving
-                ? "جاري الحفظ..."
-                : "💾 حفظ المعلومات"}
-            </button>
+            ✏️ تعديل المنتج
+          </Link>
 
-            <button
-              type="button"
-              onClick={reanalyzeProduct}
-              disabled={
-                reanalyzing || isLocked
-              }
-              style={{
-                ...secondaryButton,
-                opacity:
-                  reanalyzing || isLocked
-                    ? 0.5
-                    : 1,
-              }}
-            >
-              {reanalyzing
-                ? "جاري التحليل..."
-                : "🔄 إعادة تحليل المنتج"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  `/edit-product/${product.id}`
-                )
-              }
-              style={secondaryButton}
-            >
-              ✏️ تعديل المنتج
-            </button>
-
-            {!isLocked && (
-              <button
-                type="button"
-                onClick={() =>
-                  router.push(
-                    `/marketing/${product.id}`
-                  )
-                }
-                style={secondaryButton}
+          {!isLocked() && (
+            <>
+              <Link
+                href={`/marketing/${product.id}`}
+                style={{
+                  flex: 1,
+                  minWidth: 180,
+                  textAlign: "center",
+                  padding: "15px 20px",
+                  borderRadius: 14,
+                  background: "#16834b",
+                  color: "#fff",
+                  textDecoration: "none",
+                  fontWeight: 800,
+                }}
               >
                 🚀 التسويق
-              </button>
-            )}
-          </div>
+              </Link>
+
+              <Link
+                href="/designs"
+                style={{
+                  flex: 1,
+                  minWidth: 180,
+                  textAlign: "center",
+                  padding: "15px 20px",
+                  borderRadius: 14,
+                  background: "#e9f1ff",
+                  color: "#174ea6",
+                  textDecoration: "none",
+                  fontWeight: 800,
+                }}
+              >
+                🎨 التصميم
+              </Link>
+            </>
+          )}
         </div>
       </div>
+
+      <style jsx>{`
+        @media (max-width: 750px) {
+          section > div {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-}) {
+function InfoCard({ title, value }) {
   return (
-    <div>
-      <label
+    <div
+      style={{
+        background: "#fff",
+        borderRadius: 18,
+        padding: 20,
+        boxShadow: "0 4px 18px rgba(0,0,0,0.05)",
+      }}
+    >
+      <div
         style={{
-          display: "block",
-          fontWeight: "bold",
-          marginBottom: 7,
+          color: "#777",
+          fontSize: 14,
+          marginBottom: 8,
         }}
       >
-        {label}
-      </label>
+        {title}
+      </div>
 
-      <input
-        type={type}
-        value={value}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
+      <strong
         style={{
-          width: "100%",
-          boxSizing: "border-box",
-          padding: "12px 13px",
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          fontSize: 15,
+          fontSize: 18,
+          wordBreak: "break-word",
         }}
-      />
+      >
+        {value || "غير محدد"}
+      </strong>
     </div>
   );
 }
 
-function TextArea({
-  label,
-  value,
-  onChange,
-}) {
+function Detail({ title, value }) {
   return (
-    <div style={{ marginTop: 16 }}>
-      <label
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 14,
+        background: "#f7faf8",
+        border: "1px solid #e0e8e3",
+      }}
+    >
+      <div
         style={{
-          display: "block",
-          fontWeight: "bold",
+          color: "#777",
+          fontSize: 14,
           marginBottom: 7,
         }}
       >
-        {label}
-      </label>
+        {title}
+      </div>
 
-      <textarea
-        value={value}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        rows={4}
+      <div
         style={{
-          width: "100%",
-          boxSizing: "border-box",
-          padding: "12px 13px",
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          fontSize: 15,
-          resize: "vertical",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.7,
         }}
-      />
+      >
+        {value || "غير متوفر"}
+      </div>
     </div>
   );
 }
-
-const primaryButton = {
-  border: "none",
-  background: "#111",
-  color: "#fff",
-  padding: "13px 17px",
-  borderRadius: 12,
-  fontSize: 15,
-  fontWeight: "bold",
-  cursor: "pointer",
-};
-
-const secondaryButton = {
-  border: "1px solid #ddd",
-  background: "#fff",
-  color: "#111",
-  padding: "13px 17px",
-  borderRadius: 12,
-  fontSize: 15,
-  cursor: "pointer",
-};
