@@ -36,6 +36,12 @@ export default function DesignsPage() {
   const [format, setFormat] = useState("1:1");
   const [message, setMessage] = useState("");
 
+  const [responsibilityAccepted, setResponsibilityAccepted] =
+    useState(false);
+
+  const [acceptingResponsibility, setAcceptingResponsibility] =
+    useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -56,11 +62,12 @@ export default function DesignsPage() {
 
       setUser(user);
 
-      const { data: shopData, error: shopError } = await supabase
-        .from("shops")
-        .select("*")
-        .eq("owner_id", user.id)
-        .maybeSingle();
+      const { data: shopData, error: shopError } =
+        await supabase
+          .from("shops")
+          .select("*")
+          .eq("owner_id", user.id)
+          .maybeSingle();
 
       if (shopError) {
         throw shopError;
@@ -96,8 +103,7 @@ export default function DesignsPage() {
       const firstAvailableProduct =
         (productData || []).find(
           (product) =>
-            product.verification_status !== "locked" &&
-            product.safety_status !== "locked"
+            !isLocked(product)
         ) || null;
 
       setSelectedProduct(firstAvailableProduct);
@@ -107,9 +113,16 @@ export default function DesignsPage() {
           shopData.id,
           firstAvailableProduct.id
         );
+
+        await checkResponsibilityAcceptance(
+          user.id,
+          shopData.id,
+          firstAvailableProduct
+        );
       }
     } catch (error) {
       console.error(error);
+
       setMessage(
         error?.message ||
           "حدث خطأ أثناء تحميل صفحة التصاميم."
@@ -130,19 +143,79 @@ export default function DesignsPage() {
       });
 
     if (error) {
-      console.warn("Designs load warning:", error);
+      console.warn(
+        "Designs load warning:",
+        error
+      );
       return;
     }
 
     setDesigns(data || []);
   }
 
+  async function checkResponsibilityAcceptance(
+    userId,
+    shopId,
+    product
+  ) {
+    setResponsibilityAccepted(false);
+
+    if (!product || isLocked(product)) {
+      return;
+    }
+
+    if (!isProductUnclear(product)) {
+      setResponsibilityAccepted(true);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("product_responsibility_acceptances")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("shop_id", shopId)
+      .eq("product_id", product.id)
+      .maybeSingle();
+
+    if (error) {
+      console.warn(
+        "Responsibility check warning:",
+        error
+      );
+      return;
+    }
+
+    setResponsibilityAccepted(!!data);
+  }
+
   async function selectProduct(product) {
     setSelectedProduct(product);
     setMessage("");
 
+    if (isLocked(product)) {
+      setResponsibilityAccepted(false);
+
+      if (shop) {
+        await loadDesigns(
+          shop.id,
+          product.id
+        );
+      }
+
+      return;
+    }
+
     if (shop) {
-      await loadDesigns(shop.id, product.id);
+      await loadDesigns(
+        shop.id,
+        product.id
+      );
+
+      await checkResponsibilityAcceptance(
+        user.id,
+        shop.id,
+        product
+      );
     }
   }
 
@@ -153,14 +226,135 @@ export default function DesignsPage() {
     );
   }
 
+  function isProductUnclear(product) {
+    if (!product) {
+      return true;
+    }
+
+    if (
+      product.verification_status === "review" ||
+      product.verification_status === "unverified"
+    ) {
+      return true;
+    }
+
+    if (
+      product.confidence === "low" ||
+      product.confidence === "منخفض" ||
+      product.confidence === "medium" ||
+      product.confidence === "متوسط"
+    ) {
+      return true;
+    }
+
+    if (
+      product.name &&
+      (!product.brand ||
+        !product.category ||
+        !product.description)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  async function acceptResponsibility() {
+    if (
+      !user ||
+      !shop ||
+      !selectedProduct ||
+      acceptingResponsibility
+    ) {
+      return;
+    }
+
+    if (isLocked(selectedProduct)) {
+      setMessage(
+        "🔒 هذا المنتج مقفول ولا يمكن استخدامه."
+      );
+      return;
+    }
+
+    if (!isProductUnclear(selectedProduct)) {
+      setResponsibilityAccepted(true);
+      return;
+    }
+
+    setAcceptingResponsibility(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from(
+          "product_responsibility_acceptances"
+        )
+        .insert({
+          user_id: user.id,
+          shop_id: shop.id,
+          product_id: selectedProduct.id,
+          policy_version: "1.0",
+        });
+
+      if (error) {
+        /*
+         * إذا كانت الموافقة موجودة مسبقًا،
+         * نعتبرها مقبولة.
+         */
+        if (
+          error.code === "23505"
+        ) {
+          setResponsibilityAccepted(true);
+
+          setMessage(
+            "✅ سبق تأكيد مسؤولية هذا المنتج."
+          );
+
+          return;
+        }
+
+        throw error;
+      }
+
+      setResponsibilityAccepted(true);
+
+      setMessage(
+        "✅ تم تأكيد مسؤولية التاجر. يمكنك الآن إنشاء التصميم."
+      );
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        error?.message ||
+          "تعذر حفظ تأكيد المسؤولية."
+      );
+    } finally {
+      setAcceptingResponsibility(false);
+    }
+  }
+
   async function createDesign() {
-    if (!selectedProduct || !shop || creating) {
+    if (
+      !selectedProduct ||
+      !shop ||
+      creating
+    ) {
       return;
     }
 
     if (isLocked(selectedProduct)) {
       setMessage(
         "🔒 هذا المنتج مقفول ولا يمكن إنشاء تصميم له."
+      );
+      return;
+    }
+
+    if (
+      isProductUnclear(selectedProduct) &&
+      !responsibilityAccepted
+    ) {
+      setMessage(
+        "⚠️ يجب تأكيد مسؤولية التاجر عن هذا المنتج قبل إنشاء التصميم."
       );
       return;
     }
@@ -176,14 +370,6 @@ export default function DesignsPage() {
     setMessage("");
 
     try {
-      /*
-       * لا نرسل الطلب إلى OpenAI هنا الآن.
-       *
-       * هذه الصفحة أصبحت جاهزة معماريًا.
-       * توليد التصميم الفعلي سنربطه بعد تثبيت
-       * نظام التصميم والحماية بالكامل.
-       */
-
       const { data, error } = await supabase
         .from("ad_images")
         .insert({
@@ -290,7 +476,8 @@ export default function DesignsPage() {
           <button
             type="button"
             onClick={() =>
-              (window.location.href = "/dashboard")
+              (window.location.href =
+                "/dashboard")
             }
             style={secondaryButton}
           >
@@ -339,15 +526,21 @@ export default function DesignsPage() {
               )}
 
               {shop.whatsapp && (
-                <div>💬 واتساب: {shop.whatsapp}</div>
+                <div>
+                  💬 واتساب: {shop.whatsapp}
+                </div>
               )}
 
               {shop.instagram && (
-                <div>📸 {shop.instagram}</div>
+                <div>
+                  📸 {shop.instagram}
+                </div>
               )}
 
               {shop.website && (
-                <div>🌐 {shop.website}</div>
+                <div>
+                  🌐 {shop.website}
+                </div>
               )}
             </div>
           </div>
@@ -387,7 +580,8 @@ export default function DesignsPage() {
             <button
               type="button"
               onClick={() =>
-                (window.location.href = "/add-product")
+                (window.location.href =
+                  "/add-product")
               }
               style={primaryButton}
             >
@@ -419,9 +613,12 @@ export default function DesignsPage() {
                 }}
               >
                 {products.map((product) => {
-                  const locked = isLocked(product);
+                  const locked =
+                    isLocked(product);
+
                   const selected =
-                    selectedProduct?.id === product.id;
+                    selectedProduct?.id ===
+                    product.id;
 
                   return (
                     <button
@@ -441,7 +638,9 @@ export default function DesignsPage() {
                         borderRadius: 16,
                         padding: 12,
                         cursor: "pointer",
-                        opacity: locked ? 0.65 : 1,
+                        opacity: locked
+                          ? 0.65
+                          : 1,
                       }}
                     >
                       <div
@@ -449,19 +648,23 @@ export default function DesignsPage() {
                           width: "100%",
                           height: 130,
                           borderRadius: 12,
-                          background: "#f5f5f5",
+                          background:
+                            "#f5f5f5",
                           overflow: "hidden",
                           marginBottom: 10,
                         }}
                       >
                         {product.image_url ? (
                           <img
-                            src={product.image_url}
+                            src={
+                              product.image_url
+                            }
                             alt={product.name}
                             style={{
                               width: "100%",
                               height: "100%",
-                              objectFit: "contain",
+                              objectFit:
+                                "contain",
                             }}
                           />
                         ) : (
@@ -469,8 +672,10 @@ export default function DesignsPage() {
                             style={{
                               height: "100%",
                               display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
+                              alignItems:
+                                "center",
+                              justifyContent:
+                                "center",
                               color: "#999",
                             }}
                           >
@@ -528,11 +733,101 @@ export default function DesignsPage() {
                   >
                     🔒 المنتج مقفول.
                     <br />
-                    لا يمكن إنشاء تصميم له حتى تتم
-                    مراجعته واعتماده.
+                    لا يمكن إنشاء تصميم له حتى
+                    تتم مراجعته واعتماده.
                   </div>
                 ) : (
                   <>
+                    {isProductUnclear(
+                      selectedProduct
+                    ) &&
+                      !responsibilityAccepted && (
+                        <div
+                          style={{
+                            background:
+                              "#fff8e1",
+                            border:
+                              "1px solid #f0d98a",
+                            borderRadius: 16,
+                            padding: 18,
+                            marginBottom: 20,
+                            lineHeight: 1.9,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                              fontSize: 17,
+                              marginBottom: 8,
+                            }}
+                          >
+                            ⚠️ معلومات المنتج
+                            غير مكتملة أو غير
+                            واضحة
+                          </div>
+
+                          <div
+                            style={{
+                              color: "#555",
+                            }}
+                          >
+                            الذكاء الاصطناعي لم يتمكن
+                            من التحقق من جميع معلومات
+                            المنتج بشكل كافٍ.
+                            <br />
+                            يمكنك الاستمرار، لكن
+                            التاجر مسؤول عن صحة
+                            المعلومات ومشروعية بيع
+                            المنتج.
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={
+                              acceptResponsibility
+                            }
+                            disabled={
+                              acceptingResponsibility
+                            }
+                            style={{
+                              ...primaryButton,
+                              marginTop: 15,
+                              opacity:
+                                acceptingResponsibility
+                                  ? 0.6
+                                  : 1,
+                            }}
+                          >
+                            {acceptingResponsibility
+                              ? "جاري الحفظ..."
+                              : "☑️ أوافق وأكمل"}
+                          </button>
+                        </div>
+                      )}
+
+                    {isProductUnclear(
+                      selectedProduct
+                    ) &&
+                      responsibilityAccepted && (
+                        <div
+                          style={{
+                            background:
+                              "#eaf7ee",
+                            border:
+                              "1px solid #b7dfc2",
+                            borderRadius: 14,
+                            padding: 14,
+                            marginBottom: 20,
+                            lineHeight: 1.7,
+                          }}
+                        >
+                          ✅ تم تأكيد مسؤولية
+                          التاجر عن هذا المنتج.
+                          <br />
+                          يمكنك الآن إنشاء التصميم.
+                        </div>
+                      )}
+
                     <div
                       style={{
                         display: "grid",
@@ -550,7 +845,9 @@ export default function DesignsPage() {
                             key={item.value}
                             type="button"
                             onClick={() =>
-                              setFormat(item.value)
+                              setFormat(
+                                item.value
+                              )
                             }
                             style={{
                               border: selected
@@ -582,7 +879,8 @@ export default function DesignsPage() {
                             <div
                               style={{
                                 marginTop: 8,
-                                fontWeight: "bold",
+                                fontWeight:
+                                  "bold",
                               }}
                             >
                               {item.value}
@@ -642,14 +940,25 @@ export default function DesignsPage() {
                     <button
                       type="button"
                       onClick={createDesign}
-                      disabled={creating}
+                      disabled={
+                        creating ||
+                        (isProductUnclear(
+                          selectedProduct
+                        ) &&
+                          !responsibilityAccepted)
+                      }
                       style={{
                         ...primaryButton,
                         width: "100%",
                         marginTop: 20,
-                        opacity: creating
-                          ? 0.6
-                          : 1,
+                        opacity:
+                          creating ||
+                          (isProductUnclear(
+                            selectedProduct
+                          ) &&
+                            !responsibilityAccepted)
+                            ? 0.6
+                            : 1,
                       }}
                     >
                       {creating
@@ -682,7 +991,8 @@ export default function DesignsPage() {
                     textAlign: "center",
                   }}
                 >
-                  لا توجد تصاميم لهذا المنتج حاليًا.
+                  لا توجد تصاميم لهذا المنتج
+                  حاليًا.
                 </div>
               ) : (
                 <div
@@ -706,7 +1016,9 @@ export default function DesignsPage() {
                     >
                       {design.image_url ? (
                         <img
-                          src={design.image_url}
+                          src={
+                            design.image_url
+                          }
                           alt="تصميم إعلاني"
                           style={{
                             width: "100%",
