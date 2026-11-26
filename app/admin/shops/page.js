@@ -66,22 +66,30 @@ export default function AdminShopsPage() {
         shopList.map(async (shop) => {
           const { data: owner } = await supabase
             .from("profiles")
-            .select("id, full_name, role, account_status")
+            .select(
+              "id, full_name, role, account_status, suspension_reason"
+            )
             .eq("id", shop.owner_id)
             .maybeSingle();
 
-          const { count: productCount } = await supabase
-            .from("products")
-            .select("id", {
-              count: "exact",
-              head: true,
-            })
-            .eq("shop_id", shop.id);
+          let productCount = 0;
+
+          if (shop.id) {
+            const { count } = await supabase
+              .from("products")
+              .select("id", {
+                count: "exact",
+                head: true,
+              })
+              .eq("shop_id", shop.id);
+
+            productCount = count || 0;
+          }
 
           return {
             ...shop,
             owner,
-            productCount: productCount || 0,
+            productCount,
           };
         })
       );
@@ -104,7 +112,12 @@ export default function AdminShopsPage() {
       (shop.name || "").toLowerCase().includes(text) ||
       (shop.owner?.full_name || "").toLowerCase().includes(text) ||
       (shop.emirate || "").toLowerCase().includes(text) ||
-      (shop.status || "").toLowerCase().includes(text)
+      (shop.country || "").toLowerCase().includes(text) ||
+      (shop.status || "").toLowerCase().includes(text) ||
+      (shop.phone || "").toLowerCase().includes(text) ||
+      (shop.whatsapp || "").toLowerCase().includes(text) ||
+      (shop.email || "").toLowerCase().includes(text) ||
+      (shop.website || "").toLowerCase().includes(text)
     );
   });
 
@@ -163,7 +176,12 @@ export default function AdminShopsPage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 13, opacity: 0.7 }}>
+            <div
+              style={{
+                fontSize: 13,
+                opacity: 0.7,
+              }}
+            >
               سوق AI
             </div>
 
@@ -239,7 +257,7 @@ export default function AdminShopsPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="بحث باسم المحل أو المالك..."
+              placeholder="بحث باسم المحل أو المالك أو الحالة..."
               style={{
                 flex: 1,
                 minWidth: 220,
@@ -331,7 +349,7 @@ export default function AdminShopsPage() {
                 style={{
                   width: "100%",
                   borderCollapse: "collapse",
-                  minWidth: 1000,
+                  minWidth: 1250,
                 }}
               >
                 <thead>
@@ -342,27 +360,71 @@ export default function AdminShopsPage() {
                   >
                     <th style={thStyle}>المحل</th>
                     <th style={thStyle}>المالك</th>
+                    <th style={thStyle}>حالة المالك</th>
                     <th style={thStyle}>التواصل</th>
                     <th style={thStyle}>الموقع</th>
                     <th style={thStyle}>المنتجات</th>
-                    <th style={thStyle}>الحالة</th>
+                    <th style={thStyle}>حالة المحل</th>
                     <th style={thStyle}>تاريخ الإنشاء</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredShops.map((shop) => (
-                    <tr key={shop.id}>
-                      <td style={tdStyle}>
-                        <div
-                          style={{
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {shop.name || "بدون اسم"}
-                        </div>
+                  {filteredShops.map((shop) => {
+                    const ownerStatus =
+                      shop.owner?.account_status || "active";
 
-                        {shop.description && (
+                    return (
+                      <tr key={shop.id}>
+                        <td style={tdStyle}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                              fontSize: 15,
+                            }}
+                          >
+                            {shop.name || "بدون اسم"}
+                          </div>
+
+                          <div
+                            style={{
+                              color: "#999",
+                              fontSize: 11,
+                              marginTop: 5,
+                              direction: "ltr",
+                              textAlign: "right",
+                            }}
+                          >
+                            {shop.id}
+                          </div>
+
+                          {shop.description && (
+                            <div
+                              style={{
+                                color: "#888",
+                                fontSize: 12,
+                                marginTop: 7,
+                                lineHeight: 1.5,
+                                maxWidth: 240,
+                              }}
+                            >
+                              {shop.description.length > 100
+                                ? shop.description.slice(0, 100) + "..."
+                                : shop.description}
+                            </div>
+                          )}
+                        </td>
+
+                        <td style={tdStyle}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {shop.owner?.full_name ||
+                              "غير معروف"}
+                          </div>
+
                           <div
                             style={{
                               color: "#888",
@@ -370,61 +432,158 @@ export default function AdminShopsPage() {
                               marginTop: 5,
                             }}
                           >
-                            {shop.description.length > 80
-                              ? shop.description.slice(0, 80) + "..."
-                              : shop.description}
+                            {shop.owner?.role || "owner"}
                           </div>
-                        )}
-                      </td>
+                        </td>
 
-                      <td style={tdStyle}>
-                        {shop.owner?.full_name || "غير معروف"}
-                      </td>
+                        <td style={tdStyle}>
+                          <AccountStatusBadge
+                            status={ownerStatus}
+                          />
 
-                      <td style={tdStyle}>
-                        <div>
-                          {shop.phone || shop.whatsapp || "-"}
-                        </div>
+                          {ownerStatus !== "active" &&
+                            shop.owner?.suspension_reason && (
+                              <div
+                                style={{
+                                  marginTop: 7,
+                                  color: "#888",
+                                  fontSize: 12,
+                                  maxWidth: 190,
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                السبب:{" "}
+                                {shop.owner.suspension_reason}
+                              </div>
+                            )}
+                        </td>
 
-                        {shop.email && (
+                        <td style={tdStyle}>
                           <div
                             style={{
-                              marginTop: 4,
-                              color: "#777",
-                              fontSize: 12,
-                              direction: "ltr",
-                              textAlign: "right",
+                              lineHeight: 1.7,
                             }}
                           >
-                            {shop.email}
+                            {shop.phone && (
+                              <div>
+                                📞 {shop.phone}
+                              </div>
+                            )}
+
+                            {shop.whatsapp && (
+                              <div>
+                                💬 {shop.whatsapp}
+                              </div>
+                            )}
+
+                            {shop.email && (
+                              <div
+                                style={{
+                                  direction: "ltr",
+                                  textAlign: "right",
+                                  fontSize: 12,
+                                  color: "#777",
+                                }}
+                              >
+                                {shop.email}
+                              </div>
+                            )}
+
+                            {!shop.phone &&
+                              !shop.whatsapp &&
+                              !shop.email && (
+                                <span
+                                  style={{
+                                    color: "#999",
+                                  }}
+                                >
+                                  لا توجد بيانات
+                                </span>
+                              )}
                           </div>
-                        )}
-                      </td>
 
-                      <td style={tdStyle}>
-                        {shop.emirate || "-"}
-                      </td>
+                          {(shop.website ||
+                            shop.instagram ||
+                            shop.tiktok ||
+                            shop.snapchat) && (
+                            <div
+                              style={{
+                                marginTop: 8,
+                                fontSize: 12,
+                                color: "#777",
+                              }}
+                            >
+                              الشبكات والروابط متوفرة
+                            </div>
+                          )}
+                        </td>
 
-                      <td style={tdStyle}>
-                        <strong>{shop.productCount}</strong>
-                      </td>
+                        <td style={tdStyle}>
+                          <div
+                            style={{
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {shop.emirate || "-"}
+                          </div>
 
-                      <td style={tdStyle}>
-                        <StatusBadge
-                          text={
-                            shop.status === "active"
-                              ? "نشط"
-                              : shop.status || "غير محدد"
-                          }
-                          danger={shop.status !== "active"}
-                        />
-                      </td>
+                          <div
+                            style={{
+                              color: "#888",
+                              fontSize: 12,
+                              marginTop: 4,
+                            }}
+                          >
+                            {shop.country ||
+                              "United Arab Emirates"}
+                          </div>
 
-                      <td style={tdStyle}>
-                        {formatDate(shop.created_at)}
-                      </td>
-                    </tr>
-                  ))}
+                          {shop.address && (
+                            <div
+                              style={{
+                                color: "#888",
+                                fontSize: 12,
+                                marginTop: 5,
+                                maxWidth: 180,
+                              }}
+                            >
+                              {shop.address}
+                            </div>
+                          )}
+                        </td>
+
+                        <td style={tdStyle}>
+                          <strong
+                            style={{
+                              fontSize: 17,
+                            }}
+                          >
+                            {shop.productCount}
+                          </strong>
+
+                          <div
+                            style={{
+                              color: "#888",
+                              fontSize: 12,
+                              marginTop: 3,
+                            }}
+                          >
+                            منتج
+                          </div>
+                        </td>
+
+                        <td style={tdStyle}>
+                          <ShopStatusBadge
+                            status={shop.status}
+                          />
+                        </td>
+
+                        <td style={tdStyle}>
+                          {formatDate(shop.created_at)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -435,15 +594,99 @@ export default function AdminShopsPage() {
   );
 }
 
-function StatusBadge({ text, danger = false }) {
+function AccountStatusBadge({ status }) {
+  if (status === "blocked") {
+    return (
+      <StatusBadge
+        text="محظور"
+        background="#ffe8e8"
+        color="#a51d1d"
+      />
+    );
+  }
+
+  if (status === "suspended") {
+    return (
+      <StatusBadge
+        text="موقوف"
+        background="#fff4d8"
+        color="#956600"
+      />
+    );
+  }
+
+  return (
+    <StatusBadge
+      text="نشط"
+      background="#eef7ee"
+      color="#277227"
+    />
+  );
+}
+
+function ShopStatusBadge({ status }) {
+  if (status === "suspended") {
+    return (
+      <StatusBadge
+        text="موقوف"
+        background="#fff4d8"
+        color="#956600"
+      />
+    );
+  }
+
+  if (status === "blocked") {
+    return (
+      <StatusBadge
+        text="محظور"
+        background="#ffe8e8"
+        color="#a51d1d"
+      />
+    );
+  }
+
+  if (status === "pending") {
+    return (
+      <StatusBadge
+        text="قيد المراجعة"
+        background="#eef2ff"
+        color="#4056a1"
+      />
+    );
+  }
+
+  if (status === "inactive") {
+    return (
+      <StatusBadge
+        text="غير نشط"
+        background="#f0f0f0"
+        color="#666"
+      />
+    );
+  }
+
+  return (
+    <StatusBadge
+      text="نشط"
+      background="#eef7ee"
+      color="#277227"
+    />
+  );
+}
+
+function StatusBadge({
+  text,
+  background,
+  color,
+}) {
   return (
     <span
       style={{
         display: "inline-block",
         padding: "6px 10px",
         borderRadius: 999,
-        background: danger ? "#ffe8e8" : "#eef7ee",
-        color: danger ? "#a51d1d" : "#277227",
+        background,
+        color,
         fontSize: 12,
         fontWeight: "bold",
       }}
@@ -473,6 +716,7 @@ const thStyle = {
   fontSize: 13,
   color: "#555",
   borderBottom: "1px solid #eee",
+  whiteSpace: "nowrap",
 };
 
 const tdStyle = {
