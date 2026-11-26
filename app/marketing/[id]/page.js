@@ -20,6 +20,15 @@ export default function MarketingPage() {
   const [product, setProduct] = useState(null);
   const [marketing, setMarketing] = useState(null);
 
+  const [responsibilityAccepted, setResponsibilityAccepted] =
+    useState(false);
+
+  const [showResponsibility, setShowResponsibility] =
+    useState(false);
+
+  const [acceptingResponsibility, setAcceptingResponsibility] =
+    useState(false);
+
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -92,6 +101,41 @@ export default function MarketingPage() {
         return;
       }
 
+      /*
+       * إذا كان المنتج غير واضح أو يحتاج مراجعة،
+       * نتحقق هل التاجر وافق سابقًا على إقرار المسؤولية.
+       */
+      const needsResponsibility =
+        isProductUnclear(productData);
+
+      if (needsResponsibility) {
+        const { data: acceptanceData, error: acceptanceError } =
+          await supabase
+            .from("product_responsibility_acceptances")
+            .select("id, policy_version, accepted_at")
+            .eq("user_id", user.id)
+            .eq("product_id", productData.id)
+            .maybeSingle();
+
+        if (acceptanceError) {
+          console.warn(
+            "Responsibility acceptance load warning:",
+            acceptanceError
+          );
+        }
+
+        if (acceptanceData) {
+          setResponsibilityAccepted(true);
+          setShowResponsibility(false);
+        } else {
+          setResponsibilityAccepted(false);
+          setShowResponsibility(true);
+        }
+      } else {
+        setResponsibilityAccepted(true);
+        setShowResponsibility(false);
+      }
+
       const { data: marketingData, error: marketingError } =
         await supabase
           .from("marketing_contents")
@@ -103,7 +147,10 @@ export default function MarketingPage() {
           .maybeSingle();
 
       if (marketingError) {
-        console.warn("Marketing load warning:", marketingError);
+        console.warn(
+          "Marketing load warning:",
+          marketingError
+        );
       }
 
       if (marketingData) {
@@ -121,11 +168,63 @@ export default function MarketingPage() {
       }
     } catch (error) {
       console.error(error);
+
       setMessage(
-        error?.message || "حدث خطأ أثناء تحميل صفحة التسويق."
+        error?.message ||
+          "حدث خطأ أثناء تحميل صفحة التسويق."
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function acceptResponsibility() {
+    if (
+      !product ||
+      !shop ||
+      !user ||
+      acceptingResponsibility
+    ) {
+      return;
+    }
+
+    setAcceptingResponsibility(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase
+        .from("product_responsibility_acceptances")
+        .upsert(
+          {
+            user_id: user.id,
+            shop_id: shop.id,
+            product_id: product.id,
+            policy_version: "1.0",
+          },
+          {
+            onConflict: "user_id,product_id",
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      setResponsibilityAccepted(true);
+      setShowResponsibility(false);
+
+      setMessage(
+        "تم تسجيل إقرار المسؤولية. يمكنك الآن متابعة التسويق."
+      );
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        error?.message ||
+          "تعذر تسجيل إقرار المسؤولية."
+      );
+    } finally {
+      setAcceptingResponsibility(false);
     }
   }
 
@@ -140,6 +239,23 @@ export default function MarketingPage() {
       setMessage(
         "🔒 هذا المنتج مقفول ولا يمكن إنشاء محتوى تسويقي له."
       );
+      return;
+    }
+
+    /*
+     * إذا كان المنتج غير واضح،
+     * يجب أن تكون موافقة المسؤولية موجودة أولًا.
+     */
+    if (
+      isProductUnclear(product) &&
+      !responsibilityAccepted
+    ) {
+      setShowResponsibility(true);
+
+      setMessage(
+        "⚠️ يجب قراءة إقرار المسؤولية والموافقة عليه قبل متابعة التسويق."
+      );
+
       return;
     }
 
@@ -161,11 +277,13 @@ export default function MarketingPage() {
 
       if (!response.ok) {
         throw new Error(
-          result?.error || "فشل إنشاء المحتوى التسويقي."
+          result?.error ||
+            "فشل إنشاء المحتوى التسويقي."
         );
       }
 
-      const generated = result.marketing || result;
+      const generated =
+        result.marketing || result;
 
       const { data, error } = await supabase
         .from("marketing_contents")
@@ -222,7 +340,9 @@ export default function MarketingPage() {
         ai_status: "completed",
       });
 
-      setMessage("تم إنشاء المحتوى التسويقي بنجاح.");
+      setMessage(
+        "تم إنشاء المحتوى التسويقي بنجاح."
+      );
     } catch (error) {
       console.error(error);
 
@@ -280,6 +400,9 @@ export default function MarketingPage() {
     product.verification_status === "locked" ||
     product.safety_status === "locked";
 
+  const productNeedsResponsibility =
+    isProductUnclear(product);
+
   return (
     <main
       dir="rtl"
@@ -315,7 +438,8 @@ export default function MarketingPage() {
             background: "#fff",
             borderRadius: 20,
             padding: 22,
-            boxShadow: "0 5px 25px rgba(0,0,0,0.06)",
+            boxShadow:
+              "0 5px 25px rgba(0,0,0,0.06)",
           }}
         >
           <h1 style={{ marginTop: 0 }}>
@@ -350,13 +474,135 @@ export default function MarketingPage() {
               <strong>المنتج مقفول</strong>
 
               <p style={{ marginBottom: 0 }}>
-                لا يمكن إنشاء محتوى تسويقي لهذا المنتج حاليًا.
-                يجب مراجعة المنتج واعتماده أولًا من النظام أو
-                المشرف العام.
+                لا يمكن إنشاء محتوى تسويقي لهذا المنتج
+                حاليًا بسبب وجود حالة تستدعي المراجعة.
               </p>
             </div>
           ) : (
             <>
+              {productNeedsResponsibility &&
+                !responsibilityAccepted &&
+                showResponsibility && (
+                  <div
+                    style={{
+                      marginTop: 20,
+                      padding: 20,
+                      borderRadius: 16,
+                      background: "#fff8e1",
+                      border:
+                        "1px solid #f4c542",
+                      lineHeight: 1.9,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 28,
+                        marginBottom: 8,
+                      }}
+                    >
+                      ⚠️
+                    </div>
+
+                    <h2
+                      style={{
+                        marginTop: 0,
+                        marginBottom: 10,
+                      }}
+                    >
+                      تنبيه قبل المتابعة
+                    </h2>
+
+                    <p>
+                      لم يتمكن النظام من التحقق بشكل
+                      كافٍ من بعض معلومات هذا المنتج.
+                    </p>
+
+                    <p>
+                      هذا لا يعني أن المنتج مخالف،
+                      ولكن ننصحك بالتأكد بنفسك من
+                      صحة المعلومات وقانونية بيع
+                      المنتج وتسويقه.
+                    </p>
+
+                    <div
+                      style={{
+                        marginTop: 15,
+                        padding: 15,
+                        background: "#fff",
+                        borderRadius: 12,
+                        border:
+                          "1px solid #eee",
+                      }}
+                    >
+                      <strong>
+                        إقرار مسؤولية التاجر
+                      </strong>
+
+                      <p
+                        style={{
+                          marginBottom: 0,
+                        }}
+                      >
+                        أقر بأنني مسؤول عن المنتج
+                        الذي أقوم ببيعه أو تسويقه،
+                        وأنني مسؤول عن التأكد من
+                        قانونية المنتج وصحة المعلومات
+                        المقدمة عنه، وأوافق على
+                        سياسة المسؤولية الخاصة
+                        بالمنتجات.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={acceptResponsibility}
+                      disabled={
+                        acceptingResponsibility
+                      }
+                      style={{
+                        width: "100%",
+                        marginTop: 18,
+                        padding: "15px 18px",
+                        border: "none",
+                        borderRadius: 13,
+                        background:
+                          acceptingResponsibility
+                            ? "#999"
+                            : "#111",
+                        color: "#fff",
+                        fontSize: 16,
+                        fontWeight: "bold",
+                        cursor:
+                          acceptingResponsibility
+                            ? "not-allowed"
+                            : "pointer",
+                      }}
+                    >
+                      {acceptingResponsibility
+                        ? "جاري تسجيل الموافقة..."
+                        : "☑️ أوافق وأكمل"}
+                    </button>
+                  </div>
+                )}
+
+              {productNeedsResponsibility &&
+                responsibilityAccepted && (
+                  <div
+                    style={{
+                      marginTop: 18,
+                      padding: 13,
+                      borderRadius: 12,
+                      background: "#eef7ee",
+                      border:
+                        "1px solid #cce8cc",
+                      color: "#256029",
+                    }}
+                  >
+                    ✅ تم تسجيل إقرار المسؤولية لهذا
+                    المنتج.
+                  </div>
+                )}
+
               <div
                 style={{
                   display: "grid",
@@ -373,12 +619,18 @@ export default function MarketingPage() {
 
                 <InfoCard
                   title="العلامة"
-                  value={product.brand || "غير محددة"}
+                  value={
+                    product.brand ||
+                    "غير محددة"
+                  }
                 />
 
                 <InfoCard
                   title="التصنيف"
-                  value={product.category || "غير محدد"}
+                  value={
+                    product.category ||
+                    "غير محدد"
+                  }
                 />
 
                 <InfoCard
@@ -387,7 +639,8 @@ export default function MarketingPage() {
                     product.price !== null &&
                     product.price !== undefined
                       ? `${product.price} ${
-                          product.currency || "AED"
+                          product.currency ||
+                          "AED"
                         }`
                       : "غير محدد"
                   }
@@ -411,7 +664,8 @@ export default function MarketingPage() {
                       objectFit: "contain",
                       borderRadius: 18,
                       background: "#fafafa",
-                      border: "1px solid #eee",
+                      border:
+                        "1px solid #eee",
                     }}
                   />
                 </div>
@@ -420,26 +674,39 @@ export default function MarketingPage() {
               <button
                 type="button"
                 onClick={generateMarketing}
-                disabled={generating}
+                disabled={
+                  generating ||
+                  (productNeedsResponsibility &&
+                    !responsibilityAccepted)
+                }
                 style={{
                   width: "100%",
                   marginTop: 25,
                   padding: "16px 18px",
                   border: "none",
                   borderRadius: 14,
-                  background: generating
-                    ? "#999"
-                    : "#111",
+                  background:
+                    generating ||
+                    (productNeedsResponsibility &&
+                      !responsibilityAccepted)
+                      ? "#999"
+                      : "#111",
                   color: "#fff",
                   fontSize: 17,
                   fontWeight: "bold",
-                  cursor: generating
-                    ? "not-allowed"
-                    : "pointer",
+                  cursor:
+                    generating ||
+                    (productNeedsResponsibility &&
+                      !responsibilityAccepted)
+                      ? "not-allowed"
+                      : "pointer",
                 }}
               >
                 {generating
                   ? "جاري إنشاء المحتوى..."
+                  : productNeedsResponsibility &&
+                    !responsibilityAccepted
+                  ? "⚠️ وافق على الإقرار أولًا"
                   : marketing
                   ? "🔄 إنشاء محتوى جديد"
                   : "🚀 إنشاء المحتوى التسويقي"}
@@ -467,7 +734,9 @@ export default function MarketingPage() {
 
               <MarketingSection
                 title="الوصف التسويقي"
-                value={marketing.marketing_description}
+                value={
+                  marketing.marketing_description
+                }
               />
 
               <MarketingSection
@@ -482,7 +751,9 @@ export default function MarketingPage() {
 
               <MarketingSection
                 title="TikTok / Snapchat"
-                value={marketing.tiktok_snapchat}
+                value={
+                  marketing.tiktok_snapchat
+                }
               />
 
               <MarketingSection
@@ -492,17 +763,23 @@ export default function MarketingPage() {
 
               <MarketingSection
                 title="SEO Description"
-                value={marketing.seo_description}
+                value={
+                  marketing.seo_description
+                }
               />
 
               <MarketingSection
                 title="SEO Keywords"
-                value={marketing.seo_keywords}
+                value={
+                  marketing.seo_keywords
+                }
               />
 
               <MarketingSection
                 title="Call To Action"
-                value={marketing.call_to_action}
+                value={
+                  marketing.call_to_action
+                }
               />
             </div>
           )}
@@ -518,7 +795,9 @@ export default function MarketingPage() {
             <button
               type="button"
               onClick={() =>
-                router.push(`/product-intelligence/${product.id}`)
+                router.push(
+                  `/product-intelligence/${product.id}`
+                )
               }
               style={secondaryButton}
             >
@@ -528,7 +807,9 @@ export default function MarketingPage() {
             <button
               type="button"
               onClick={() =>
-                router.push(`/edit-product/${product.id}`)
+                router.push(
+                  `/edit-product/${product.id}`
+                )
               }
               style={secondaryButton}
             >
@@ -537,7 +818,9 @@ export default function MarketingPage() {
 
             <button
               type="button"
-              onClick={() => router.push("/designs")}
+              onClick={() =>
+                router.push("/designs")
+              }
               disabled={isLocked}
               style={{
                 ...secondaryButton,
@@ -554,6 +837,88 @@ export default function MarketingPage() {
       </div>
     </main>
   );
+}
+
+function isProductUnclear(product) {
+  if (!product) return false;
+
+  const verification =
+    product.verification_status;
+
+  const safety =
+    product.safety_status;
+
+  const confidence =
+    String(product.confidence || "")
+      .trim()
+      .toLowerCase();
+
+  /*
+   * المخالفة والقفل لها مسار مختلف.
+   * هنا نبحث فقط عن المنتج الذي يحتاج
+   * إقرار مسؤولية بسبب عدم وضوح المعلومات.
+   */
+
+  if (
+    safety === "locked" ||
+    verification === "locked"
+  ) {
+    return false;
+  }
+
+  if (
+    safety === "violation" ||
+    safety === "critical"
+  ) {
+    return false;
+  }
+
+  if (
+    verification === "review" ||
+    verification === "unverified"
+  ) {
+    return true;
+  }
+
+  if (
+    confidence === "low" ||
+    confidence === "منخفض" ||
+    confidence === "medium" ||
+    confidence === "متوسط"
+  ) {
+    return true;
+  }
+
+  /*
+   * إذا كانت البيانات الأساسية ناقصة بشكل واضح،
+   * نعتبر المنتج غير واضح.
+   */
+  const hasName = Boolean(
+    String(product.name || "").trim()
+  );
+
+  const hasBrand = Boolean(
+    String(product.brand || "").trim()
+  );
+
+  const hasCategory = Boolean(
+    String(product.category || "").trim()
+  );
+
+  const hasDescription = Boolean(
+    String(product.description || "").trim()
+  );
+
+  if (
+    hasName &&
+    !hasBrand &&
+    !hasCategory &&
+    !hasDescription
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function InfoCard({ title, value }) {
