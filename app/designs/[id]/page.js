@@ -4,137 +4,111 @@ import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 
-const supabase = createClient();
-
 export default function DesignDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const supabase = createClient();
 
   const id = params?.id;
 
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState(false);
-
-  const [shop, setShop] = useState(null);
   const [design, setDesign] = useState(null);
   const [product, setProduct] = useState(null);
-
+  const [shop, setShop] = useState(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (id) {
-      loadDesign();
-    }
+    if (!id) return;
+
+    loadDesign();
   }, [id]);
 
   async function loadDesign() {
-    setLoading(true);
-    setError("");
-
     try {
+      setLoading(true);
+      setError("");
+
       const {
-        data: { user: currentUser },
+        data: { user },
         error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !currentUser) {
-        router.replace("/login");
+      if (userError || !user) {
+        router.push("/login");
         return;
       }
 
-      const {
-        data: shopData,
-        error: shopError,
-      } = await supabase
-        .from("shops")
-        .select("*")
-        .eq("owner_id", currentUser.id)
-        .order("created_at", {
-          ascending: true,
-        })
-        .limit(1)
-        .maybeSingle();
+      // جلب المحل
+      const { data: shopData, error: shopError } =
+        await supabase
+          .from("shops")
+          .select("*")
+          .eq("owner_id", user.id)
+          .limit(1)
+          .maybeSingle();
 
       if (shopError) {
-        throw shopError;
+        throw new Error(shopError.message);
       }
 
       if (!shopData) {
-        setError("لم يتم العثور على المحل.");
-        return;
+        throw new Error("المحل غير موجود.");
       }
 
       setShop(shopData);
 
-      const {
-        data: designData,
-        error: designError,
-      } = await supabase
-        .from("ad_images")
-        .select("*")
-        .eq("id", id)
-        .eq("shop_id", shopData.id)
-        .maybeSingle();
+      // جلب التصميم
+      const { data: designData, error: designError } =
+        await supabase
+          .from("ad_images")
+          .select("*")
+          .eq("id", id)
+          .eq("shop_id", shopData.id)
+          .maybeSingle();
 
       if (designError) {
-        throw designError;
+        throw new Error(designError.message);
       }
 
       if (!designData) {
-        setError("التصميم غير موجود.");
-        return;
+        throw new Error("التصميم غير موجود.");
       }
 
       setDesign(designData);
 
+      // جلب المنتج
       if (designData.product_id) {
-        const {
-          data: productData,
-          error: productError,
-        } = await supabase
-          .from("products")
-          .select("*")
-          .eq("id", designData.product_id)
-          .eq("shop_id", shopData.id)
-          .maybeSingle();
+        const { data: productData, error: productError } =
+          await supabase
+            .from("products")
+            .select("*")
+            .eq("id", designData.product_id)
+            .eq("shop_id", shopData.id)
+            .maybeSingle();
 
-        if (productError) {
-          console.error(productError);
+        if (!productError) {
+          setProduct(productData || null);
         }
-
-        setProduct(productData || null);
       }
     } catch (err) {
-      console.error(err);
-
-      setError(
-        "حدث خطأ أثناء تحميل تفاصيل التصميم."
-      );
+      console.error("DESIGN DETAILS ERROR:", err);
+      setError(err?.message || "تعذر تحميل التصميم.");
     } finally {
       setLoading(false);
     }
   }
 
   async function deleteDesign() {
-    if (!design) return;
+    if (!design?.id) return;
 
     const confirmed = window.confirm(
       "هل أنت متأكد من حذف هذا التصميم؟"
     );
 
-    if (!confirmed) {
-      return;
-    }
-
-    setDeleting(true);
-    setError("");
-    setMessage("");
+    if (!confirmed) return;
 
     try {
-      const {
-        error: deleteError,
-      } = await supabase
+      const { error: deleteError } = await supabase
         .from("ad_images")
         .delete()
         .eq("id", design.id)
@@ -144,107 +118,63 @@ export default function DesignDetailsPage() {
         throw deleteError;
       }
 
-      router.replace("/designs");
+      router.push("/designs");
     } catch (err) {
-      console.error(err);
-
-      setError("تعذر حذف التصميم.");
-    } finally {
-      setDeleting(false);
+      console.error("DELETE DESIGN ERROR:", err);
+      alert("تعذر حذف التصميم.");
     }
   }
 
-  function getStatus() {
-    if (!design) {
-      return {
-        text: "غير معروف",
-        background: "#f5f5f5",
-        color: "#555",
-      };
-    }
-
-    if (design.status === "completed") {
-      return {
-        text: "مكتمل",
-        background: "#ecfdf3",
-        color: "#067647",
-      };
-    }
-
-    if (
-      design.status === "processing" ||
-      design.status === "generating"
-    ) {
-      return {
-        text: "قيد الإنشاء",
-        background: "#eff8ff",
-        color: "#175cd3",
-      };
-    }
-
-    if (design.status === "failed") {
-      return {
-        text: "فشل",
-        background: "#fef3f2",
-        color: "#b42318",
-      };
-    }
-
-    return {
-      text: "بانتظار الإنشاء",
-      background: "#fffaeb",
-      color: "#b54708",
-    };
-  }
-
-  function formatDate(date) {
-    if (!date) return "";
+  async function downloadDesign() {
+    if (!design?.image_url) return;
 
     try {
-      return new Intl.DateTimeFormat(
-        "ar-AE",
-        {
-          dateStyle: "medium",
-          timeStyle: "short",
-        }
-      ).format(new Date(date));
-    } catch {
-      return date;
+      const response = await fetch(design.image_url);
+
+      if (!response.ok) {
+        throw new Error("تعذر تحميل الصورة.");
+      }
+
+      const blob = await response.blob();
+
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `suq-ai-design-${design.id}.png`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("DOWNLOAD ERROR:", err);
+
+      // حل بديل للجوال
+      window.open(design.image_url, "_blank");
     }
   }
 
-  function shareDesign() {
-    if (!design?.image_url) {
-      return;
-    }
+  async function shareDesign() {
+    if (!design?.image_url) return;
 
-    if (navigator.share) {
-      navigator
-        .share({
-          title:
-            product?.name ||
-            "تصميم إعلاني",
-          text:
-            `تصميم إعلاني لـ ${
-              product?.name ||
-              "المنتج"
-            }`,
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: product?.name || "تصميم إعلاني",
+          text: `تصميم إعلاني من ${shop?.name || "سوق AI"}`,
           url: design.image_url,
-        })
-        .catch(() => {});
-    } else {
-      navigator.clipboard
-        ?.writeText(design.image_url)
-        .then(() => {
-          setMessage(
-            "تم نسخ رابط التصميم."
-          );
-        })
-        .catch(() => {
-          setMessage(
-            "يمكنك فتح التصميم ومشاركة الرابط."
-          );
         });
+      } else {
+        await navigator.clipboard.writeText(
+          design.image_url
+        );
+
+        alert("تم نسخ رابط التصميم.");
+      }
+    } catch (err) {
+      console.log("Share cancelled or failed:", err);
     }
   }
 
@@ -254,830 +184,549 @@ export default function DesignDetailsPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f6f8f7",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          background: "#f5f7f6",
+          padding: "30px 16px",
           fontFamily:
-            "Arial, sans-serif",
-          color: "#17201c",
-        }}
-      >
-        جاري تحميل التصميم...
-      </main>
-    );
-  }
-
-  if (error && !design) {
-    return (
-      <main
-        dir="rtl"
-        style={{
-          minHeight: "100vh",
-          background: "#f6f8f7",
-          fontFamily:
-            "Arial, sans-serif",
-          padding: 20,
+            "Arial, Tahoma, sans-serif",
         }}
       >
         <div
           style={{
-            maxWidth: 700,
-            margin: "80px auto",
-            background: "#fff",
-            border:
-              "1px solid #e1e7e3",
-            borderRadius: 20,
-            padding: 24,
+            maxWidth: 900,
+            margin: "0 auto",
             textAlign: "center",
+            paddingTop: 100,
           }}
         >
           <div
             style={{
               fontSize: 42,
-              marginBottom: 14,
+              marginBottom: 15,
             }}
           >
-            ⚠️
+            ⏳
           </div>
 
-          <h2
-            style={{
-              margin: "0 0 10px",
-            }}
-          >
-            {error}
+          <h2 style={{ margin: 0 }}>
+            جاري تحميل التصميم...
           </h2>
-
-          <button
-            onClick={() =>
-              router.push("/designs")
-            }
-            style={{
-              marginTop: 16,
-              border: 0,
-              borderRadius: 12,
-              padding:
-                "12px 20px",
-              background:
-                "#15803d",
-              color: "#fff",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            ← العودة للتصاميم
-          </button>
         </div>
       </main>
     );
   }
 
-  const status = getStatus();
+  if (error) {
+    return (
+      <main
+        dir="rtl"
+        style={{
+          minHeight: "100vh",
+          background: "#f5f7f6",
+          padding: "30px 16px",
+          fontFamily:
+            "Arial, Tahoma, sans-serif",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 700,
+            margin: "0 auto",
+          }}
+        >
+          <button
+            onClick={() => router.push("/designs")}
+            style={{
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              fontSize: 16,
+              marginBottom: 25,
+            }}
+          >
+            ← العودة للتصاميم
+          </button>
+
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 20,
+              padding: 30,
+              textAlign: "center",
+              boxShadow:
+                "0 10px 30px rgba(0,0,0,0.06)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 45,
+                marginBottom: 15,
+              }}
+            >
+              ⚠️
+            </div>
+
+            <h2>تعذر تحميل التصميم</h2>
+
+            <p
+              style={{
+                color: "#666",
+                marginTop: 10,
+              }}
+            >
+              {error}
+            </p>
+
+            <button
+              onClick={loadDesign}
+              style={{
+                marginTop: 20,
+                padding: "12px 24px",
+                borderRadius: 12,
+                border: "none",
+                background: "#16834b",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f6f8f7",
-        color: "#17201c",
+        background: "#f5f7f6",
+        padding: "25px 16px 50px",
         fontFamily:
-          "Arial, sans-serif",
-        paddingBottom: 60,
+          "Arial, Tahoma, sans-serif",
       }}
     >
       <div
         style={{
-          maxWidth: 1150,
+          maxWidth: 1100,
           margin: "0 auto",
-          padding:
-            "22px 16px",
         }}
       >
-        <header
+        {/* Header */}
+        <div
           style={{
             display: "flex",
-            justifyContent:
-              "space-between",
-            alignItems:
-              "center",
-            gap: 14,
-            marginBottom: 20,
-            flexWrap:
-              "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 15,
+            marginBottom: 25,
+            flexWrap: "wrap",
           }}
         >
-          <div>
-            <div
-              style={{
-                color:
-                  "#15803d",
-                fontWeight: 900,
-                fontSize: 13,
-                marginBottom: 6,
-              }}
-            >
-              سوق AI
-            </div>
-
-            <h1
-              style={{
-                margin: 0,
-                fontSize: 28,
-                fontWeight: 900,
-              }}
-            >
-              🎨 تفاصيل التصميم
-            </h1>
-
-            <div
-              style={{
-                color:
-                  "#66736d",
-                marginTop: 6,
-                fontSize: 14,
-              }}
-            >
-              {product?.name ||
-                "التصميم الإعلاني"}
-            </div>
-          </div>
-
           <button
-            onClick={() =>
-              router.push("/designs")
-            }
+            onClick={() => router.push("/designs")}
             style={{
-              border:
-                "1px solid #d7dfda",
-              background:
-                "#fff",
-              color:
-                "#1f2933",
+              border: "none",
+              background: "#fff",
+              padding: "11px 18px",
               borderRadius: 12,
-              padding:
-                "11px 16px",
-              fontWeight: 900,
-              cursor:
-                "pointer",
+              cursor: "pointer",
+              fontWeight: "bold",
             }}
           >
-            ← كل التصاميم
+            ← العودة للتصاميم
           </button>
-        </header>
 
-        {message && (
-          <div
+          <h1
             style={{
-              background:
-                "#ecfdf3",
-              border:
-                "1px solid #abefc6",
-              color:
-                "#067647",
-              borderRadius: 14,
-              padding: 13,
-              marginBottom: 16,
-              fontWeight: 800,
+              margin: 0,
+              fontSize: 25,
             }}
           >
-            {message}
-          </div>
-        )}
+            تفاصيل التصميم
+          </h1>
+        </div>
 
-        {error && (
-          <div
-            style={{
-              background:
-                "#fef3f2",
-              border:
-                "1px solid #fecdca",
-              color:
-                "#b42318",
-              borderRadius: 14,
-              padding: 13,
-              marginBottom: 16,
-              fontWeight: 800,
-            }}
-          >
-            {error}
-          </div>
-        )}
-
+        {/* Main */}
         <div
-          className="details-layout"
           style={{
             display: "grid",
             gridTemplateColumns:
-              "minmax(0, 1.5fr) minmax(300px, .7fr)",
+              "minmax(0, 1.4fr) minmax(280px, 0.8fr)",
             gap: 20,
-            alignItems:
-              "start",
           }}
         >
+          {/* Design */}
           <section
             style={{
-              background:
-                "#fff",
-              border:
-                "1px solid #e1e7e3",
-              borderRadius: 20,
-              overflow:
-                "hidden",
+              background: "#fff",
+              borderRadius: 22,
+              padding: 18,
+              boxShadow:
+                "0 10px 30px rgba(0,0,0,0.06)",
             }}
           >
             <div
               style={{
-                padding: 16,
-                borderBottom:
-                  "1px solid #e8edea",
+                background: "#f1f3f2",
+                borderRadius: 18,
+                padding: 15,
                 display: "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-                gap: 10,
-                flexWrap:
-                  "wrap",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontWeight: 900,
-                    fontSize: 17,
-                  }}
-                >
-                  التصميم
-                </div>
-
-                <div
-                  style={{
-                    color:
-                      "#66736d",
-                    fontSize: 12,
-                    marginTop: 4,
-                  }}
-                >
-                  {design?.format ||
-                    "1:1"}
-                </div>
-              </div>
-
-              <span
-                style={{
-                  background:
-                    status.background,
-                  color:
-                    status.color,
-                  padding:
-                    "7px 12px",
-                  borderRadius:
-                    999,
-                  fontSize: 12,
-                  fontWeight: 900,
-                }}
-              >
-                {status.text}
-              </span>
-            </div>
-
-            <div
-              style={{
-                background:
-                  "#f2f4f3",
-                padding: 16,
+                justifyContent: "center",
+                alignItems: "center",
                 minHeight: 400,
-                display: "flex",
-                alignItems:
-                  "center",
-                justifyContent:
-                  "center",
               }}
             >
               {design?.image_url ? (
                 <img
-                  src={
-                    design.image_url
-                  }
+                  src={design.image_url}
                   alt={
                     product?.name ||
-                    "التصميم"
+                    "التصميم الإعلاني"
                   }
                   style={{
-                    display:
-                      "block",
-                    width:
-                      "100%",
-                    maxWidth: 800,
-                    maxHeight:
-                      "75vh",
-                    objectFit:
-                      "contain",
-                    borderRadius:
-                      12,
-                    boxShadow:
-                      "0 10px 35px rgba(0,0,0,.12)",
+                    display: "block",
+                    width: "100%",
+                    maxWidth: 750,
+                    height: "auto",
+                    maxHeight: "75vh",
+                    objectFit: "contain",
+                    borderRadius: 12,
+                  }}
+                  onError={(event) => {
+                    console.error(
+                      "DESIGN IMAGE LOAD ERROR:",
+                      design.image_url
+                    );
+
+                    event.currentTarget.style.display =
+                      "none";
+
+                    const message =
+                      document.getElementById(
+                        "design-image-error"
+                      );
+
+                    if (message) {
+                      message.style.display = "block";
+                    }
                   }}
                 />
-              ) : (
-                <div
-                  style={{
-                    textAlign:
-                      "center",
-                    color:
-                      "#66736d",
-                    padding: 50,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 44,
-                      marginBottom: 12,
-                    }}
-                  >
-                    🎨
-                  </div>
+              ) : null}
 
-                  <div
-                    style={{
-                      fontWeight: 900,
-                      marginBottom: 6,
-                    }}
-                  >
-                    لم يتم استلام صورة التصميم
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 13,
-                    }}
-                  >
-                    حالة التصميم:{" "}
-                    {status.text}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {design?.image_url && (
               <div
-                className="action-grid"
+                id="design-image-error"
                 style={{
-                  padding: 16,
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(3, 1fr)",
-                  gap: 10,
+                  display: design?.image_url
+                    ? "none"
+                    : "block",
+                  textAlign: "center",
+                  color: "#777",
+                  padding: 40,
                 }}
               >
-                <a
-                  href={
-                    design.image_url
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <div
                   style={{
-                    textDecoration:
-                      "none",
-                    textAlign:
-                      "center",
-                    background:
-                      "#15803d",
-                    color:
-                      "#fff",
-                    borderRadius:
-                      12,
-                    padding:
-                      "13px 10px",
-                    fontWeight:
-                      900,
-                    fontSize: 13,
+                    fontSize: 45,
+                    marginBottom: 10,
                   }}
                 >
-                  👁️ فتح
-                </a>
+                  🖼️
+                </div>
 
-                <a
-                  href={
-                    design.image_url
-                  }
-                  download
-                  style={{
-                    textDecoration:
-                      "none",
-                    textAlign:
-                      "center",
-                    background:
-                      "#f0fdf4",
-                    color:
-                      "#166534",
-                    border:
-                      "1px solid #bbf7d0",
-                    borderRadius:
-                      12,
-                    padding:
-                      "13px 10px",
-                    fontWeight:
-                      900,
-                    fontSize: 13,
-                  }}
-                >
-                  ⬇️ تحميل
-                </a>
+                <strong>
+                  الصورة غير متوفرة
+                </strong>
 
-                <button
-                  onClick={
-                    shareDesign
-                  }
+                <p
                   style={{
-                    border:
-                      "1px solid #d9e1dc",
-                    background:
-                      "#fff",
-                    color:
-                      "#17201c",
-                    borderRadius:
-                      12,
-                    padding:
-                      "13px 10px",
-                    fontWeight:
-                      900,
                     fontSize: 13,
-                    cursor:
-                      "pointer",
+                    marginTop: 8,
                   }}
                 >
-                  📤 مشاركة
-                </button>
+                  رابط الصورة غير موجود في
+                  قاعدة البيانات.
+                </p>
               </div>
-            )}
+            </div>
+
+            {/* Actions */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(3, minmax(0, 1fr))",
+                gap: 10,
+                marginTop: 15,
+              }}
+            >
+              <button
+                onClick={() =>
+                  window.open(
+                    design?.image_url,
+                    "_blank"
+                  )
+                }
+                disabled={!design?.image_url}
+                style={{
+                  padding: "13px 10px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                }}
+              >
+                فتح الصورة
+              </button>
+
+              <button
+                onClick={downloadDesign}
+                disabled={!design?.image_url}
+                style={{
+                  padding: "13px 10px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: "#16834b",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                }}
+              >
+                تحميل
+              </button>
+
+              <button
+                onClick={shareDesign}
+                disabled={!design?.image_url}
+                style={{
+                  padding: "13px 10px",
+                  borderRadius: 12,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                }}
+              >
+                مشاركة
+              </button>
+            </div>
           </section>
 
-          <aside>
+          {/* Info */}
+          <aside
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 15,
+            }}
+          >
+            {/* Product */}
             <div
               style={{
-                background:
-                  "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 18,
-                marginBottom: 16,
+                background: "#fff",
+                borderRadius: 18,
+                padding: 20,
+                boxShadow:
+                  "0 8px 25px rgba(0,0,0,0.05)",
               }}
             >
-              <h2
+              <h3 style={{ marginTop: 0 }}>
+                المنتج
+              </h3>
+
+              {product?.image_url && (
+                <img
+                  src={product.image_url}
+                  alt={product?.name || "المنتج"}
+                  style={{
+                    width: "100%",
+                    height: 180,
+                    objectFit: "contain",
+                    background: "#f7f7f7",
+                    borderRadius: 12,
+                    marginBottom: 15,
+                  }}
+                />
+              )}
+
+              <div
                 style={{
-                  margin:
-                    "0 0 14px",
                   fontSize: 18,
+                  fontWeight: "bold",
                 }}
               >
-                🛍️ المنتج
-              </h2>
+                {product?.name || "منتج"}
+              </div>
 
-              {product ? (
-                <>
-                  {product.image_url && (
-                    <div
-                      style={{
-                        width:
-                          "100%",
-                        height: 170,
-                        borderRadius:
-                          14,
-                        overflow:
-                          "hidden",
-                        background:
-                          "#f5f7f6",
-                        marginBottom:
-                          12,
-                      }}
-                    >
-                      <img
-                        src={
-                          product.image_url
-                        }
-                        alt={
-                          product.name
-                        }
-                        style={{
-                          width:
-                            "100%",
-                          height:
-                            "100%",
-                          objectFit:
-                            "contain",
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <div
-                    style={{
-                      fontSize: 17,
-                      fontWeight: 900,
-                      lineHeight:
-                        1.5,
-                    }}
-                  >
-                    {
-                      product.name
-                    }
-                  </div>
-
-                  {product.brand && (
-                    <div
-                      style={{
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                        marginTop: 5,
-                      }}
-                    >
-                      {
-                        product.brand
-                      }
-                    </div>
-                  )}
-
-                  {product.category && (
-                    <div
-                      style={{
-                        marginTop: 10,
-                        color:
-                          "#66736d",
-                        fontSize: 13,
-                      }}
-                    >
-                      التصنيف:{" "}
-                      {
-                        product.category
-                      }
-                    </div>
-                  )}
-
-                  {product.price !==
-                    null &&
-                    product.price !==
-                      undefined && (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          fontWeight:
-                            900,
-                          color:
-                            "#15803d",
-                        }}
-                      >
-                        السعر:{" "}
-                        {
-                          product.price
-                        }{" "}
-                        {product.currency ||
-                          "AED"}
-                      </div>
-                    )}
-                </>
-              ) : (
+              {product?.brand && (
                 <div
                   style={{
-                    color:
-                      "#66736d",
-                    fontSize: 13,
+                    color: "#666",
+                    marginTop: 6,
                   }}
                 >
-                  لم يتم العثور على بيانات المنتج.
+                  {product.brand}
+                </div>
+              )}
+
+              {product?.price != null && (
+                <div
+                  style={{
+                    color: "#16834b",
+                    fontWeight: "bold",
+                    marginTop: 10,
+                  }}
+                >
+                  {product.price}{" "}
+                  {product.currency || "AED"}
                 </div>
               )}
             </div>
 
+            {/* Design info */}
             <div
               style={{
-                background:
-                  "#fff",
-                border:
-                  "1px solid #e1e7e3",
-                borderRadius: 20,
-                padding: 18,
-                marginBottom: 16,
+                background: "#fff",
+                borderRadius: 18,
+                padding: 20,
+                boxShadow:
+                  "0 8px 25px rgba(0,0,0,0.05)",
               }}
             >
-              <h2
-                style={{
-                  margin:
-                    "0 0 14px",
-                  fontSize: 18,
-                }}
-              >
-                ⚙️ إعدادات التصميم
-              </h2>
+              <h3 style={{ marginTop: 0 }}>
+                إعدادات التصميم
+              </h3>
 
-              <div
-                style={{
-                  display:
-                    "grid",
-                  gap: 11,
-                  fontSize: 13,
-                }}
-              >
+              <InfoRow
+                label="الحالة"
+                value={
+                  design?.status === "completed"
+                    ? "مكتمل"
+                    : design?.status || "غير معروف"
+                }
+              />
+
+              <InfoRow
+                label="المقاس"
+                value={
+                  design?.format || "1:1"
+                }
+              />
+
+              {design?.created_at && (
                 <InfoRow
-                  label="المقاس"
-                  value={
-                    design?.format ||
-                    "1:1"
-                  }
+                  label="تاريخ الإنشاء"
+                  value={new Date(
+                    design.created_at
+                  ).toLocaleString("ar-AE")}
                 />
-
-                <InfoRow
-                  label="الحالة"
-                  value={
-                    status.text
-                  }
-                />
-
-                {design?.created_at && (
-                  <InfoRow
-                    label="تاريخ الإنشاء"
-                    value={formatDate(
-                      design.created_at
-                    )}
-                  />
-                )}
-
-                {design?.completed_at && (
-                  <InfoRow
-                    label="اكتمل في"
-                    value={formatDate(
-                      design.completed_at
-                    )}
-                  />
-                )}
-
-                {design?.generation_started_at && (
-                  <InfoRow
-                    label="بدأ التوليد"
-                    value={formatDate(
-                      design.generation_started_at
-                    )}
-                  />
-                )}
-              </div>
+              )}
             </div>
 
-            {shop && (
-              <div
-                style={{
-                  background:
-                    "#fff",
-                  border:
-                    "1px solid #e1e7e3",
-                  borderRadius: 20,
-                  padding: 18,
-                  marginBottom: 16,
-                }}
-              >
-                <h2
-                  style={{
-                    margin:
-                      "0 0 14px",
-                    fontSize: 18,
-                  }}
-                >
-                  🏪 المحل
-                </h2>
-
-                <div
-                  style={{
-                    fontWeight:
-                      900,
-                    fontSize: 16,
-                  }}
-                >
-                  {
-                    shop.name
-                  }
-                </div>
-
-                {shop.phone && (
-                  <div
-                    style={{
-                      color:
-                        "#66736d",
-                      fontSize: 13,
-                      marginTop: 7,
-                    }}
-                  >
-                    ☎️{" "}
-                    {
-                      shop.phone
-                    }
-                  </div>
-                )}
-
-                {shop.whatsapp && (
-                  <div
-                    style={{
-                      color:
-                        "#66736d",
-                      fontSize: 13,
-                      marginTop: 7,
-                    }}
-                  >
-                    💬{" "}
-                    {
-                      shop.whatsapp
-                    }
-                  </div>
-                )}
-              </div>
-            )}
-
-            <button
-              onClick={() =>
-                router.push(
-                  "/designs"
-                )
-              }
+            {/* Shop */}
+            <div
               style={{
-                width:
-                  "100%",
-                border: 0,
-                borderRadius:
-                  14,
-                padding: 15,
-                background:
-                  "#15803d",
-                color:
-                  "#fff",
-                fontWeight:
-                  900,
-                fontSize: 15,
-                cursor:
-                  "pointer",
-                marginBottom:
-                  10,
+                background: "#fff",
+                borderRadius: 18,
+                padding: 20,
+                boxShadow:
+                  "0 8px 25px rgba(0,0,0,0.05)",
               }}
             >
-              🎨 إنشاء تصميم جديد
+              <h3 style={{ marginTop: 0 }}>
+                بيانات المحل
+              </h3>
+
+              <InfoRow
+                label="المحل"
+                value={shop?.name || "-"}
+              />
+
+              {shop?.phone && (
+                <InfoRow
+                  label="الهاتف"
+                  value={shop.phone}
+                />
+              )}
+
+              {shop?.whatsapp && (
+                <InfoRow
+                  label="واتساب"
+                  value={shop.whatsapp}
+                />
+              )}
+
+              {shop?.instagram && (
+                <InfoRow
+                  label="Instagram"
+                  value={shop.instagram}
+                />
+              )}
+            </div>
+
+            {/* Delete */}
+            <button
+              onClick={deleteDesign}
+              style={{
+                width: "100%",
+                padding: "14px",
+                borderRadius: 14,
+                border: "1px solid #e5bcbc",
+                background: "#fff",
+                color: "#b42318",
+                cursor: "pointer",
+                fontWeight: "bold",
+              }}
+            >
+              حذف التصميم
             </button>
 
             <button
-              onClick={
-                deleteDesign
-              }
-              disabled={
-                deleting
-              }
+              onClick={() => router.push("/designs")}
               style={{
-                width:
-                  "100%",
-                border:
-                  "1px solid #fecdca",
-                borderRadius:
-                  14,
-                padding: 13,
-                background:
-                  "#fff",
-                color:
-                  "#b42318",
-                fontWeight:
-                  900,
-                fontSize: 14,
-                cursor:
-                  deleting
-                    ? "not-allowed"
-                    : "pointer",
-                opacity:
-                  deleting
-                    ? 0.6
-                    : 1,
+                width: "100%",
+                padding: "14px",
+                borderRadius: 14,
+                border: "none",
+                background: "#16834b",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: "bold",
               }}
             >
-              {deleting
-                ? "جاري الحذف..."
-                : "🗑️ حذف التصميم"}
+              إنشاء تصميم جديد
             </button>
           </aside>
         </div>
       </div>
 
       <style jsx>{`
-        button,
-        a {
-          -webkit-tap-highlight-color: transparent;
-        }
+        @media (max-width: 800px) {
+          main {
+            padding: 18px 12px 40px !important;
+          }
 
-        @media (max-width: 900px) {
-          .details-layout {
+          h1 {
+            font-size: 21px !important;
+          }
+
+          section {
+            padding: 12px !important;
+          }
+
+          aside {
+            width: 100%;
+          }
+
+          div[style*="grid-template-columns"] {
             grid-template-columns: 1fr !important;
           }
-        }
 
-        @media (max-width: 600px) {
-          .action-grid {
-            grid-template-columns: 1fr !important;
+          img {
+            max-height: 65vh !important;
           }
         }
       `}</style>
@@ -1090,33 +739,25 @@ function InfoRow({ label, value }) {
     <div
       style={{
         display: "flex",
-        justifyContent:
-          "space-between",
-        alignItems:
-          "flex-start",
-        gap: 12,
-        paddingBottom: 10,
-        borderBottom:
-          "1px solid #eef1ef",
+        justifyContent: "space-between",
+        gap: 15,
+        padding: "9px 0",
+        borderBottom: "1px solid #eee",
+        fontSize: 14,
       }}
     >
-      <span
-        style={{
-          color: "#66736d",
-        }}
-      >
+      <span style={{ color: "#777" }}>
         {label}
       </span>
 
-      <span
+      <strong
         style={{
-          fontWeight: 800,
           textAlign: "left",
-          direction: "rtl",
+          wordBreak: "break-word",
         }}
       >
         {value}
-      </span>
+      </strong>
     </div>
   );
 }
