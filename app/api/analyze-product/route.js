@@ -1,189 +1,180 @@
+import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
+import { logAIUsage } from "../../../lib/ai-usage";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+);
+
 export async function POST(request) {
   try {
-    const { product } = await request.json();
+    const body = await request.json();
 
-    if (!product) {
-      return Response.json(
-        { error: "بيانات المنتج غير موجودة" },
-        { status: 400 }
-      );
-    }
+    const {
+      productId = null,
+      name = "",
+      brand = "",
+      category = "",
+      barcode = "",
+      image_url = null,
+      imageUrl = null,
+    } = body;
 
-    const productName = String(product.name || "").trim();
-    const brand = String(product.brand || "").trim();
-    const category = String(product.category || "").trim();
-    const barcode = String(product.barcode || "").trim();
-    const imageUrl = String(product.image_url || "").trim();
+    const finalImageUrl = image_url || imageUrl || null;
 
-    if (!productName) {
-      return Response.json(
-        { error: "اسم المنتج مطلوب" },
-        { status: 400 }
-      );
-    }
-
-    if (!imageUrl && !barcode && !brand) {
-      return Response.json(
+    if (!name && !brand && !barcode && !finalImageUrl) {
+      return NextResponse.json(
         {
-          error:
-            "يحتاج المنتج إلى صورة أو باركود أو علامة تجارية للتعرف عليه بدقة.",
+          error: "لا توجد معلومات كافية لتحليل المنتج",
         },
         { status: 400 }
       );
     }
 
-    const instructions = `
-أنت "ذكاء المنتج" في منصة سوق AI.
+    /*
+     * -----------------------------------------
+     * 1. الحصول على بيانات المنتج والمحل
+     * -----------------------------------------
+     */
 
-مهمتك هي التعرف على المنتج الحقيقي من:
-1. صورة المنتج.
-2. اسم المنتج.
-3. العلامة التجارية.
-4. الباركود.
-5. التصنيف.
+    let shopId = null;
+    let userId = null;
 
-ثم البحث على الإنترنت عن المنتج نفسه وجمع معلومات موثوقة عنه.
+    if (productId) {
+      const { data: product, error: productError } =
+        await supabaseAdmin
+          .from("products")
+          .select(
+            `
+              id,
+              shop_id,
+              shops (
+                id,
+                owner_id
+              )
+            `
+          )
+          .eq("id", productId)
+          .maybeSingle();
 
-مهم جدًا:
+      if (!productError && product) {
+        shopId = product.shop_id || null;
+        userId = product.shops?.owner_id || null;
+      }
+    }
 
-- لا تخمن هوية المنتج.
-- لا تستخدم مواصفات عامة للفئة.
-- لا تخلط بين منتجات متشابهة.
-- لا تخترع أي معلومة.
-- إذا لم تجد معلومة موثوقة اكتب "غير متوفر".
-- إذا اختلفت المصادر اذكر ذلك في verification_notes.
-- الأولوية للموقع الرسمي للشركة المصنعة.
-- بعده استخدم المتاجر والمصادر المتخصصة الموثوقة.
+    /*
+     * -----------------------------------------
+     * 2. تجهيز معلومات المنتج للذكاء الاصطناعي
+     * -----------------------------------------
+     */
 
-طريقة التعرف:
-
-أولًا افحص الصورة وابحث عن:
-- اسم العلامة التجارية.
-- اسم المنتج.
-- رقم الموديل.
-- أي رقم أو كود ظاهر.
-- شكل المنتج.
-- الكتابة الموجودة على العبوة.
-
-ثم استخدم هذه المعلومات في البحث.
-
-إذا توفر باركود:
-ابحث عن الباركود حرفيًا.
-
-إذا توفر اسم علامة تجارية:
-ابحث عن العلامة التجارية مع اسم المنتج والباركود.
-
-إذا كان المنتج إلكترونيًا:
-ابحث عن المواصفات الرسمية الخاصة بالموديل.
-
-إذا كان المنتج سماعات:
-ابحث عن:
-- النوع
-- الموديل
-- Bluetooth
-- إصدار Bluetooth
-- البطارية
-- مدة التشغيل
-- الشحن
-- الميكروفون
-- ANC
-- مقاومة الماء
-- التوافق
-- الوزن
-- الأبعاد
-
-لا تضع أي مواصفة إلا إذا كانت تخص المنتج الذي تم التعرف عليه.
-
-إذا كانت المطابقة قوية بين:
-الصورة + العلامة التجارية + الباركود + معلومات المصادر
-فاجعل confidence = high.
-
-إذا كانت المطابقة جيدة لكن ليست مؤكدة تمامًا:
-confidence = medium.
-
-إذا لم نستطع تحديد المنتج:
-confidence = low
-واشرح السبب في verification_notes.
-
-لا تغير سعر المتجر.
-
-أنت تبني بطاقة معلومات للمنتج، وليس إعلانًا تسويقيًا.
-`;
-
-    const textPrompt = `
-حلل هذا المنتج الحقيقي:
-
-اسم المنتج:
-"${productName}"
+    const productInformation = `
+اسم المنتج الذي أدخله المستخدم:
+${name || "غير محدد"}
 
 العلامة التجارية:
-"${brand || "غير محددة"}"
+${brand || "غير محددة"}
 
-التصنيف:
-"${category || "غير محدد"}"
+الفئة:
+${category || "غير محددة"}
 
 الباركود:
-"${barcode || "غير متوفر"}"
+${barcode || "غير موجود"}
 
-ابدأ بالتعرف على المنتج من الصورة إذا كانت متوفرة.
-
-بعد ذلك:
-
-1. اقرأ أي اسم أو شعار أو رقم موديل ظاهر في الصورة.
-2. استخدم الباركود في البحث.
-3. استخدم العلامة التجارية في البحث.
-4. قارن المعلومات الموجودة في الصورة مع نتائج البحث.
-5. ابحث عن الموقع الرسمي للشركة.
-6. تحقق من المنتج قبل كتابة المواصفات.
-
-لا تستخدم مواصفات عامة.
-
-إذا لم تتأكد من المنتج، لا تخترع.
-اكتب "غير متوفر" للمعلومات التي لم يتم التحقق منها.
+يجب التعرف على المنتج الحقيقي من المعلومات والصورة والبحث في المصادر الموثوقة.
+لا تخترع أي معلومة غير مؤكدة.
 `;
 
     /*
-     * نبني محتوى الطلب.
-     *
-     * الصورة تدخل إلى الذكاء إذا كانت موجودة.
-     * النص يدخل معه في نفس الطلب.
+     * -----------------------------------------
+     * 3. تجهيز محتوى الطلب
+     * -----------------------------------------
      */
-    const inputContent = [
+
+    const content = [
       {
         type: "input_text",
-        text: textPrompt,
+        text: productInformation,
       },
     ];
 
-    if (imageUrl) {
-      inputContent.push({
+    if (finalImageUrl) {
+      content.push({
         type: "input_image",
-        image_url: imageUrl,
+        image_url: finalImageUrl,
         detail: "high",
       });
     }
+
+    /*
+     * -----------------------------------------
+     * 4. تحليل المنتج بواسطة OpenAI
+     * -----------------------------------------
+     */
 
     const response = await openai.responses.create({
       model: "gpt-5-mini",
 
       tools: [
         {
-          type: "web_search",
+          type: "web_search_preview",
         },
       ],
 
-      instructions,
-
       input: [
         {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: `
+أنت نظام Product Intelligence لمنصة سوق AI.
+
+مهمتك التعرف على المنتج الحقيقي والتحقق من معلوماته قبل استخدامه في التسويق.
+
+القواعد:
+
+1. لا تخترع أي معلومة.
+2. إذا كانت المعلومة غير مؤكدة اذكر أنها غير مؤكدة.
+3. استخدم الصورة والاسم والبراند والباركود معًا.
+4. ابحث في المصادر الموثوقة.
+5. أعط الأولوية للمصدر الرسمي للشركة المصنعة.
+6. إذا وجد رقم موديل، استخدمه للتحقق من المنتج.
+7. لا تعتبر مجرد تشابه الصورة دليلاً كافيًا.
+8. لا تضف مواصفات لم تجد لها مصدرًا موثوقًا.
+9. إذا اختلفت المصادر، اذكر الاختلاف في verification_notes.
+10. معلومات الضمان تختلف حسب الدولة، فلا تفترض ضمانًا محددًا.
+11. بلد المنشأ لا يُذكر إلا إذا كان موثوقًا.
+12. لا تكتب معلومات تسويقية مبالغًا فيها.
+13. جميع النتائج يجب أن تكون باللغة العربية.
+14. احتفظ بأسماء المنتجات والعلامات التجارية الرسمية كما هي عند الحاجة.
+15. confidence يجب أن يكون:
+   - high
+   - medium
+   - low
+
+أنت لا تكتب إعلانًا.
+أنت تبني ملفًا موثوقًا للمنتج لاستخدامه لاحقًا في التسويق.
+`,
+            },
+          ],
+        },
+        {
           role: "user",
-          content: inputContent,
+          content,
         },
       ],
 
@@ -195,7 +186,6 @@ confidence = low
 
           schema: {
             type: "object",
-            additionalProperties: false,
 
             properties: {
               product_name: {
@@ -272,11 +262,7 @@ confidence = low
 
               confidence: {
                 type: "string",
-                enum: [
-                  "high",
-                  "medium",
-                  "low",
-                ],
+                enum: ["high", "medium", "low"],
               },
 
               sources: {
@@ -309,20 +295,41 @@ confidence = low
               "confidence",
               "sources",
             ],
+
+            additionalProperties: false,
           },
         },
       },
     });
 
-    const outputText = response.output_text;
+    /*
+     * -----------------------------------------
+     * 5. استخراج نتيجة التحليل
+     * -----------------------------------------
+     */
 
-    if (!outputText) {
-      console.error("OPENAI EMPTY RESPONSE");
+    const resultText = response.output_text;
 
-      return Response.json(
+    if (!resultText) {
+      await logAIUsage({
+        userId,
+        shopId,
+        productId,
+        operation: "product_analysis",
+        model: "gpt-5-mini",
+        status: "failed",
+        inputTokens: response.usage?.input_tokens || 0,
+        outputTokens: response.usage?.output_tokens || 0,
+        totalTokens: response.usage?.total_tokens || 0,
+        metadata: {
+          source: "analyze-product",
+          reason: "empty_output",
+        },
+      });
+
+      return NextResponse.json(
         {
-          error:
-            "الذكاء الاصطناعي لم يرجع نتيجة.",
+          error: "لم يتم الحصول على نتيجة من الذكاء الاصطناعي",
         },
         { status: 500 }
       );
@@ -331,127 +338,72 @@ confidence = low
     let result;
 
     try {
-      result = JSON.parse(outputText);
-    } catch (error) {
-      console.error(
-        "JSON PARSE ERROR:",
-        error
-      );
+      result = JSON.parse(resultText);
+    } catch (parseError) {
+      await logAIUsage({
+        userId,
+        shopId,
+        productId,
+        operation: "product_analysis",
+        model: "gpt-5-mini",
+        status: "failed",
+        inputTokens: response.usage?.input_tokens || 0,
+        outputTokens: response.usage?.output_tokens || 0,
+        totalTokens: response.usage?.total_tokens || 0,
+        metadata: {
+          source: "analyze-product",
+          reason: "invalid_json",
+        },
+      });
 
-      console.error(
-        "RAW OPENAI RESULT:",
-        outputText
-      );
-
-      return Response.json(
+      return NextResponse.json(
         {
-          error:
-            "تم التعرف على المنتج ولكن تعذر تنظيم النتيجة.",
+          error: "تعذر قراءة نتيجة تحليل المنتج",
         },
         { status: 500 }
       );
     }
 
-    console.log(
-      "PRODUCT INTELLIGENCE RESULT:",
-      JSON.stringify(result)
-    );
+    /*
+     * -----------------------------------------
+     * 6. تسجيل استخدام الذكاء الاصطناعي
+     * -----------------------------------------
+     */
 
-    return Response.json({
-      product_name:
-        result.product_name ||
-        productName,
-
-      brand:
-        result.brand ||
-        brand ||
-        "غير متوفر",
-
-      product_type:
-        result.product_type ||
-        "غير متوفر",
-
-      category:
-        result.category ||
-        category ||
-        "غير متوفر",
-
-      short_description:
-        result.short_description ||
-        "غير متوفر",
-
-      full_description:
-        result.full_description ||
-        "غير متوفر",
-
-      specifications:
-        result.specifications ||
-        "غير متوفر",
-
-      features:
-        result.features ||
-        "غير متوفر",
-
-      uses:
-        result.uses ||
-        "غير متوفر",
-
-      target_audience:
-        result.target_audience ||
-        "غير متوفر",
-
-      manufacturer:
-        result.manufacturer ||
-        "غير متوفر",
-
-      country_of_origin:
-        result.country_of_origin ||
-        "غير متوفر",
-
-      size_or_volume:
-        result.size_or_volume ||
-        "غير متوفر",
-
-      ingredients:
-        result.ingredients ||
-        "غير متوفر",
-
-      warnings:
-        result.warnings ||
-        "غير متوفر",
-
-      storage:
-        result.storage ||
-        "غير متوفر",
-
-      warranty:
-        result.warranty ||
-        "غير متوفر",
-
-      verification_notes:
-        result.verification_notes ||
-        "غير متوفر",
-
-      confidence:
-        result.confidence ||
-        "low",
-
-      sources:
-        Array.isArray(result.sources)
-          ? result.sources
-          : [],
+    await logAIUsage({
+      userId,
+      shopId,
+      productId,
+      operation: "product_analysis",
+      model: "gpt-5-mini",
+      status: "success",
+      inputTokens: response.usage?.input_tokens || 0,
+      outputTokens: response.usage?.output_tokens || 0,
+      totalTokens: response.usage?.total_tokens || 0,
+      estimatedCost: 0,
+      metadata: {
+        source: "analyze-product",
+        barcode: barcode || null,
+        image_used: Boolean(finalImageUrl),
+        confidence: result.confidence || null,
+      },
     });
-  } catch (error) {
-    console.error(
-      "ANALYZE PRODUCT ERROR:",
-      error
-    );
 
-    return Response.json(
+    /*
+     * -----------------------------------------
+     * 7. إرجاع النتيجة للتطبيق
+     * -----------------------------------------
+     */
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Analyze product error:", error);
+
+    return NextResponse.json(
       {
         error:
           error?.message ||
-          "حدث خطأ أثناء تحليل المنتج.",
+          "حدث خطأ أثناء تحليل المنتج",
       },
       { status: 500 }
     );
