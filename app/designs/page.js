@@ -1,352 +1,405 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 const supabase = createClient();
 
-const formats = [
+const FORMATS = [
   {
-    value: "1:1",
-    title: "مربع",
-    description: "Instagram / منشورات",
-    icon: "⬛",
+    id: "1:1",
+    title: "منشور مربع",
+    description: "مناسب لمنشورات Instagram",
+    icon: "▣",
   },
   {
-    value: "9:16",
-    title: "عمودي",
-    description: "Stories / Reels / TikTok",
-    icon: "📱",
+    id: "4:5",
+    title: "منشور عمودي",
+    description: "مناسب للإعلانات والمنشورات",
+    icon: "▯",
   },
   {
-    value: "16:9",
+    id: "9:16",
+    title: "ستوري",
+    description: "Instagram / Snapchat / TikTok",
+    icon: "▥",
+  },
+  {
+    id: "16:9",
     title: "أفقي",
-    description: "YouTube / شاشات",
-    icon: "🖥️",
+    description: "شاشات وإعلانات أفقية",
+    icon: "▭",
   },
 ];
 
+const TEMPLATES = [
+  {
+    id: "product",
+    title: "عرض منتج",
+    description: "منتج واضح مع اسم المنتج وهوية المحل",
+    icon: "🛍️",
+  },
+  {
+    id: "discount",
+    title: "خصم وسعر",
+    description: "تركيز على السعر أو الخصم",
+    icon: "💰",
+  },
+  {
+    id: "new",
+    title: "منتج جديد",
+    description: "إعلان إطلاق منتج جديد",
+    icon: "🆕",
+  },
+  {
+    id: "bestseller",
+    title: "الأكثر مبيعاً",
+    description: "إبراز منتج مميز أو مشهور",
+    icon: "⭐",
+  },
+  {
+    id: "offer",
+    title: "عرض خاص",
+    description: "تصميم قوي للعروض والمناسبات",
+    icon: "🔥",
+  },
+  {
+    id: "simple",
+    title: "إعلان بسيط",
+    description: "تصميم نظيف وسريع",
+    icon: "📢",
+  },
+  {
+    id: "social",
+    title: "إعلان سوشيال",
+    description: "تصميم جاهز للنشر على السوشيال",
+    icon: "📱",
+  },
+  {
+    id: "premium",
+    title: "فاخر",
+    description: "شكل أنيق ومناسب للمنتجات الفاخرة",
+    icon: "✨",
+  },
+];
+
+const STYLES = [
+  {
+    id: "luxury",
+    title: "فاخر",
+    icon: "🖤",
+  },
+  {
+    id: "modern",
+    title: "عصري",
+    icon: "⚡",
+  },
+  {
+    id: "clean",
+    title: "نظيف",
+    icon: "🧊",
+  },
+  {
+    id: "dark-tech",
+    title: "تقني داكن",
+    icon: "🌑",
+  },
+  {
+    id: "premium",
+    title: "Premium",
+    icon: "💎",
+  },
+  {
+    id: "sale",
+    title: "عرض قوي",
+    icon: "🔥",
+  },
+];
+
+const BACKGROUNDS = [
+  { id: "black", title: "أسود", value: "خلفية سوداء فخمة" },
+  { id: "white", title: "أبيض", value: "خلفية بيضاء نظيفة" },
+  { id: "dark", title: "داكن", value: "خلفية داكنة عصرية" },
+  { id: "light", title: "فاتح", value: "خلفية فاتحة وناعمة" },
+  { id: "gradient", title: "تدرج", value: "خلفية بتدرج لوني احترافي" },
+];
+
+function StatusBadge({ type, children }) {
+  const styles = {
+    ready: {
+      background: "#ecfdf3",
+      color: "#067647",
+      border: "1px solid #abefc6",
+    },
+    warning: {
+      background: "#fffaeb",
+      color: "#b54708",
+      border: "1px solid #fedf89",
+    },
+    locked: {
+      background: "#fef3f2",
+      color: "#b42318",
+      border: "1px solid #fecdca",
+    },
+    pending: {
+      background: "#eff8ff",
+      color: "#175cd3",
+      border: "1px solid #b2ddff",
+    },
+  };
+
+  return (
+    <span
+      style={{
+        ...styles[type],
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "6px 10px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function isLocked(product) {
+  return (
+    product?.verification_status === "locked" ||
+    product?.safety_status === "locked" ||
+    product?.safety_status === "violation" ||
+    product?.safety_level === "critical"
+  );
+}
+
+function isUnclear(product) {
+  if (!product) return true;
+
+  if (isLocked(product)) return false;
+
+  return (
+    product.verification_status === "review" ||
+    product.verification_status === "unverified" ||
+    product.ai_status === "pending" ||
+    product.confidence === "low" ||
+    product.confidence === "medium" ||
+    !product.brand ||
+    !product.category ||
+    !product.description
+  );
+}
+
+function getProductStatus(product) {
+  if (isLocked(product)) {
+    return {
+      type: "locked",
+      text: "مقفل",
+      icon: "🔴",
+    };
+  }
+
+  if (isUnclear(product)) {
+    return {
+      type: "warning",
+      text: "يحتاج تأكيد",
+      icon: "🟡",
+    };
+  }
+
+  return {
+    type: "ready",
+    text: "جاهز للتصميم",
+    icon: "🟢",
+  };
+}
+
+function getDesignStatus(status) {
+  if (status === "completed") {
+    return {
+      type: "ready",
+      text: "مكتمل",
+      icon: "✓",
+    };
+  }
+
+  if (status === "failed") {
+    return {
+      type: "locked",
+      text: "فشل",
+      icon: "!",
+    };
+  }
+
+  if (status === "processing") {
+    return {
+      type: "pending",
+      text: "قيد الإنشاء",
+      icon: "⏳",
+    };
+  }
+
+  return {
+    type: "pending",
+    text: "بانتظار الإنشاء",
+    icon: "◷",
+  };
+}
+
 export default function DesignsPage() {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [user, setUser] = useState(null);
   const [shop, setShop] = useState(null);
+
   const [products, setProducts] = useState([]);
-  const [selectedProduct, setSelectedProduct] = useState(null);
   const [designs, setDesigns] = useState([]);
 
-  const [format, setFormat] = useState("1:1");
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("success");
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [mode, setMode] = useState("simple");
+
+  const [selectedTemplate, setSelectedTemplate] = useState("product");
+  const [selectedStyle, setSelectedStyle] = useState("modern");
+  const [selectedBackground, setSelectedBackground] = useState("black");
+  const [selectedFormat, setSelectedFormat] = useState("1:1");
+
+  const [description, setDescription] = useState("");
+
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showIdentity, setShowIdentity] = useState(true);
 
   const [responsibilityAccepted, setResponsibilityAccepted] =
     useState(false);
 
-  const [acceptingResponsibility, setAcceptingResponsibility] =
-    useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const selectedProduct = useMemo(() => {
+    return products.find((item) => item.id === selectedProductId) || null;
+  }, [products, selectedProductId]);
+
+  const selectedProductLocked = selectedProduct
+    ? isLocked(selectedProduct)
+    : false;
+
+  const selectedProductUnclear = selectedProduct
+    ? isUnclear(selectedProduct)
+    : false;
 
   useEffect(() => {
-    loadData();
+    loadPage();
   }, []);
 
-  async function loadData() {
+  async function loadPage() {
     setLoading(true);
-    setMessage("");
+    setError("");
 
     try {
       const {
-        data: { user },
+        data: { user: currentUser },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        window.location.href = "/login";
+      if (userError || !currentUser) {
+        router.replace("/login");
         return;
       }
 
-      setUser(user);
+      setUser(currentUser);
 
-      const { data: shopData, error: shopError } =
-        await supabase
-          .from("shops")
-          .select("*")
-          .eq("owner_id", user.id)
-          .maybeSingle();
+      const { data: shopData, error: shopError } = await supabase
+        .from("shops")
+        .select("*")
+        .eq("owner_id", currentUser.id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
-      if (shopError) throw shopError;
+      if (shopError) {
+        throw shopError;
+      }
 
       if (!shopData) {
-        window.location.href = "/setup-shop";
-        return;
-      }
-
-      if (shopData.status !== "active") {
-        setMessageType("error");
-        setMessage("حساب المحل غير نشط حاليًا.");
+        setError("لم يتم العثور على المحل الخاص بالحساب.");
         return;
       }
 
       setShop(shopData);
 
-      const { data: productData, error: productsError } =
-        await supabase
-          .from("products")
-          .select("*")
-          .eq("shop_id", shopData.id)
-          .order("created_at", {
-            ascending: false,
-          });
+      const { data: productData, error: productError } = await supabase
+        .from("products")
+        .select("*")
+        .eq("shop_id", shopData.id)
+        .order("created_at", { ascending: false });
 
-      if (productsError) throw productsError;
-
-      const safeProducts = productData || [];
-
-      setProducts(safeProducts);
-
-      const firstAvailableProduct =
-        safeProducts.find(
-          (product) => !isLocked(product)
-        ) || null;
-
-      setSelectedProduct(firstAvailableProduct);
-
-      if (firstAvailableProduct) {
-        await loadDesigns(
-          shopData.id,
-          firstAvailableProduct.id
-        );
-
-        await checkResponsibilityAcceptance(
-          user.id,
-          shopData.id,
-          firstAvailableProduct
-        );
+      if (productError) {
+        throw productError;
       }
-    } catch (error) {
-      console.error(error);
 
-      setMessageType("error");
-      setMessage(
-        error?.message ||
-          "حدث خطأ أثناء تحميل صفحة التصاميم."
-      );
+      setProducts(productData || []);
+
+      if (productData?.length > 0) {
+        setSelectedProductId(productData[0].id);
+      }
+
+      const { data: designData, error: designError } = await supabase
+        .from("ad_images")
+        .select("*")
+        .eq("shop_id", shopData.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (!designError) {
+        setDesigns(designData || []);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("حدث خطأ أثناء تحميل صفحة التصميم.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadDesigns(shopId, productId) {
-    const { data, error } = await supabase
-      .from("ad_images")
-      .select("*")
-      .eq("shop_id", shopId)
-      .eq("product_id", productId)
-      .order("created_at", {
-        ascending: false,
-      });
-
-    if (error) {
-      console.warn(
-        "Designs load warning:",
-        error
-      );
-      return;
+  async function checkResponsibilityAcceptance() {
+    if (!user || !shop || !selectedProduct) {
+      return false;
     }
 
-    setDesigns(data || []);
-  }
-
-  async function checkResponsibilityAcceptance(
-    userId,
-    shopId,
-    product
-  ) {
-    setResponsibilityAccepted(false);
-
-    if (!product || isLocked(product)) {
-      return;
+    if (!selectedProductUnclear) {
+      return true;
     }
 
-    if (!isProductUnclear(product)) {
-      setResponsibilityAccepted(true);
-      return;
-    }
-
-    const { data, error } = await supabase
+    const { data, error: acceptanceError } = await supabase
       .from("product_responsibility_acceptances")
       .select("id")
-      .eq("user_id", userId)
-      .eq("shop_id", shopId)
-      .eq("product_id", product.id)
+      .eq("user_id", user.id)
+      .eq("product_id", selectedProduct.id)
       .maybeSingle();
 
-    if (error) {
-      console.warn(
-        "Responsibility check warning:",
-        error
-      );
-      return;
-    }
-
-    setResponsibilityAccepted(Boolean(data));
-  }
-
-  async function selectProduct(product) {
-    setSelectedProduct(product);
-    setMessage("");
-
-    if (!shop || !user) return;
-
-    await loadDesigns(
-      shop.id,
-      product.id
-    );
-
-    await checkResponsibilityAcceptance(
-      user.id,
-      shop.id,
-      product
-    );
-  }
-
-  function isLocked(product) {
-    return (
-      product?.verification_status === "locked" ||
-      product?.safety_status === "locked"
-    );
-  }
-
-  function isProductUnclear(product) {
-    if (!product) return false;
-
-    if (isLocked(product)) {
+    if (acceptanceError) {
+      console.error(acceptanceError);
       return false;
     }
 
-    if (
-      product.safety_status === "violation" ||
-      product.safety_level === "critical"
-    ) {
-      return false;
-    }
-
-    const verification =
-      String(
-        product.verification_status || ""
-      )
-        .trim()
-        .toLowerCase();
-
-    const confidence =
-      String(product.confidence || "")
-        .trim()
-        .toLowerCase();
-
-    if (
-      verification === "review" ||
-      verification === "unverified"
-    ) {
-      return true;
-    }
-
-    if (
-      confidence === "low" ||
-      confidence === "منخفض" ||
-      confidence === "medium" ||
-      confidence === "متوسط"
-    ) {
-      return true;
-    }
-
-    const hasName = Boolean(
-      String(product.name || "").trim()
-    );
-
-    const hasBrand = Boolean(
-      String(product.brand || "").trim()
-    );
-
-    const hasCategory = Boolean(
-      String(product.category || "").trim()
-    );
-
-    const hasDescription = Boolean(
-      String(product.description || "").trim()
-    );
-
-    if (
-      hasName &&
-      !hasBrand &&
-      !hasCategory &&
-      !hasDescription
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
-  function getProductStatus(product) {
-    if (isLocked(product)) {
-      return {
-        label: "مقفل",
-        icon: "🔒",
-        background: "#fff1f1",
-        color: "#9b2226",
-        border: "#f1c0c0",
-      };
-    }
-
-    if (isProductUnclear(product)) {
-      return {
-        label: "يحتاج تأكيد",
-        icon: "🟡",
-        background: "#fff8e1",
-        color: "#8a6500",
-        border: "#f0d98a",
-      };
-    }
-
-    return {
-      label: "جاهز",
-      icon: "🟢",
-      background: "#eef7ee",
-      color: "#256029",
-      border: "#cce8cc",
-    };
+    return Boolean(data);
   }
 
   async function acceptResponsibility() {
-    if (
-      !user ||
-      !shop ||
-      !selectedProduct ||
-      acceptingResponsibility
-    ) {
-      return;
-    }
+    if (!user || !shop || !selectedProduct) return;
 
-    if (isLocked(selectedProduct)) {
-      setMessageType("error");
-      setMessage(
-        "🔒 هذا المنتج مقفول ولا يمكن استخدامه."
-      );
-      return;
-    }
-
-    if (!isProductUnclear(selectedProduct)) {
-      setResponsibilityAccepted(true);
-      return;
-    }
-
-    setAcceptingResponsibility(true);
+    setSaving(true);
+    setError("");
     setMessage("");
 
     try {
-      const { error } = await supabase
-        .from(
-          "product_responsibility_acceptances"
-        )
+      const { error: acceptanceError } = await supabase
+        .from("product_responsibility_acceptances")
         .upsert(
           {
             user_id: user.id,
@@ -359,107 +412,134 @@ export default function DesignsPage() {
           }
         );
 
-      if (error) throw error;
+      if (acceptanceError) {
+        throw acceptanceError;
+      }
 
       setResponsibilityAccepted(true);
-
-      setMessageType("success");
-      setMessage(
-        "✅ تم تأكيد مسؤولية التاجر. يمكنك الآن إنشاء التصميم."
-      );
-    } catch (error) {
-      console.error(error);
-
-      setMessageType("error");
-      setMessage(
-        error?.message ||
-          "تعذر حفظ تأكيد المسؤولية."
-      );
+      setMessage("تم تأكيد مسؤولية المنتج ويمكنك الآن تجهيز التصميم.");
+    } catch (err) {
+      console.error(err);
+      setError("تعذر حفظ تأكيد المسؤولية.");
     } finally {
-      setAcceptingResponsibility(false);
+      setSaving(false);
     }
   }
 
   async function createDesign() {
-    if (
-      !selectedProduct ||
-      !shop ||
-      !user ||
-      creating
-    ) {
+    setError("");
+    setMessage("");
+
+    if (!selectedProduct) {
+      setError("اختر المنتج أولاً.");
       return;
     }
 
-    if (isLocked(selectedProduct)) {
-      setMessageType("error");
-      setMessage(
-        "🔒 هذا المنتج مقفول ولا يمكن إنشاء تصميم له."
-      );
-      return;
-    }
-
-    if (
-      isProductUnclear(selectedProduct) &&
-      !responsibilityAccepted
-    ) {
-      setMessageType("error");
-      setMessage(
-        "⚠️ يجب تأكيد مسؤولية التاجر عن هذا المنتج قبل إنشاء التصميم."
+    if (selectedProductLocked) {
+      setError(
+        "هذا المنتج مقفل ولا يمكن استخدامه في التسويق أو التصميم حالياً."
       );
       return;
     }
 
     if (!selectedProduct.image_url) {
-      setMessageType("error");
-      setMessage(
-        "📷 أضف صورة للمنتج أولًا قبل إنشاء التصميم."
-      );
+      setError("المنتج لا يحتوي على صورة. أضف صورة المنتج أولاً.");
       return;
     }
 
-    setCreating(true);
-    setMessage("");
+    if (selectedProductUnclear && !responsibilityAccepted) {
+      const accepted = await checkResponsibilityAcceptance();
+
+      if (!accepted) {
+        setError(
+          "هذا المنتج يحتاج تأكيد مسؤولية المنتج قبل إنشاء التصميم."
+        );
+        return;
+      }
+
+      setResponsibilityAccepted(true);
+    }
+
+    setSaving(true);
 
     try {
-      const { data, error } = await supabase
+      const designPrompt = {
+        type: "product_ad_design",
+        mode,
+        template:
+          mode === "simple" ? selectedTemplate : null,
+        style: mode === "professional" ? selectedStyle : null,
+        background:
+          mode === "professional"
+            ? BACKGROUNDS.find(
+                (item) => item.id === selectedBackground
+              )?.value || selectedBackground
+            : null,
+        format: selectedFormat,
+        description: description.trim(),
+        shop: {
+          name: shop?.name || "",
+          logo_url: shop?.logo_url || "",
+          phone: shop?.phone || "",
+          whatsapp: shop?.whatsapp || "",
+          instagram: shop?.instagram || "",
+          tiktok: shop?.tiktok || "",
+          snapchat: shop?.snapchat || "",
+          website: shop?.website || "",
+        },
+        product: {
+          id: selectedProduct.id,
+          name: selectedProduct.name || "",
+          brand: selectedProduct.brand || "",
+          category: selectedProduct.category || "",
+          price: selectedProduct.price ?? null,
+          currency: selectedProduct.currency || "AED",
+          image_url: selectedProduct.image_url || "",
+          description: selectedProduct.description || "",
+          features: selectedProduct.features || "",
+        },
+        rules: {
+          preserve_original_product_image: true,
+          do_not_change_product_identity: true,
+          do_not_invent_product_information: true,
+          use_shop_identity: true,
+          advertising_first: true,
+        },
+      };
+
+      const { error: insertError } = await supabase
         .from("ad_images")
         .insert({
           product_id: selectedProduct.id,
           shop_id: shop.id,
           image_url: null,
-          format,
-          prompt: buildDesignPrompt(
-            shop,
-            selectedProduct,
-            format
-          ),
+          format: selectedFormat,
+          prompt: JSON.stringify(designPrompt),
           status: "pending",
-        })
-        .select()
-        .single();
+        });
 
-      if (error) throw error;
+      if (insertError) {
+        throw insertError;
+      }
 
-      setDesigns((current) => [
-        data,
-        ...current,
-      ]);
-
-      setMessageType("success");
       setMessage(
-        "🎨 تم إنشاء طلب التصميم ووضعه في قائمة الانتظار."
+        "تم تجهيز طلب التصميم بنجاح. سيتم ربطه بمولّد التصميم في الخطوة التالية."
       );
-    } catch (error) {
-      console.error(error);
 
-      setMessageType("error");
-      setMessage(
-        error?.message ||
-          "حدث خطأ أثناء إنشاء طلب التصميم."
-      );
+      await loadPage();
+    } catch (err) {
+      console.error(err);
+      setError("تعذر تجهيز التصميم حالياً.");
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
+  }
+
+  function handleProductChange(value) {
+    setSelectedProductId(value);
+    setResponsibilityAccepted(false);
+    setError("");
+    setMessage("");
   }
 
   if (loading) {
@@ -468,25 +548,14 @@ export default function DesignsPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f7f8fa",
-          padding: 30,
+          background: "#f6f8f7",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           fontFamily: "Arial, sans-serif",
-          textAlign: "center",
         }}
       >
-        <div
-          style={{
-            maxWidth: 600,
-            margin: "80px auto",
-            background: "#fff",
-            padding: 30,
-            borderRadius: 20,
-            boxShadow:
-              "0 5px 25px rgba(0,0,0,0.06)",
-          }}
-        >
-          جاري تحميل استوديو التصاميم...
-        </div>
+        جاري تحميل استوديو التصميم...
       </main>
     );
   }
@@ -496,1141 +565,1042 @@ export default function DesignsPage() {
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fa",
-        padding: "24px 14px 60px",
+        background: "#f6f8f7",
+        color: "#17201c",
         fontFamily: "Arial, sans-serif",
+        paddingBottom: 60,
       }}
     >
       <div
         style={{
-          maxWidth: 1100,
+          maxWidth: 1200,
           margin: "0 auto",
+          padding: "24px 18px",
         }}
       >
-        <div
+        {/* Header */}
+        <header
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: 12,
+            gap: 16,
+            marginBottom: 24,
             flexWrap: "wrap",
-            marginBottom: 20,
           }}
         >
           <div>
+            <div
+              style={{
+                color: "#15803d",
+                fontWeight: 800,
+                fontSize: 13,
+                marginBottom: 6,
+              }}
+            >
+              سوق AI
+            </div>
+
             <h1
               style={{
                 margin: 0,
                 fontSize: 30,
+                fontWeight: 900,
               }}
             >
-              🎨 استوديو التصاميم
+              🎨 استوديو التصميم
             </h1>
 
             <p
               style={{
-                marginTop: 8,
-                color: "#666",
+                margin: "8px 0 0",
+                color: "#66736d",
+                fontSize: 15,
               }}
             >
-              أنشئ تصاميم إعلانية لمنتجاتك باستخدام
-              هوية محلك.
+              حوّل منتجك إلى إعلان جاهز للنشر
             </p>
           </div>
 
           <button
-            type="button"
-            onClick={() =>
-              (window.location.href =
-                "/dashboard")
-            }
-            style={secondaryButton}
-          >
-            ← لوحة التحكم
-          </button>
-        </div>
-
-        {shop && (
-          <section
+            onClick={() => router.push("/products")}
             style={{
+              border: "1px solid #d7dfda",
               background: "#fff",
-              borderRadius: 18,
-              padding: 18,
-              marginBottom: 18,
-              boxShadow:
-                "0 5px 20px rgba(0,0,0,0.05)",
+              color: "#1f2933",
+              borderRadius: 12,
+              padding: "11px 16px",
+              fontWeight: 800,
+              cursor: "pointer",
             }}
           >
-            <div
-              style={{
-                fontSize: 13,
-                color: "#777",
-                marginBottom: 6,
-              }}
-            >
-              هوية المحل
-            </div>
+            ← المنتجات
+          </button>
+        </header>
 
-            <strong
-              style={{
-                fontSize: 20,
-              }}
-            >
-              {shop.name}
-            </strong>
-
-            <div
-              style={{
-                marginTop: 10,
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-              }}
-            >
-              {shop.phone && (
-                <IdentityBadge>
-                  📞 {shop.phone}
-                </IdentityBadge>
-              )}
-
-              {shop.whatsapp && (
-                <IdentityBadge>
-                  💬 {shop.whatsapp}
-                </IdentityBadge>
-              )}
-
-              {shop.instagram && (
-                <IdentityBadge>
-                  📸 {shop.instagram}
-                </IdentityBadge>
-              )}
-
-              {shop.tiktok && (
-                <IdentityBadge>
-                  🎵 {shop.tiktok}
-                </IdentityBadge>
-              )}
-
-              {shop.snapchat && (
-                <IdentityBadge>
-                  👻 {shop.snapchat}
-                </IdentityBadge>
-              )}
-
-              {shop.website && (
-                <IdentityBadge>
-                  🌐 {shop.website}
-                </IdentityBadge>
-              )}
-            </div>
-          </section>
+        {error && (
+          <div
+            style={{
+              background: "#fef3f2",
+              border: "1px solid #fecdca",
+              color: "#b42318",
+              borderRadius: 14,
+              padding: 14,
+              marginBottom: 16,
+              fontWeight: 700,
+            }}
+          >
+            {error}
+          </div>
         )}
 
         {message && (
           <div
             style={{
-              background:
-                messageType === "error"
-                  ? "#fff1f1"
-                  : "#eef7ee",
-              color:
-                messageType === "error"
-                  ? "#9b2226"
-                  : "#256029",
-              border:
-                messageType === "error"
-                  ? "1px solid #f1c0c0"
-                  : "1px solid #cce8cc",
+              background: "#ecfdf3",
+              border: "1px solid #abefc6",
+              color: "#067647",
               borderRadius: 14,
-              padding: 15,
-              marginBottom: 18,
-              lineHeight: 1.7,
+              padding: 14,
+              marginBottom: 16,
+              fontWeight: 700,
             }}
           >
             {message}
           </div>
         )}
 
-        {products.length === 0 ? (
-          <section
-            style={{
-              background: "#fff",
-              borderRadius: 20,
-              padding: 35,
-              textAlign: "center",
-              boxShadow:
-                "0 5px 20px rgba(0,0,0,0.05)",
-            }}
-          >
-            <div style={{ fontSize: 45 }}>
-              📦
-            </div>
-
-            <h2>
-              لا توجد منتجات
-            </h2>
-
-            <p
-              style={{
-                color: "#666",
-                lineHeight: 1.8,
-              }}
-            >
-              أضف منتجًا أولًا حتى تتمكن من إنشاء
-              تصميم إعلاني.
-            </p>
-
-            <button
-              type="button"
-              onClick={() =>
-                (window.location.href =
-                  "/add-product")
-              }
-              style={primaryButton}
-            >
-              + إضافة منتج
-            </button>
-          </section>
-        ) : (
-          <>
-            <section
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.6fr) minmax(300px, .8fr)",
+            gap: 20,
+            alignItems: "start",
+          }}
+        >
+          <section>
+            {/* Product */}
+            <div
               style={{
                 background: "#fff",
+                border: "1px solid #e1e7e3",
                 borderRadius: 20,
                 padding: 20,
-                marginBottom: 20,
-                boxShadow:
-                  "0 5px 20px rgba(0,0,0,0.05)",
+                marginBottom: 18,
               }}
             >
-              <div
+              <h2
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 10,
-                  flexWrap: "wrap",
+                  margin: "0 0 14px",
+                  fontSize: 19,
                 }}
               >
-                <div>
-                  <h2
+                1. اختر المنتج
+              </h2>
+
+              <select
+                value={selectedProductId}
+                onChange={(e) => handleProductChange(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: 14,
+                  borderRadius: 12,
+                  border: "1px solid #cfd8d3",
+                  fontSize: 15,
+                  background: "#fff",
+                }}
+              >
+                {products.length === 0 && (
+                  <option value="">لا توجد منتجات</option>
+                )}
+
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                    {product.brand ? ` — ${product.brand}` : ""}
+                  </option>
+                ))}
+              </select>
+
+              {selectedProduct && (
+                <div
+                  style={{
+                    marginTop: 16,
+                    display: "flex",
+                    gap: 14,
+                    alignItems: "center",
+                    padding: 14,
+                    background: "#f8faf9",
+                    borderRadius: 16,
+                    border: "1px solid #e6ebe8",
+                  }}
+                >
+                  <div
                     style={{
-                      marginTop: 0,
-                      marginBottom: 5,
+                      width: 82,
+                      height: 82,
+                      borderRadius: 14,
+                      background: "#fff",
+                      border: "1px solid #e1e7e3",
+                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
                     }}
                   >
-                    1. اختر المنتج
-                  </h2>
+                    {selectedProduct.image_url ? (
+                      <img
+                        src={selectedProduct.image_url}
+                        alt={selectedProduct.name}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "contain",
+                        }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 28 }}>📦</span>
+                    )}
+                  </div>
+
+                  <div style={{ flex: 1 }}>
+                    <div
+                      style={{
+                        fontWeight: 900,
+                        fontSize: 17,
+                        marginBottom: 6,
+                      }}
+                    >
+                      {selectedProduct.name}
+                    </div>
+
+                    <div
+                      style={{
+                        color: "#66736d",
+                        fontSize: 13,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {selectedProduct.brand || "بدون علامة"}{" "}
+                      {selectedProduct.category
+                        ? `• ${selectedProduct.category}`
+                        : ""}
+                    </div>
+
+                    {(() => {
+                      const status = getProductStatus(selectedProduct);
+
+                      return (
+                        <StatusBadge type={status.type}>
+                          {status.icon} {status.text}
+                        </StatusBadge>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mode */}
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e1e7e3",
+                borderRadius: 20,
+                padding: 20,
+                marginBottom: 18,
+              }}
+            >
+              <h2
+                style={{
+                  margin: "0 0 14px",
+                  fontSize: 19,
+                }}
+              >
+                2. نوع التصميم
+              </h2>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                <button
+                  onClick={() => setMode("simple")}
+                  style={{
+                    textAlign: "right",
+                    padding: 18,
+                    borderRadius: 16,
+                    cursor: "pointer",
+                    background:
+                      mode === "simple" ? "#f0fdf4" : "#fff",
+                    border:
+                      mode === "simple"
+                        ? "2px solid #16a34a"
+                        : "1px solid #d9e1dc",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 23,
+                      marginBottom: 8,
+                    }}
+                  >
+                    ⚡
+                  </div>
 
                   <div
                     style={{
-                      color: "#777",
-                      fontSize: 13,
+                      fontWeight: 900,
+                      fontSize: 17,
                     }}
                   >
-                    اختر المنتج الذي تريد تصميم إعلان
-                    له.
+                    عادي وسريع
                   </div>
+
+                  <div
+                    style={{
+                      color: "#66736d",
+                      fontSize: 13,
+                      marginTop: 5,
+                    }}
+                  >
+                    قوالب جاهزة وتصميم سريع
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setMode("professional")}
+                  style={{
+                    textAlign: "right",
+                    padding: 18,
+                    borderRadius: 16,
+                    cursor: "pointer",
+                    background:
+                      mode === "professional" ? "#f0fdf4" : "#fff",
+                    border:
+                      mode === "professional"
+                        ? "2px solid #16a34a"
+                        : "1px solid #d9e1dc",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 23,
+                      marginBottom: 8,
+                    }}
+                  >
+                    💎
+                  </div>
+
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 17,
+                    }}
+                  >
+                    احترافي
+                  </div>
+
+                  <div
+                    style={{
+                      color: "#66736d",
+                      fontSize: 13,
+                      marginTop: 5,
+                    }}
+                  >
+                    وصف حر وتحكم أكبر بالتصميم
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Simple templates */}
+            {mode === "simple" && (
+              <div
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 20,
+                  marginBottom: 18,
+                }}
+              >
+                <h2
+                  style={{
+                    margin: "0 0 6px",
+                    fontSize: 19,
+                  }}
+                >
+                  3. اختر قالباً
+                </h2>
+
+                <p
+                  style={{
+                    color: "#66736d",
+                    fontSize: 13,
+                    margin: "0 0 16px",
+                  }}
+                >
+                  اختر الشكل المناسب للإعلان بدون الحاجة لكتابة وصف طويل.
+                </p>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit,minmax(170px,1fr))",
+                    gap: 12,
+                  }}
+                >
+                  {TEMPLATES.map((template) => {
+                    const active = selectedTemplate === template.id;
+
+                    return (
+                      <button
+                        key={template.id}
+                        onClick={() =>
+                          setSelectedTemplate(template.id)
+                        }
+                        style={{
+                          textAlign: "right",
+                          background: active ? "#f0fdf4" : "#fff",
+                          border: active
+                            ? "2px solid #16a34a"
+                            : "1px solid #d9e1dc",
+                          borderRadius: 15,
+                          padding: 15,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ fontSize: 25 }}>
+                          {template.icon}
+                        </div>
+
+                        <div
+                          style={{
+                            fontWeight: 900,
+                            marginTop: 8,
+                          }}
+                        >
+                          {template.title}
+                        </div>
+
+                        <div
+                          style={{
+                            color: "#66736d",
+                            fontSize: 12,
+                            lineHeight: 1.6,
+                            marginTop: 4,
+                          }}
+                        >
+                          {template.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Professional */}
+            {mode === "professional" && (
+              <div
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e1e7e3",
+                  borderRadius: 20,
+                  padding: 20,
+                  marginBottom: 18,
+                }}
+              >
+                <h2
+                  style={{
+                    margin: "0 0 6px",
+                    fontSize: 19,
+                  }}
+                >
+                  3. صمّم بالطريقة اللي تبيها
+                </h2>
+
+                <p
+                  style={{
+                    color: "#66736d",
+                    fontSize: 13,
+                    margin: "0 0 16px",
+                  }}
+                >
+                  اكتب وصفك، والذكاء الاصطناعي يحوّله لاحقاً إلى
+                  تصميم إعلاني.
+                </p>
+
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder='مثال: أبغي خلفية سوداء فخمة، المنتج في المنتصف وواضح، إضاءة زرقاء خفيفة من الخلف، شعار المحل فوق، والسعر 299 درهم بشكل أنيق.'
+                  style={{
+                    width: "100%",
+                    minHeight: 150,
+                    resize: "vertical",
+                    padding: 15,
+                    borderRadius: 14,
+                    border: "1px solid #cfd8d3",
+                    fontSize: 15,
+                    lineHeight: 1.8,
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+
+                <div
+                  style={{
+                    marginTop: 18,
+                    fontWeight: 900,
+                    marginBottom: 10,
+                  }}
+                >
+                  الستايل
                 </div>
 
                 <div
                   style={{
-                    fontSize: 13,
-                    color: "#777",
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit,minmax(120px,1fr))",
+                    gap: 9,
                   }}
                 >
-                  {products.length} منتج
+                  {STYLES.map((style) => {
+                    const active = selectedStyle === style.id;
+
+                    return (
+                      <button
+                        key={style.id}
+                        onClick={() => setSelectedStyle(style.id)}
+                        style={{
+                          padding: "12px 10px",
+                          borderRadius: 12,
+                          cursor: "pointer",
+                          background: active ? "#f0fdf4" : "#fff",
+                          border: active
+                            ? "2px solid #16a34a"
+                            : "1px solid #d9e1dc",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {style.icon} {style.title}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 18,
+                    fontWeight: 900,
+                    marginBottom: 10,
+                  }}
+                >
+                  الخلفية
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit,minmax(100px,1fr))",
+                    gap: 9,
+                  }}
+                >
+                  {BACKGROUNDS.map((background) => {
+                    const active =
+                      selectedBackground === background.id;
+
+                    return (
+                      <button
+                        key={background.id}
+                        onClick={() =>
+                          setSelectedBackground(background.id)
+                        }
+                        style={{
+                          padding: 12,
+                          borderRadius: 12,
+                          cursor: "pointer",
+                          background: active
+                            ? "#f0fdf4"
+                            : "#fff",
+                          border: active
+                            ? "2px solid #16a34a"
+                            : "1px solid #d9e1dc",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {background.title}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
+            )}
+
+            {/* Format */}
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e1e7e3",
+                borderRadius: 20,
+                padding: 20,
+                marginBottom: 18,
+              }}
+            >
+              <h2
+                style={{
+                  margin: "0 0 14px",
+                  fontSize: 19,
+                }}
+              >
+                4. مقاس الإعلان
+              </h2>
 
               <div
                 style={{
                   display: "grid",
                   gridTemplateColumns:
-                    "repeat(auto-fill, minmax(180px, 1fr))",
-                  gap: 14,
-                  marginTop: 18,
+                    "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 10,
                 }}
               >
-                {products.map((product) => {
-                  const locked =
-                    isLocked(product);
-
-                  const selected =
-                    selectedProduct?.id ===
-                    product.id;
-
-                  const status =
-                    getProductStatus(product);
+                {FORMATS.map((format) => {
+                  const active = selectedFormat === format.id;
 
                   return (
                     <button
-                      key={product.id}
-                      type="button"
-                      onClick={() =>
-                        selectProduct(product)
-                      }
+                      key={format.id}
+                      onClick={() => setSelectedFormat(format.id)}
                       style={{
                         textAlign: "right",
-                        border: selected
-                          ? "2px solid #111"
-                          : "1px solid #ddd",
-                        background: "#fff",
-                        borderRadius: 16,
-                        padding: 12,
+                        padding: 14,
+                        borderRadius: 14,
                         cursor: "pointer",
-                        opacity: locked
-                          ? 0.7
-                          : 1,
+                        background: active
+                          ? "#f0fdf4"
+                          : "#fff",
+                        border: active
+                          ? "2px solid #16a34a"
+                          : "1px solid #d9e1dc",
                       }}
                     >
                       <div
                         style={{
-                          width: "100%",
-                          height: 130,
-                          borderRadius: 12,
-                          background:
-                            "#f5f5f5",
-                          overflow: "hidden",
-                          marginBottom: 10,
+                          fontSize: 23,
+                          marginBottom: 5,
                         }}
                       >
-                        {product.image_url ? (
-                          <img
-                            src={
-                              product.image_url
-                            }
-                            alt={product.name}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit:
-                                "contain",
-                            }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              height: "100%",
-                              display: "flex",
-                              alignItems:
-                                "center",
-                              justifyContent:
-                                "center",
-                              color: "#999",
-                            }}
-                          >
-                            📷 لا توجد صورة
-                          </div>
-                        )}
+                        {format.icon}
                       </div>
 
-                      <strong
+                      <div
                         style={{
-                          display: "block",
-                          marginBottom: 7,
+                          fontWeight: 900,
                         }}
                       >
-                        {product.name}
-                      </strong>
+                        {format.title}
+                      </div>
 
-                      <span
+                      <div
                         style={{
-                          display: "inline-block",
-                          background:
-                            status.background,
-                          color: status.color,
-                          border: `1px solid ${status.border}`,
-                          padding:
-                            "5px 9px",
-                          borderRadius: 20,
+                          color: "#66736d",
                           fontSize: 12,
-                          fontWeight: "bold",
+                          marginTop: 4,
                         }}
                       >
-                        {status.icon}{" "}
-                        {status.label}
-                      </span>
+                        {format.description}
+                      </div>
                     </button>
                   );
                 })}
               </div>
-            </section>
+            </div>
 
-            {selectedProduct && (
-              <>
-                <section
+            {/* Responsibility */}
+            {selectedProductUnclear && selectedProduct && (
+              <div
+                style={{
+                  background: "#fffbeb",
+                  border: "1px solid #fedf89",
+                  borderRadius: 18,
+                  padding: 18,
+                  marginBottom: 18,
+                }}
+              >
+                <div
                   style={{
-                    background: "#fff",
-                    borderRadius: 20,
-                    padding: 20,
-                    marginBottom: 20,
-                    boxShadow:
-                      "0 5px 20px rgba(0,0,0,0.05)",
+                    fontWeight: 900,
+                    color: "#92400e",
+                    marginBottom: 8,
                   }}
                 >
-                  <div
+                  🟡 يحتاج تأكيد المنتج
+                </div>
+
+                <div
+                  style={{
+                    color: "#92400e",
+                    fontSize: 13,
+                    lineHeight: 1.8,
+                    marginBottom: 12,
+                  }}
+                >
+                  بعض معلومات المنتج غير مكتملة أو لم يتم التحقق
+                  منها بشكل كافٍ. يمكنك المتابعة بعد تأكيد أنك مسؤول
+                  عن صحة معلومات المنتج ومشروعيته.
+                </div>
+
+                {!responsibilityAccepted ? (
+                  <button
+                    onClick={acceptResponsibility}
+                    disabled={saving}
                     style={{
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                      flexWrap: "wrap",
+                      background: "#15803d",
+                      color: "#fff",
+                      border: 0,
+                      borderRadius: 11,
+                      padding: "11px 15px",
+                      cursor: saving
+                        ? "not-allowed"
+                        : "pointer",
+                      fontWeight: 900,
                     }}
                   >
-                    <div>
-                      <h2
-                        style={{
-                          marginTop: 0,
-                          marginBottom: 5,
-                        }}
-                      >
-                        2. إعداد التصميم
-                      </h2>
+                    {saving
+                      ? "جاري الحفظ..."
+                      : "أؤكد المسؤولية ويمكنني المتابعة"}
+                  </button>
+                ) : (
+                  <StatusBadge type="ready">
+                    ✓ تم تأكيد المسؤولية
+                  </StatusBadge>
+                )}
+              </div>
+            )}
 
-                      <div
-                        style={{
-                          color: "#777",
-                          fontSize: 13,
-                        }}
-                      >
-                        المنتج المحدد:{" "}
-                        <strong>
-                          {selectedProduct.name}
-                        </strong>
-                      </div>
-                    </div>
+            {/* Create */}
+            <button
+              onClick={createDesign}
+              disabled={
+                saving ||
+                !selectedProduct ||
+                selectedProductLocked ||
+                (selectedProductUnclear && !responsibilityAccepted)
+              }
+              style={{
+                width: "100%",
+                border: 0,
+                borderRadius: 16,
+                padding: 17,
+                background:
+                  saving ||
+                  !selectedProduct ||
+                  selectedProductLocked ||
+                  (selectedProductUnclear &&
+                    !responsibilityAccepted)
+                    ? "#aab5ae"
+                    : "#15803d",
+                color: "#fff",
+                fontSize: 17,
+                fontWeight: 900,
+                cursor:
+                  saving ||
+                  !selectedProduct ||
+                  selectedProductLocked ||
+                  (selectedProductUnclear &&
+                    !responsibilityAccepted)
+                    ? "not-allowed"
+                    : "pointer",
+              }}
+            >
+              {saving ? "جاري تجهيز التصميم..." : "🎨 إنشاء التصميم"}
+            </button>
+          </section>
 
-                    <StatusBadge
-                      product={selectedProduct}
-                    />
-                  </div>
+          {/* Sidebar */}
+          <aside>
+            {/* Shop identity */}
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e1e7e3",
+                borderRadius: 20,
+                padding: 18,
+                marginBottom: 18,
+              }}
+            >
+              <button
+                onClick={() => setShowIdentity(!showIdentity)}
+                style={{
+                  width: "100%",
+                  border: 0,
+                  background: "transparent",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontWeight: 900,
+                    fontSize: 17,
+                  }}
+                >
+                  🏪 هوية المحل
+                </span>
 
-                  {isLocked(selectedProduct) ? (
+                <span>{showIdentity ? "⌃" : "⌄"}</span>
+              </button>
+
+              {showIdentity && shop && (
+                <div style={{ marginTop: 16 }}>
+                  {shop.logo_url && (
                     <div
                       style={{
-                        marginTop: 20,
-                        background: "#fff1f1",
-                        border:
-                          "1px solid #f1c0c0",
-                        borderRadius: 16,
-                        padding: 18,
-                        lineHeight: 1.8,
+                        width: 70,
+                        height: 70,
+                        borderRadius: 15,
+                        overflow: "hidden",
+                        border: "1px solid #e1e7e3",
+                        marginBottom: 12,
                       }}
                     >
-                      <strong>
-                        🔒 المنتج مقفول
-                      </strong>
+                      <img
+                        src={shop.logo_url}
+                        alt={shop.name}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "contain",
+                        }}
+                      />
+                    </div>
+                  )}
 
-                      <p>
-                        لا يمكن إنشاء تصميم لهذا
-                        المنتج حتى تتم مراجعته
-                        واعتماده.
-                      </p>
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 18,
+                    }}
+                  >
+                    {shop.name}
+                  </div>
 
-                      {selectedProduct.safety_reason && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "grid",
+                      gap: 7,
+                      color: "#66736d",
+                      fontSize: 13,
+                    }}
+                  >
+                    {shop.phone && (
+                      <div>☎️ {shop.phone}</div>
+                    )}
+
+                    {shop.whatsapp && (
+                      <div>💬 {shop.whatsapp}</div>
+                    )}
+
+                    {shop.instagram && (
+                      <div>📸 {shop.instagram}</div>
+                    )}
+
+                    {shop.tiktok && (
+                      <div>🎵 {shop.tiktok}</div>
+                    )}
+
+                    {shop.snapchat && (
+                      <div>👻 {shop.snapchat}</div>
+                    )}
+
+                    {shop.website && (
+                      <div>🌐 {shop.website}</div>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: 10,
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      borderRadius: 11,
+                      fontSize: 12,
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    سيتم استخدام هوية المحل تلقائياً في التصميم
+                    عندما تكون البيانات متوفرة.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Design rules */}
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e1e7e3",
+                borderRadius: 20,
+                padding: 18,
+                marginBottom: 18,
+              }}
+            >
+              <h3
+                style={{
+                  margin: "0 0 13px",
+                  fontSize: 17,
+                }}
+              >
+                🛡️ قواعد التصميم
+              </h3>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: 10,
+                  color: "#56625c",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}
+              >
+                <div>✓ المنتج هو محور الإعلان</div>
+                <div>✓ الحفاظ على هوية المنتج الأصلية</div>
+                <div>✓ عدم اختراع معلومات عن المنتج</div>
+                <div>✓ استخدام هوية المحل</div>
+                <div>✓ التصميم موجه للإعلان والنشر</div>
+              </div>
+            </div>
+
+            {/* History */}
+            <div
+              style={{
+                background: "#fff",
+                border: "1px solid #e1e7e3",
+                borderRadius: 20,
+                padding: 18,
+              }}
+            >
+              <h3
+                style={{
+                  margin: "0 0 14px",
+                  fontSize: 17,
+                }}
+              >
+                🗂️ آخر التصاميم
+              </h3>
+
+              {designs.length === 0 ? (
+                <div
+                  style={{
+                    color: "#7a857f",
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  لا توجد تصاميم حتى الآن.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 10,
+                  }}
+                >
+                  {designs.slice(0, 8).map((design) => {
+                    const status = getDesignStatus(
+                      design.status
+                    );
+
+                    const product = products.find(
+                      (item) => item.id === design.product_id
+                    );
+
+                    return (
+                      <div
+                        key={design.id}
+                        style={{
+                          border: "1px solid #e5ebe7",
+                          borderRadius: 12,
+                          padding: 11,
+                        }}
+                      >
                         <div
                           style={{
-                            background: "#fff",
-                            borderRadius: 10,
-                            padding: 12,
-                            color: "#8a2222",
+                            fontWeight: 800,
+                            fontSize: 13,
+                            marginBottom: 7,
                           }}
                         >
-                          السبب:{" "}
-                          {
-                            selectedProduct.safety_reason
-                          }
+                          {product?.name || "منتج"}
                         </div>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {isProductUnclear(
-                        selectedProduct
-                      ) &&
-                        !responsibilityAccepted && (
-                          <div
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span
                             style={{
-                              marginTop: 20,
-                              background:
-                                "#fff8e1",
-                              border:
-                                "1px solid #f0d98a",
-                              borderRadius: 16,
-                              padding: 18,
-                              lineHeight: 1.9,
+                              color: "#66736d",
+                              fontSize: 12,
                             }}
                           >
-                            <div
-                              style={{
-                                fontWeight:
-                                  "bold",
-                                fontSize: 17,
-                                marginBottom: 8,
-                              }}
-                            >
-                              ⚠️ معلومات المنتج
-                              غير مكتملة أو غير
-                              واضحة
-                            </div>
+                            {design.format || "1:1"}
+                          </span>
 
-                            <div
-                              style={{
-                                color: "#555",
-                              }}
-                            >
-                              عدم وضوح المعلومات لا
-                              يعني أن المنتج مخالف.
-                              يمكنك الاستمرار بعد
-                              تأكيد مسؤوليتك عن
-                              صحة المعلومات ومشروعية
-                              بيع المنتج وتسويقه.
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={
-                                acceptResponsibility
-                              }
-                              disabled={
-                                acceptingResponsibility
-                              }
-                              style={{
-                                ...primaryButton,
-                                marginTop: 15,
-                                opacity:
-                                  acceptingResponsibility
-                                    ? 0.6
-                                    : 1,
-                              }}
-                            >
-                              {acceptingResponsibility
-                                ? "جاري الحفظ..."
-                                : "☑️ أوافق وأكمل"}
-                            </button>
-                          </div>
-                        )}
-
-                      {isProductUnclear(
-                        selectedProduct
-                      ) &&
-                        responsibilityAccepted && (
-                          <div
-                            style={{
-                              marginTop: 20,
-                              background:
-                                "#eaf7ee",
-                              border:
-                                "1px solid #b7dfc2",
-                              borderRadius: 14,
-                              padding: 14,
-                              lineHeight: 1.7,
-                              color: "#256029",
-                            }}
-                          >
-                            ✅ تم تأكيد مسؤولية
-                            التاجر عن هذا المنتج.
-                            يمكنك الآن إنشاء
-                            التصميم.
-                          </div>
-                        )}
-
-                      <h3
-                        style={{
-                          marginTop: 25,
-                        }}
-                      >
-                        مقاس التصميم
-                      </h3>
-
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns:
-                            "repeat(auto-fit, minmax(180px, 1fr))",
-                          gap: 12,
-                        }}
-                      >
-                        {formats.map((item) => {
-                          const selected =
-                            format ===
-                            item.value;
-
-                          return (
-                            <button
-                              key={
-                                item.value
-                              }
-                              type="button"
-                              onClick={() =>
-                                setFormat(
-                                  item.value
-                                )
-                              }
-                              style={{
-                                border: selected
-                                  ? "2px solid #111"
-                                  : "1px solid #ddd",
-                                background:
-                                  selected
-                                    ? "#f5f5f5"
-                                    : "#fff",
-                                borderRadius: 15,
-                                padding: 16,
-                                cursor:
-                                  "pointer",
-                                textAlign:
-                                  "right",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  fontSize: 24,
-                                  marginBottom: 8,
-                                }}
-                              >
-                                {item.icon}
-                              </div>
-
-                              <strong>
-                                {item.title}
-                              </strong>
-
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                  fontSize: 13,
-                                  color:
-                                    "#777",
-                                }}
-                              >
-                                {
-                                  item.description
-                                }
-                              </div>
-
-                              <div
-                                style={{
-                                  marginTop: 8,
-                                  fontWeight:
-                                    "bold",
-                                }}
-                              >
-                                {item.value}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 20,
-                          padding: 16,
-                          background:
-                            "#f8f9fb",
-                          borderRadius: 14,
-                          lineHeight: 1.9,
-                        }}
-                      >
-                        <strong>
-                          🏪 هوية التصميم
-                        </strong>
-
-                        <div>
-                          اسم المحل:{" "}
-                          {shop?.name || "—"}
-                        </div>
-
-                        <div>
-                          رقم التواصل:{" "}
-                          {shop?.phone ||
-                            shop?.whatsapp ||
-                            "—"}
-                        </div>
-
-                        <div>
-                          Instagram:{" "}
-                          {shop?.instagram ||
-                            "—"}
-                        </div>
-
-                        <div>
-                          TikTok:{" "}
-                          {shop?.tiktok || "—"}
-                        </div>
-
-                        <div>
-                          Snapchat:{" "}
-                          {shop?.snapchat ||
-                            "—"}
-                        </div>
-
-                        <div>
-                          الموقع:{" "}
-                          {shop?.website || "—"}
+                          <StatusBadge type={status.type}>
+                            {status.icon} {status.text}
+                          </StatusBadge>
                         </div>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={createDesign}
-                        disabled={
-                          creating ||
-                          (isProductUnclear(
-                            selectedProduct
-                          ) &&
-                            !responsibilityAccepted)
-                        }
-                        style={{
-                          ...primaryButton,
-                          width: "100%",
-                          marginTop: 20,
-                          opacity:
-                            creating ||
-                            (isProductUnclear(
-                              selectedProduct
-                            ) &&
-                              !responsibilityAccepted)
-                              ? 0.6
-                              : 1,
-                        }}
-                      >
-                        {creating
-                          ? "جاري إنشاء الطلب..."
-                          : "🎨 إنشاء التصميم"}
-                      </button>
-                    </>
-                  )}
-                </section>
-
-                <section
-                  style={{
-                    background: "#fff",
-                    borderRadius: 20,
-                    padding: 20,
-                    boxShadow:
-                      "0 5px 20px rgba(0,0,0,0.05)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      alignItems: "center",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <h2
-                        style={{
-                          marginTop: 0,
-                          marginBottom: 5,
-                        }}
-                      >
-                        3. تصاميم المنتج
-                      </h2>
-
-                      <div
-                        style={{
-                          color: "#777",
-                          fontSize: 13,
-                        }}
-                      >
-                        الطلبات والتصاميم السابقة
-                        لهذا المنتج.
-                      </div>
-                    </div>
-
-                    <span
-                      style={{
-                        background: "#f5f5f5",
-                        padding: "7px 11px",
-                        borderRadius: 20,
-                        fontSize: 13,
-                      }}
-                    >
-                      {designs.length} طلب
-                    </span>
-                  </div>
-
-                  {designs.length === 0 ? (
-                    <div
-                      style={{
-                        color: "#777",
-                        padding: 30,
-                        textAlign: "center",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: 35,
-                        }}
-                      >
-                        🎨
-                      </div>
-
-                      لا توجد تصاميم لهذا المنتج
-                      حاليًا.
-                    </div>
-                  ) : (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fill, minmax(220px, 1fr))",
-                        gap: 16,
-                        marginTop: 18,
-                      }}
-                    >
-                      {designs.map(
-                        (design) => (
-                          <div
-                            key={design.id}
-                            style={{
-                              border:
-                                "1px solid #eee",
-                              borderRadius: 16,
-                              overflow:
-                                "hidden",
-                              background:
-                                "#fff",
-                            }}
-                          >
-                            {design.image_url ? (
-                              <img
-                                src={
-                                  design.image_url
-                                }
-                                alt="تصميم إعلاني"
-                                style={{
-                                  width: "100%",
-                                  display:
-                                    "block",
-                                }}
-                              />
-                            ) : (
-                              <div
-                                style={{
-                                  height: 180,
-                                  background:
-                                    "#f5f5f5",
-                                  display:
-                                    "flex",
-                                  alignItems:
-                                    "center",
-                                  justifyContent:
-                                    "center",
-                                  flexDirection:
-                                    "column",
-                                  gap: 8,
-                                  color:
-                                    "#777",
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    fontSize: 30,
-                                  }}
-                                >
-                                  ⏳
-                                </span>
-
-                                قيد المعالجة
-                              </div>
-                            )}
-
-                            <div
-                              style={{
-                                padding: 12,
-                              }}
-                            >
-                              <strong>
-                                {design.format ||
-                                  "1:1"}
-                              </strong>
-
-                              <div
-                                style={{
-                                  marginTop: 6,
-                                  color:
-                                    "#777",
-                                  fontSize: 13,
-                                }}
-                              >
-                                الحالة:{" "}
-                                {getDesignStatus(
-                                  design.status
-                                )}
-                              </div>
-
-                              <div
-                                style={{
-                                  marginTop: 5,
-                                  color:
-                                    "#999",
-                                  fontSize: 12,
-                                }}
-                              >
-                                {design.created_at
-                                  ? new Date(
-                                      design.created_at
-                                    ).toLocaleString(
-                                      "ar-AE"
-                                    )
-                                  : ""}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  )}
-                </section>
-              </>
-            )}
-          </>
-        )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
       </div>
+
+      <style jsx>{`
+        @media (max-width: 850px) {
+          main > div {
+            padding-left: 12px !important;
+            padding-right: 12px !important;
+          }
+
+          section + aside {
+            margin-top: 0;
+          }
+
+          div[style*="grid-template-columns: minmax(0, 1.6fr)"] {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 600px) {
+          h1 {
+            font-size: 25px !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
-
-function getDesignStatus(status) {
-  switch (status) {
-    case "completed":
-      return "✅ مكتمل";
-
-    case "processing":
-      return "🔄 جاري التنفيذ";
-
-    case "failed":
-      return "❌ فشل";
-
-    case "pending":
-    default:
-      return "⏳ قيد الانتظار";
-  }
-}
-
-function StatusBadge({ product }) {
-  const status = getProductStatus(product);
-
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        background: status.background,
-        color: status.color,
-        border: `1px solid ${status.border}`,
-        padding: "8px 13px",
-        borderRadius: 20,
-        fontSize: 13,
-        fontWeight: "bold",
-      }}
-    >
-      {status.icon} {status.label}
-    </span>
-  );
-}
-
-function getProductStatus(product) {
-  if (
-    product?.verification_status === "locked" ||
-    product?.safety_status === "locked"
-  ) {
-    return {
-      label: "مقفل",
-      icon: "🔒",
-      background: "#fff1f1",
-      color: "#9b2226",
-      border: "#f1c0c0",
-    };
-  }
-
-  if (
-    product?.safety_status === "violation" ||
-    product?.safety_level === "critical"
-  ) {
-    return {
-      label: "مراجعة مطلوبة",
-      icon: "🔴",
-      background: "#fff1f1",
-      color: "#9b2226",
-      border: "#f1c0c0",
-    };
-  }
-
-  if (isProductUnclear(product)) {
-    return {
-      label: "يحتاج تأكيد",
-      icon: "🟡",
-      background: "#fff8e1",
-      color: "#8a6500",
-      border: "#f0d98a",
-    };
-  }
-
-  return {
-    label: "جاهز",
-    icon: "🟢",
-    background: "#eef7ee",
-    color: "#256029",
-    border: "#cce8cc",
-  };
-}
-
-function isProductUnclear(product) {
-  if (!product) return false;
-
-  if (
-    product.verification_status === "locked" ||
-    product.safety_status === "locked"
-  ) {
-    return false;
-  }
-
-  if (
-    product.safety_status === "violation" ||
-    product.safety_level === "critical"
-  ) {
-    return false;
-  }
-
-  const verification =
-    String(
-      product.verification_status || ""
-    )
-      .trim()
-      .toLowerCase();
-
-  const confidence =
-    String(product.confidence || "")
-      .trim()
-      .toLowerCase();
-
-  if (
-    verification === "review" ||
-    verification === "unverified"
-  ) {
-    return true;
-  }
-
-  if (
-    confidence === "low" ||
-    confidence === "منخفض" ||
-    confidence === "medium" ||
-    confidence === "متوسط"
-  ) {
-    return true;
-  }
-
-  const hasName = Boolean(
-    String(product.name || "").trim()
-  );
-
-  const hasBrand = Boolean(
-    String(product.brand || "").trim()
-  );
-
-  const hasCategory = Boolean(
-    String(product.category || "").trim()
-  );
-
-  const hasDescription = Boolean(
-    String(product.description || "").trim()
-  );
-
-  return (
-    hasName &&
-    !hasBrand &&
-    !hasCategory &&
-    !hasDescription
-  );
-}
-
-function buildDesignPrompt(
-  shop,
-  product,
-  format
-) {
-  return JSON.stringify({
-    type: "product_ad_design",
-
-    format,
-
-    shop: {
-      name: shop?.name || "",
-      phone: shop?.phone || "",
-      whatsapp: shop?.whatsapp || "",
-      instagram: shop?.instagram || "",
-      tiktok: shop?.tiktok || "",
-      snapchat: shop?.snapchat || "",
-      website: shop?.website || "",
-      logo_url: shop?.logo_url || "",
-    },
-
-    product: {
-      name: product?.name || "",
-      brand: product?.brand || "",
-      category: product?.category || "",
-      price: product?.price ?? null,
-      currency: product?.currency || "AED",
-      image_url: product?.image_url || "",
-      description:
-        product?.description || "",
-      features:
-        product?.features || "",
-    },
-
-    rules: {
-      preserve_original_product_image: true,
-      do_not_change_product_identity: true,
-      do_not_invent_product_information: true,
-      use_shop_identity: true,
-    },
-  });
-}
-
-function IdentityBadge({ children }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        background: "#f8f9fb",
-        border: "1px solid #eee",
-        borderRadius: 20,
-        padding: "7px 10px",
-        fontSize: 13,
-        color: "#555",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-const primaryButton = {
-  border: "none",
-  background: "#111",
-  color: "#fff",
-  padding: "14px 18px",
-  borderRadius: 13,
-  fontSize: 16,
-  fontWeight: "bold",
-  cursor: "pointer",
-};
-
-const secondaryButton = {
-  border: "1px solid #ddd",
-  background: "#fff",
-  color: "#111",
-  padding: "11px 15px",
-  borderRadius: 12,
-  fontSize: 14,
-  cursor: "pointer",
-};
