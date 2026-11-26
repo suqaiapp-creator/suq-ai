@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { createClient } from "../../lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import {
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
 
 const supabase = createClient();
 
@@ -318,7 +326,11 @@ function getDesignStatus(status) {
   };
 }
 
-export default function DesignsPage() {
+/* =========================================================
+   الصفحة الداخلية
+========================================================= */
+
+function DesignsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -894,7 +906,6 @@ export default function DesignsPage() {
           padding: "24px 18px",
         }}
       >
-        {/* HEADER */}
         <header
           style={{
             display: "flex",
@@ -978,7 +989,6 @@ export default function DesignsPage() {
           </button>
         </header>
 
-        {/* الرسائل */}
         {error && (
           <div
             style={{
@@ -1015,7 +1025,6 @@ export default function DesignsPage() {
           </div>
         )}
 
-        {/* الإحصائيات */}
         <div
           style={{
             display: "grid",
@@ -1062,7 +1071,6 @@ export default function DesignsPage() {
           />
         </div>
 
-        {/* مركز التحكم */}
         <div
           style={{
             background: "#fff",
@@ -1220,7 +1228,6 @@ export default function DesignsPage() {
           </div>
         </div>
 
-        {/* قائمة التصاميم */}
         <section
           style={{
             marginBottom: 30,
@@ -1318,7 +1325,6 @@ export default function DesignsPage() {
           )}
         </section>
 
-        {/* مولد التصميم */}
         <section
           id="design-generator"
           style={{
@@ -1364,7 +1370,6 @@ export default function DesignsPage() {
             }}
           >
             <section>
-              {/* المنتج */}
               <div
                 className="design-card"
                 style={{
@@ -1563,7 +1568,6 @@ export default function DesignsPage() {
                 )}
               </div>
 
-              {/* نوع التصميم */}
               <div
                 className="design-card"
                 style={{
@@ -1628,7 +1632,6 @@ export default function DesignsPage() {
                 </div>
               </div>
 
-              {/* القوالب */}
               {mode ===
                 "simple" && (
                 <div
@@ -1714,7 +1717,6 @@ export default function DesignsPage() {
                 </div>
               )}
 
-              {/* الاحترافي */}
               {mode ===
                 "professional" && (
                 <div
@@ -1903,7 +1905,6 @@ export default function DesignsPage() {
                 </div>
               )}
 
-              {/* المقاس */}
               <div
                 className="design-card"
                 style={{
@@ -1971,7 +1972,6 @@ export default function DesignsPage() {
                 </div>
               </div>
 
-              {/* المسؤولية */}
               {selectedProductUnclear &&
                 selectedProduct && (
                   <div
@@ -2069,7 +2069,6 @@ export default function DesignsPage() {
                   </div>
                 )}
 
-              {/* إنشاء */}
               <button
                 type="button"
                 onClick={createDesign}
@@ -2112,9 +2111,7 @@ export default function DesignsPage() {
               </button>
             </section>
 
-            {/* الجانب */}
             <aside>
-              {/* هوية المحل */}
               <div
                 className="design-card"
                 style={{
@@ -2273,7 +2270,6 @@ export default function DesignsPage() {
                   )}
               </div>
 
-              {/* قواعد */}
               <div
                 className="design-card"
                 style={{
@@ -2374,6 +2370,36 @@ export default function DesignsPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+/* =========================================================
+   الصفحة الرئيسية + Suspense
+========================================================= */
+
+export default function DesignsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main
+          dir="rtl"
+          style={{
+            minHeight: "100vh",
+            background: "#f6f8f7",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily:
+              "Arial, sans-serif",
+            color: "#17201c",
+          }}
+        >
+          جاري تحميل استوديو التصميم...
+        </main>
+      }
+    >
+      <DesignsPageContent />
+    </Suspense>
   );
 }
 
