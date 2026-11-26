@@ -9,6 +9,46 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// -----------------------------------------
+// Runway Cost Settings
+// -----------------------------------------
+//
+// حالياً نستخدم:
+// 480p = 2 Credits / second
+// Image-to-video start frame = +1 Credit
+//
+// سعر الـ Credit حسب شراء المستخدم الحالي:
+// $8.40 / 1000 Credits
+//
+// يمكن تغييره لاحقاً من Environment Variable.
+// -----------------------------------------
+
+const RUNWAY_CREDITS_PER_SECOND = 2;
+
+const RUNWAY_START_FRAME_CREDITS = 1;
+
+const RUNWAY_COST_PER_CREDIT =
+  Number(
+    process.env.RUNWAY_CREDIT_COST_USD
+  ) || 0.0084;
+
+function calculateRunwayCredits(duration) {
+  const seconds = Number(duration) || 5;
+
+  return (
+    seconds *
+      RUNWAY_CREDITS_PER_SECOND +
+    RUNWAY_START_FRAME_CREDITS
+  );
+}
+
+function calculateRunwayCost(credits) {
+  return (
+    Number(credits || 0) *
+    RUNWAY_COST_PER_CREDIT
+  );
+}
+
 export async function POST(request) {
   let videoId = null;
 
@@ -329,6 +369,27 @@ export async function POST(request) {
     }
 
     // -----------------------------------------
+    // حساب تكلفة Runway
+    // -----------------------------------------
+
+    const duration =
+      Number(
+        engineResult.duration ||
+          video.duration_seconds ||
+          5
+      );
+
+    const runwayCredits =
+      calculateRunwayCredits(
+        duration
+      );
+
+    const runwayEstimatedCost =
+      calculateRunwayCost(
+        runwayCredits
+      );
+
+    // -----------------------------------------
     // حفظ حالة المعالجة + Task ID
     // -----------------------------------------
 
@@ -371,6 +432,111 @@ export async function POST(request) {
     }
 
     // -----------------------------------------
+    // تسجيل استخدام Runway في ai_usage
+    // -----------------------------------------
+    //
+    // مهم:
+    // فشل التسجيل هنا لا يفشل إنشاء الفيديو.
+    // لأن الفيديو تم إرساله فعلياً إلى Runway.
+    // -----------------------------------------
+
+    try {
+      const {
+        error: usageError,
+      } = await supabase
+        .from("ai_usage")
+        .insert({
+          user_id:
+            shop.owner_id || null,
+
+          shop_id:
+            video.shop_id || null,
+
+          product_id:
+            video.product_id || null,
+
+          operation:
+            "video_generation",
+
+          provider:
+            engineResult.engine ||
+            "runway",
+
+          model:
+            engineResult.model ||
+            null,
+
+          status:
+            "processing",
+
+          input_tokens: 0,
+
+          output_tokens: 0,
+
+          total_tokens: 0,
+
+          credits_used:
+            runwayCredits,
+
+          estimated_cost:
+            runwayEstimatedCost,
+
+          metadata: {
+            video_id:
+              video.id,
+
+            provider_task_id:
+              engineResult.taskId,
+
+            duration_seconds:
+              duration,
+
+            format:
+              video.format || null,
+
+            ratio:
+              engineResult.ratio || null,
+
+            video_type:
+              video.video_type || null,
+
+            style:
+              video.style || null,
+
+            background:
+              video.background || null,
+
+            credits_per_second:
+              RUNWAY_CREDITS_PER_SECOND,
+
+            start_frame_credits:
+              RUNWAY_START_FRAME_CREDITS,
+
+            cost_per_credit_usd:
+              RUNWAY_COST_PER_CREDIT,
+
+            estimated_cost_usd:
+              runwayEstimatedCost,
+
+            note:
+              "Runway usage recorded at task creation. Final status/cost will be updated after task completion.",
+          },
+        });
+
+      if (usageError) {
+        console.error(
+          "AI USAGE LOGGING ERROR:",
+          usageError
+        );
+      }
+    } catch (usageLogError) {
+      console.error(
+        "AI USAGE LOGGING FAILED:",
+        usageLogError
+      );
+    }
+
+    // -----------------------------------------
     // الرد
     // -----------------------------------------
 
@@ -408,6 +574,14 @@ export async function POST(request) {
       model:
         engineResult.model ||
         null,
+
+      usage: {
+        credits:
+          runwayCredits,
+
+        estimated_cost_usd:
+          runwayEstimatedCost,
+      },
     });
   } catch (error) {
     console.error(
