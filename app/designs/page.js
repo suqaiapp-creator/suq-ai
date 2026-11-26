@@ -145,6 +145,43 @@ const BACKGROUNDS = [
   },
 ];
 
+function IconBox({
+  children,
+  size = 44,
+  background = "#f0fdf4",
+  color = "#15803d",
+}) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        minWidth: size,
+        borderRadius: 13,
+        background,
+        color,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size <= 42 ? 19 : 22,
+        lineHeight: 1,
+        flexShrink: 0,
+        boxSizing: "border-box",
+      }}
+    >
+      <span
+        style={{
+          display: "block",
+          lineHeight: 1,
+          transform: "translateY(-1px)",
+        }}
+      >
+        {children}
+      </span>
+    </div>
+  );
+}
+
 function StatusBadge({ type, children }) {
   const styles = {
     ready: {
@@ -180,9 +217,20 @@ function StatusBadge({ type, children }) {
         borderRadius: 999,
         fontSize: 12,
         fontWeight: 700,
+        whiteSpace: "nowrap",
+        lineHeight: 1.2,
       }}
     >
-      {children}
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          lineHeight: 1,
+        }}
+      >
+        {children}
+      </span>
     </span>
   );
 }
@@ -394,9 +442,7 @@ export default function DesignsPage() {
       setProducts(productData || []);
 
       if (productData?.length > 0) {
-        setSelectedProductId(
-          productData[0].id
-        );
+        setSelectedProductId(productData[0].id);
       }
 
       const {
@@ -575,13 +621,11 @@ export default function DesignsPage() {
 
       if (mode === "professional") {
         const backgroundItem =
-          Array.isArray(BACKGROUNDS)
-            ? BACKGROUNDS.find(
-                (item) =>
-                  item.id ===
-                  selectedBackground
-              )
-            : null;
+          BACKGROUNDS.find(
+            (item) =>
+              item.id ===
+              selectedBackground
+          );
 
         backgroundValue =
           backgroundItem?.value ||
@@ -756,8 +800,7 @@ export default function DesignsPage() {
 
             <p
               style={{
-                margin:
-                  "8px 0 0",
+                margin: "8px 0 0",
                 color: "#66736d",
                 fontSize: 15,
               }}
@@ -797,6 +840,7 @@ export default function DesignsPage() {
               padding: 14,
               marginBottom: 16,
               fontWeight: 700,
+              lineHeight: 1.6,
             }}
           >
             {error}
@@ -814,6 +858,7 @@ export default function DesignsPage() {
               padding: 14,
               marginBottom: 16,
               fontWeight: 700,
+              lineHeight: 1.6,
             }}
           >
             {message}
@@ -821,6 +866,7 @@ export default function DesignsPage() {
         )}
 
         <div
+          className="design-layout"
           style={{
             display: "grid",
             gridTemplateColumns:
@@ -830,7 +876,9 @@ export default function DesignsPage() {
           }}
         >
           <section>
+            {/* المنتج */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -842,8 +890,7 @@ export default function DesignsPage() {
             >
               <h2
                 style={{
-                  margin:
-                    "0 0 14px",
+                  margin: "0 0 14px",
                   fontSize: 19,
                 }}
               >
@@ -867,10 +914,11 @@ export default function DesignsPage() {
                     "1px solid #cfd8d3",
                   fontSize: 15,
                   background: "#fff",
+                  boxSizing:
+                    "border-box",
                 }}
               >
-                {products.length ===
-                  0 && (
+                {products.length === 0 && (
                   <option value="">
                     لا توجد منتجات
                   </option>
@@ -879,8 +927,12 @@ export default function DesignsPage() {
                 {products.map(
                   (product) => (
                     <option
-                      key={product.id}
-                      value={product.id}
+                      key={
+                        product.id
+                      }
+                      value={
+                        product.id
+                      }
                     >
                       {product.name}
                       {product.brand
@@ -911,6 +963,7 @@ export default function DesignsPage() {
                     style={{
                       width: 82,
                       height: 82,
+                      minWidth: 82,
                       borderRadius: 14,
                       background:
                         "#fff",
@@ -948,6 +1001,7 @@ export default function DesignsPage() {
                       <span
                         style={{
                           fontSize: 28,
+                          lineHeight: 1,
                         }}
                       >
                         📦
@@ -958,6 +1012,7 @@ export default function DesignsPage() {
                   <div
                     style={{
                       flex: 1,
+                      minWidth: 0,
                     }}
                   >
                     <div
@@ -965,6 +1020,7 @@ export default function DesignsPage() {
                         fontWeight: 900,
                         fontSize: 17,
                         marginBottom: 6,
+                        lineHeight: 1.4,
                       }}
                     >
                       {
@@ -978,6 +1034,7 @@ export default function DesignsPage() {
                           "#66736d",
                         fontSize: 13,
                         marginBottom: 8,
+                        lineHeight: 1.5,
                       }}
                     >
                       {selectedProduct.brand ||
@@ -1009,7 +1066,9 @@ export default function DesignsPage() {
               )}
             </div>
 
+            {/* نوع التصميم */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -1021,8 +1080,7 @@ export default function DesignsPage() {
             >
               <h2
                 style={{
-                  margin:
-                    "0 0 14px",
+                  margin: "0 0 14px",
                   fontSize: 19,
                 }}
               >
@@ -1030,6 +1088,7 @@ export default function DesignsPage() {
               </h2>
 
               <div
+                className="mode-grid"
                 style={{
                   display: "grid",
                   gridTemplateColumns:
@@ -1039,56 +1098,60 @@ export default function DesignsPage() {
               >
                 <button
                   onClick={() =>
-                    setMode(
-                      "simple"
-                    )
+                    setMode("simple")
                   }
                   style={{
-                    textAlign:
-                      "right",
-                    padding: 18,
+                    textAlign: "right",
+                    padding: 16,
                     borderRadius: 16,
-                    cursor:
-                      "pointer",
+                    cursor: "pointer",
                     background:
-                      mode ===
-                      "simple"
+                      mode === "simple"
                         ? "#f0fdf4"
                         : "#fff",
                     border:
-                      mode ===
-                      "simple"
+                      mode === "simple"
                         ? "2px solid #16a34a"
                         : "1px solid #d9e1dc",
+                    display: "flex",
+                    alignItems:
+                      "flex-start",
+                    gap: 13,
+                    minHeight: 102,
+                    boxSizing:
+                      "border-box",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 23,
-                      marginBottom: 8,
-                    }}
-                  >
+                  <IconBox size={46}>
                     ⚡
-                  </div>
+                  </IconBox>
 
                   <div
                     style={{
-                      fontWeight: 900,
-                      fontSize: 17,
+                      minWidth: 0,
                     }}
                   >
-                    عادي وسريع
-                  </div>
+                    <div
+                      style={{
+                        fontWeight: 900,
+                        fontSize: 17,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      عادي وسريع
+                    </div>
 
-                  <div
-                    style={{
-                      color:
-                        "#66736d",
-                      fontSize: 13,
-                      marginTop: 5,
-                    }}
-                  >
-                    قوالب جاهزة وتصميم سريع
+                    <div
+                      style={{
+                        color:
+                          "#66736d",
+                        fontSize: 13,
+                        marginTop: 5,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      قوالب جاهزة وتصميم سريع
+                    </div>
                   </div>
                 </button>
 
@@ -1099,12 +1162,10 @@ export default function DesignsPage() {
                     )
                   }
                   style={{
-                    textAlign:
-                      "right",
-                    padding: 18,
+                    textAlign: "right",
+                    padding: 16,
                     borderRadius: 16,
-                    cursor:
-                      "pointer",
+                    cursor: "pointer",
                     background:
                       mode ===
                       "professional"
@@ -1115,43 +1176,58 @@ export default function DesignsPage() {
                       "professional"
                         ? "2px solid #16a34a"
                         : "1px solid #d9e1dc",
+                    display: "flex",
+                    alignItems:
+                      "flex-start",
+                    gap: 13,
+                    minHeight: 102,
+                    boxSizing:
+                      "border-box",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 23,
-                      marginBottom: 8,
-                    }}
+                  <IconBox
+                    size={46}
+                    background="#f5f3ff"
+                    color="#6d28d9"
                   >
                     💎
-                  </div>
+                  </IconBox>
 
                   <div
                     style={{
-                      fontWeight: 900,
-                      fontSize: 17,
+                      minWidth: 0,
                     }}
                   >
-                    احترافي
-                  </div>
+                    <div
+                      style={{
+                        fontWeight: 900,
+                        fontSize: 17,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      احترافي
+                    </div>
 
-                  <div
-                    style={{
-                      color:
-                        "#66736d",
-                      fontSize: 13,
-                      marginTop: 5,
-                    }}
-                  >
-                    وصف حر وتحكم أكبر بالتصميم
+                    <div
+                      style={{
+                        color:
+                          "#66736d",
+                        fontSize: 13,
+                        marginTop: 5,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      وصف حر وتحكم أكبر بالتصميم
+                    </div>
                   </div>
                 </button>
               </div>
             </div>
 
-            {mode ===
-              "simple" && (
+            {/* القوالب */}
+            {mode === "simple" && (
               <div
+                className="design-card"
                 style={{
                   background: "#fff",
                   border:
@@ -1163,8 +1239,7 @@ export default function DesignsPage() {
               >
                 <h2
                   style={{
-                    margin:
-                      "0 0 6px",
+                    margin: "0 0 6px",
                     fontSize: 19,
                   }}
                 >
@@ -1173,22 +1248,21 @@ export default function DesignsPage() {
 
                 <p
                   style={{
-                    color:
-                      "#66736d",
+                    color: "#66736d",
                     fontSize: 13,
-                    margin:
-                      "0 0 16px",
+                    margin: "0 0 16px",
+                    lineHeight: 1.7,
                   }}
                 >
                   اختر الشكل المناسب للإعلان بدون الحاجة لكتابة وصف طويل.
                 </p>
 
                 <div
+                  className="template-grid"
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gridTemplateColumns:
-                      "repeat(auto-fit,minmax(170px,1fr))",
+                      "repeat(2, minmax(0, 1fr))",
                     gap: 12,
                   }}
                 >
@@ -1220,45 +1294,69 @@ export default function DesignsPage() {
                                 ? "2px solid #16a34a"
                                 : "1px solid #d9e1dc",
                             borderRadius: 15,
-                            padding: 15,
+                            padding: 14,
                             cursor:
                               "pointer",
+                            display:
+                              "flex",
+                            alignItems:
+                              "flex-start",
+                            gap: 12,
+                            minHeight: 92,
+                            boxSizing:
+                              "border-box",
                           }}
                         >
-                          <div
-                            style={{
-                              fontSize: 25,
-                            }}
+                          <IconBox
+                            size={44}
+                            background={
+                              active
+                                ? "#dcfce7"
+                                : "#f5f7f6"
+                            }
+                            color={
+                              active
+                                ? "#15803d"
+                                : "#4b6357"
+                            }
                           >
                             {
                               template.icon
                             }
-                          </div>
+                          </IconBox>
 
                           <div
                             style={{
-                              fontWeight: 900,
-                              marginTop: 8,
+                              minWidth: 0,
+                              flex: 1,
                             }}
                           >
-                            {
-                              template.title
-                            }
-                          </div>
+                            <div
+                              style={{
+                                fontWeight: 900,
+                                lineHeight:
+                                  1.4,
+                              }}
+                            >
+                              {
+                                template.title
+                              }
+                            </div>
 
-                          <div
-                            style={{
-                              color:
-                                "#66736d",
-                              fontSize: 12,
-                              lineHeight:
-                                1.6,
-                              marginTop: 4,
-                            }}
-                          >
-                            {
-                              template.description
-                            }
+                            <div
+                              style={{
+                                color:
+                                  "#66736d",
+                                fontSize: 12,
+                                lineHeight:
+                                  1.6,
+                                marginTop: 4,
+                              }}
+                            >
+                              {
+                                template.description
+                              }
+                            </div>
                           </div>
                         </button>
                       );
@@ -1268,9 +1366,10 @@ export default function DesignsPage() {
               </div>
             )}
 
-            {mode ===
-              "professional" && (
+            {/* الاحترافي */}
+            {mode === "professional" && (
               <div
+                className="design-card"
                 style={{
                   background: "#fff",
                   border:
@@ -1282,8 +1381,7 @@ export default function DesignsPage() {
               >
                 <h2
                   style={{
-                    margin:
-                      "0 0 6px",
+                    margin: "0 0 6px",
                     fontSize: 19,
                   }}
                 >
@@ -1292,20 +1390,17 @@ export default function DesignsPage() {
 
                 <p
                   style={{
-                    color:
-                      "#66736d",
+                    color: "#66736d",
                     fontSize: 13,
-                    margin:
-                      "0 0 16px",
+                    margin: "0 0 16px",
+                    lineHeight: 1.7,
                   }}
                 >
                   اكتب وصفك، والذكاء الاصطناعي يحوّله لاحقاً إلى تصميم إعلاني.
                 </p>
 
                 <textarea
-                  value={
-                    description
-                  }
+                  value={description}
                   onChange={(e) =>
                     setDescription(
                       e.target.value
@@ -1315,8 +1410,7 @@ export default function DesignsPage() {
                   style={{
                     width: "100%",
                     minHeight: 150,
-                    resize:
-                      "vertical",
+                    resize: "vertical",
                     padding: 15,
                     borderRadius: 14,
                     border:
@@ -1326,6 +1420,8 @@ export default function DesignsPage() {
                     boxSizing:
                       "border-box",
                     outline: "none",
+                    fontFamily:
+                      "inherit",
                   }}
                 />
 
@@ -1340,12 +1436,12 @@ export default function DesignsPage() {
                 </div>
 
                 <div
+                  className="style-grid"
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gridTemplateColumns:
-                      "repeat(auto-fit,minmax(120px,1fr))",
-                    gap: 9,
+                      "repeat(3, minmax(0, 1fr))",
+                    gap: 10,
                   }}
                 >
                   {STYLES.map(
@@ -1366,7 +1462,7 @@ export default function DesignsPage() {
                           }
                           style={{
                             padding:
-                              "12px 10px",
+                              "11px 10px",
                             borderRadius: 12,
                             cursor:
                               "pointer",
@@ -1379,14 +1475,39 @@ export default function DesignsPage() {
                                 ? "2px solid #16a34a"
                                 : "1px solid #d9e1dc",
                             fontWeight: 800,
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            justifyContent:
+                              "center",
+                            gap: 7,
+                            minHeight: 45,
                           }}
                         >
-                          {
-                            style.icon
-                          }{" "}
-                          {
-                            style.title
-                          }
+                          <span
+                            style={{
+                              display:
+                                "inline-flex",
+                              alignItems:
+                                "center",
+                              justifyContent:
+                                "center",
+                              lineHeight:
+                                1,
+                              fontSize: 17,
+                            }}
+                          >
+                            {
+                              style.icon
+                            }
+                          </span>
+
+                          <span>
+                            {
+                              style.title
+                            }
+                          </span>
                         </button>
                       );
                     }
@@ -1404,12 +1525,12 @@ export default function DesignsPage() {
                 </div>
 
                 <div
+                  className="background-grid"
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gridTemplateColumns:
-                      "repeat(auto-fit,minmax(100px,1fr))",
-                    gap: 9,
+                      "repeat(3, minmax(0, 1fr))",
+                    gap: 10,
                   }}
                 >
                   {BACKGROUNDS.map(
@@ -1429,7 +1550,8 @@ export default function DesignsPage() {
                             )
                           }
                           style={{
-                            padding: 12,
+                            padding:
+                              "12px 10px",
                             borderRadius: 12,
                             cursor:
                               "pointer",
@@ -1442,6 +1564,7 @@ export default function DesignsPage() {
                                 ? "2px solid #16a34a"
                                 : "1px solid #d9e1dc",
                             fontWeight: 800,
+                            minHeight: 45,
                           }}
                         >
                           {
@@ -1455,7 +1578,9 @@ export default function DesignsPage() {
               </div>
             )}
 
+            {/* المقاسات */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -1467,20 +1592,19 @@ export default function DesignsPage() {
             >
               <h2
                 style={{
-                  margin:
-                    "0 0 14px",
+                  margin: "0 0 14px",
                   fontSize: 19,
                 }}
               >
-                4. مقاس الإعلان
+                {mode === "simple" ? "4" : "4"}. مقاس الإعلان
               </h2>
 
               <div
+                className="format-grid"
                 style={{
-                  display:
-                    "grid",
+                  display: "grid",
                   gridTemplateColumns:
-                    "repeat(auto-fit,minmax(180px,1fr))",
+                    "repeat(2, minmax(0, 1fr))",
                   gap: 10,
                 }}
               >
@@ -1503,7 +1627,7 @@ export default function DesignsPage() {
                         style={{
                           textAlign:
                             "right",
-                          padding: 14,
+                          padding: 13,
                           borderRadius: 14,
                           cursor:
                             "pointer",
@@ -1515,40 +1639,60 @@ export default function DesignsPage() {
                             active
                               ? "2px solid #16a34a"
                               : "1px solid #d9e1dc",
+                          display:
+                            "flex",
+                          alignItems:
+                            "center",
+                          gap: 12,
+                          minHeight: 72,
+                          boxSizing:
+                            "border-box",
                         }}
                       >
-                        <div
-                          style={{
-                            fontSize: 23,
-                            marginBottom: 5,
-                          }}
+                        <IconBox
+                          size={42}
+                          background={
+                            active
+                              ? "#dcfce7"
+                              : "#f5f7f6"
+                          }
                         >
                           {
                             format.icon
                           }
-                        </div>
+                        </IconBox>
 
                         <div
                           style={{
-                            fontWeight: 900,
+                            minWidth: 0,
                           }}
                         >
-                          {
-                            format.title
-                          }
-                        </div>
+                          <div
+                            style={{
+                              fontWeight: 900,
+                              lineHeight:
+                                1.4,
+                            }}
+                          >
+                            {
+                              format.title
+                            }
+                          </div>
 
-                        <div
-                          style={{
-                            color:
-                              "#66736d",
-                            fontSize: 12,
-                            marginTop: 4,
-                          }}
-                        >
-                          {
-                            format.description
-                          }
+                          <div
+                            style={{
+                              color:
+                                "#66736d",
+                              fontSize: 12,
+                              marginTop: 3,
+                              lineHeight:
+                                1.5,
+                            }}
+                          >
+                            {
+                              format.description
+                            }
+                          </div>
                         </div>
                       </button>
                     );
@@ -1557,6 +1701,7 @@ export default function DesignsPage() {
               </div>
             </div>
 
+            {/* تأكيد المسؤولية */}
             {selectedProductUnclear &&
               selectedProduct && (
                 <div
@@ -1572,66 +1717,91 @@ export default function DesignsPage() {
                 >
                   <div
                     style={{
-                      fontWeight: 900,
-                      color: "#92400e",
-                      marginBottom: 8,
+                      display:
+                        "flex",
+                      alignItems:
+                        "flex-start",
+                      gap: 12,
                     }}
                   >
-                    🟡 يحتاج تأكيد المنتج
-                  </div>
+                    <IconBox
+                      size={42}
+                      background="#fef3c7"
+                      color="#92400e"
+                    >
+                      🟡
+                    </IconBox>
 
-                  <div
-                    style={{
-                      color:
-                        "#92400e",
-                      fontSize: 13,
-                      lineHeight: 1.8,
-                      marginBottom: 12,
-                    }}
-                  >
-                    بعض معلومات المنتج غير مكتملة أو لم يتم التحقق منها بشكل كافٍ. يمكنك المتابعة بعد تأكيد أنك مسؤول عن صحة معلومات المنتج ومشروعيته.
-                  </div>
-
-                  {!responsibilityAccepted ? (
-                    <button
-                      onClick={
-                        acceptResponsibility
-                      }
-                      disabled={
-                        saving
-                      }
+                    <div
                       style={{
-                        background:
-                          "#15803d",
-                        color:
-                          "#fff",
-                        border: 0,
-                        borderRadius: 11,
-                        padding:
-                          "11px 15px",
-                        cursor:
-                          saving
-                            ? "not-allowed"
-                            : "pointer",
-                        fontWeight: 900,
+                        minWidth: 0,
+                        flex: 1,
                       }}
                     >
-                      {saving
-                        ? "جاري الحفظ..."
-                        : "أؤكد المسؤولية ويمكنني المتابعة"}
-                    </button>
-                  ) : (
-                    <StatusBadge type="ready">
-                      ✓ تم تأكيد المسؤولية
-                    </StatusBadge>
-                  )}
+                      <div
+                        style={{
+                          fontWeight: 900,
+                          color:
+                            "#92400e",
+                          marginBottom: 7,
+                        }}
+                      >
+                        يحتاج تأكيد المنتج
+                      </div>
+
+                      <div
+                        style={{
+                          color:
+                            "#92400e",
+                          fontSize: 13,
+                          lineHeight: 1.8,
+                          marginBottom: 12,
+                        }}
+                      >
+                        بعض معلومات المنتج غير مكتملة أو لم يتم التحقق منها بشكل كافٍ. يمكنك المتابعة بعد تأكيد أنك مسؤول عن صحة معلومات المنتج ومشروعيته.
+                      </div>
+
+                      {!responsibilityAccepted ? (
+                        <button
+                          onClick={
+                            acceptResponsibility
+                          }
+                          disabled={
+                            saving
+                          }
+                          style={{
+                            background:
+                              "#15803d",
+                            color:
+                              "#fff",
+                            border: 0,
+                            borderRadius: 11,
+                            padding:
+                              "11px 15px",
+                            cursor:
+                              saving
+                                ? "not-allowed"
+                                : "pointer",
+                            fontWeight: 900,
+                          }}
+                        >
+                          {saving
+                            ? "جاري الحفظ..."
+                            : "أؤكد المسؤولية ويمكنني المتابعة"}
+                        </button>
+                      ) : (
+                        <StatusBadge type="ready">
+                          ✓ تم تأكيد المسؤولية
+                        </StatusBadge>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
+            {/* إنشاء التصميم */}
             <button
-              onClick={
-                createDesign
-              }
+              onClick={createDesign}
               disabled={
                 saving ||
                 !selectedProduct ||
@@ -1671,8 +1841,11 @@ export default function DesignsPage() {
             </button>
           </section>
 
+          {/* الجانب */}
           <aside>
+            {/* هوية المحل */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -1693,27 +1866,60 @@ export default function DesignsPage() {
                   border: 0,
                   background:
                     "transparent",
-                  display:
-                    "flex",
+                  display: "flex",
                   justifyContent:
                     "space-between",
                   alignItems:
                     "center",
-                  cursor:
-                    "pointer",
+                  cursor: "pointer",
                   padding: 0,
+                  color:
+                    "#17201c",
                 }}
               >
                 <span
                   style={{
                     fontWeight: 900,
                     fontSize: 17,
+                    display:
+                      "flex",
+                    alignItems:
+                      "center",
+                    gap: 9,
                   }}
                 >
-                  🏪 هوية المحل
+                  <span
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      background:
+                        "#f0fdf4",
+                      display:
+                        "inline-flex",
+                      alignItems:
+                        "center",
+                      justifyContent:
+                        "center",
+                      fontSize: 18,
+                      flexShrink: 0,
+                    }}
+                  >
+                    🏪
+                  </span>
+
+                  <span>
+                    هوية المحل
+                  </span>
                 </span>
 
-                <span>
+                <span
+                  style={{
+                    fontSize: 18,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >
                   {showIdentity
                     ? "⌃"
                     : "⌄"}
@@ -1763,6 +1969,7 @@ export default function DesignsPage() {
                       style={{
                         fontWeight: 900,
                         fontSize: 18,
+                        lineHeight: 1.4,
                       }}
                     >
                       {
@@ -1773,65 +1980,184 @@ export default function DesignsPage() {
                     <div
                       style={{
                         marginTop: 12,
-                        display:
-                          "grid",
-                        gap: 7,
+                        display: "grid",
+                        gap: 8,
                         color:
                           "#66736d",
                         fontSize: 13,
                       }}
                     >
                       {shop.phone && (
-                        <div>
-                          ☎️{" "}
-                          {
-                            shop.phone
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            ☎️
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.phone
+                            }
+                          </span>
                         </div>
                       )}
 
                       {shop.whatsapp && (
-                        <div>
-                          💬{" "}
-                          {
-                            shop.whatsapp
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            💬
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.whatsapp
+                            }
+                          </span>
                         </div>
                       )}
 
                       {shop.instagram && (
-                        <div>
-                          📸{" "}
-                          {
-                            shop.instagram
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            📸
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.instagram
+                            }
+                          </span>
                         </div>
                       )}
 
                       {shop.tiktok && (
-                        <div>
-                          🎵{" "}
-                          {
-                            shop.tiktok
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            🎵
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.tiktok
+                            }
+                          </span>
                         </div>
                       )}
 
                       {shop.snapchat && (
-                        <div>
-                          👻{" "}
-                          {
-                            shop.snapchat
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            👻
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.snapchat
+                            }
+                          </span>
                         </div>
                       )}
 
                       {shop.website && (
-                        <div>
-                          🌐{" "}
-                          {
-                            shop.website
-                          }
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: 8,
+                            minWidth: 0,
+                          }}
+                        >
+                          <span>
+                            🌐
+                          </span>
+                          <span
+                            style={{
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                            }}
+                          >
+                            {
+                              shop.website
+                            }
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1855,7 +2181,9 @@ export default function DesignsPage() {
                 )}
             </div>
 
+            {/* قواعد التصميم */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -1867,48 +2195,167 @@ export default function DesignsPage() {
             >
               <h3
                 style={{
-                  margin:
-                    "0 0 13px",
+                  margin: "0 0 14px",
                   fontSize: 17,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
                 }}
               >
-                🛡️ قواعد التصميم
+                <span
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    background:
+                      "#eff6ff",
+                    display:
+                      "inline-flex",
+                    alignItems:
+                      "center",
+                    justifyContent:
+                      "center",
+                    fontSize: 17,
+                    flexShrink: 0,
+                  }}
+                >
+                  🛡️
+                </span>
+
+                <span>
+                  قواعد التصميم
+                </span>
               </h3>
 
               <div
                 style={{
-                  display:
-                    "grid",
-                  gap: 10,
-                  color:
-                    "#56625c",
+                  display: "grid",
+                  gap: 11,
+                  color: "#56625c",
                   fontSize: 13,
                   lineHeight: 1.6,
                 }}
               >
-                <div>
-                  ✓ المنتج هو محور الإعلان
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    gap: 8,
+                    alignItems:
+                      "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#15803d",
+                      fontWeight: 900,
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <span>
+                    المنتج هو محور الإعلان
+                  </span>
                 </div>
 
-                <div>
-                  ✓ الحفاظ على هوية المنتج الأصلية
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    gap: 8,
+                    alignItems:
+                      "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#15803d",
+                      fontWeight: 900,
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <span>
+                    الحفاظ على هوية المنتج الأصلية
+                  </span>
                 </div>
 
-                <div>
-                  ✓ عدم اختراع معلومات عن المنتج
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    gap: 8,
+                    alignItems:
+                      "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#15803d",
+                      fontWeight: 900,
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <span>
+                    عدم اختراع معلومات عن المنتج
+                  </span>
                 </div>
 
-                <div>
-                  ✓ استخدام هوية المحل
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    gap: 8,
+                    alignItems:
+                      "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#15803d",
+                      fontWeight: 900,
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <span>
+                    استخدام هوية المحل
+                  </span>
                 </div>
 
-                <div>
-                  ✓ التصميم موجه للإعلان والنشر
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    gap: 8,
+                    alignItems:
+                      "flex-start",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#15803d",
+                      fontWeight: 900,
+                    }}
+                  >
+                    ✓
+                  </span>
+                  <span>
+                    التصميم موجه للإعلان والنشر
+                  </span>
                 </div>
               </div>
             </div>
 
+            {/* آخر التصاميم */}
             <div
+              className="design-card"
               style={{
                 background: "#fff",
                 border:
@@ -1919,20 +2366,42 @@ export default function DesignsPage() {
             >
               <h3
                 style={{
-                  margin:
-                    "0 0 14px",
+                  margin: "0 0 14px",
                   fontSize: 17,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
                 }}
               >
-                🗂️ آخر التصاميم
+                <span
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    background:
+                      "#f5f3ff",
+                    display:
+                      "inline-flex",
+                    alignItems:
+                      "center",
+                    justifyContent:
+                      "center",
+                    fontSize: 17,
+                    flexShrink: 0,
+                  }}
+                >
+                  🗂️
+                </span>
+
+                <span>
+                  آخر التصاميم
+                </span>
               </h3>
 
-              {designs.length ===
-              0 ? (
+              {designs.length === 0 ? (
                 <div
                   style={{
-                    color:
-                      "#7a857f",
+                    color: "#7a857f",
                     fontSize: 13,
                     lineHeight: 1.7,
                   }}
@@ -1942,99 +2411,148 @@ export default function DesignsPage() {
               ) : (
                 <div
                   style={{
-                    display:
-                      "grid",
+                    display: "grid",
                     gap: 10,
                   }}
                 >
                   {designs
                     .slice(0, 8)
-                    .map(
-                      (
-                        design
-                      ) => {
-                        const status =
-                          getDesignStatus(
-                            design.status
-                          );
+                    .map((design) => {
+                      const status =
+                        getDesignStatus(
+                          design.status
+                        );
 
-                        const product =
-                          products.find(
-                            (
-                              item
-                            ) =>
-                              item.id ===
-                              design.product_id
-                          );
+                      const product =
+                        products.find(
+                          (item) =>
+                            item.id ===
+                            design.product_id
+                        );
 
-                        return (
+                      return (
+                        <div
+                          key={
+                            design.id
+                          }
+                          style={{
+                            border:
+                              "1px solid #e5ebe7",
+                            borderRadius: 12,
+                            padding: 11,
+                          }}
+                        >
                           <div
-                            key={
-                              design.id
-                            }
                             style={{
-                              border:
-                                "1px solid #e5ebe7",
-                              borderRadius: 12,
-                              padding: 11,
+                              fontWeight: 800,
+                              fontSize: 13,
+                              marginBottom: 8,
+                              lineHeight:
+                                1.5,
                             }}
                           >
-                            <div
-                              style={{
-                                fontWeight: 800,
-                                fontSize: 13,
-                                marginBottom: 7,
-                              }}
-                            >
-                              {product?.name ||
-                                "منتج"}
-                            </div>
-
-                            <div
-                              style={{
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "space-between",
-                                alignItems:
-                                  "center",
-                                gap: 8,
-                              }}
-                            >
-                              <span
-                                style={{
-                                  color:
-                                    "#66736d",
-                                  fontSize: 12,
-                                }}
-                              >
-                                {design.format ||
-                                  "1:1"}
-                              </span>
-
-                              <StatusBadge
-                                type={
-                                  status.type
-                                }
-                              >
-                                {
-                                  status.icon
-                                }{" "}
-                                {
-                                  status.text
-                                }
-                              </StatusBadge>
-                            </div>
+                            {product?.name ||
+                              "منتج"}
                           </div>
-                        );
-                      }
-                    )}
+
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              justifyContent:
+                                "space-between",
+                              alignItems:
+                                "center",
+                              gap: 8,
+                              flexWrap:
+                                "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                color:
+                                  "#66736d",
+                                fontSize: 12,
+                              }}
+                            >
+                              {design.format ||
+                                "1:1"}
+                            </span>
+
+                            <StatusBadge
+                              type={
+                                status.type
+                              }
+                            >
+                              {
+                                status.icon
+                              }{" "}
+                              {
+                                status.text
+                              }
+                            </StatusBadge>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </div>
           </aside>
         </div>
       </div>
+
+      <style jsx>{`
+        button {
+          font-family: Arial, sans-serif;
+        }
+
+        @media (max-width: 900px) {
+          .design-layout {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 650px) {
+          .mode-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .template-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .format-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .style-grid {
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            ) !important;
+          }
+
+          .background-grid {
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            ) !important;
+          }
+
+          .design-card {
+            padding: 16px !important;
+            border-radius: 17px !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .style-grid,
+          .background-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
