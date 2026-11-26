@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { logAIUsage } from "../../../lib/ai-usage";
 
 const openai = new OpenAI({
@@ -17,76 +19,310 @@ const supabaseAdmin = createClient(
   }
 );
 
+function isProductUnclear(product) {
+  if (!product) return true;
+
+  if (
+    product.verification_status === "review" ||
+    product.verification_status === "unverified"
+  ) {
+    return true;
+  }
+
+  if (
+    product.confidence === "low" ||
+    product.confidence === "منخفض" ||
+    product.confidence === "medium" ||
+    product.confidence === "متوسط"
+  ) {
+    return true;
+  }
+
+  if (
+    product.name &&
+    (!product.brand ||
+      !product.category ||
+      !product.description)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function POST(request) {
   let userId = null;
   let shopId = null;
   let productId = null;
 
   try {
+    /*
+     * -----------------------------------------
+     * 1. التحقق من المستخدم الحالي
+     * -----------------------------------------
+     */
+
+    const cookieStore = await cookies();
+
+    const supabaseAuth = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(
+                ({ name, value, options }) => {
+                  cookieStore.set(name, value, options);
+                }
+              );
+            } catch {
+              // لا نحتاج لتعديل الكوكيز هنا
+            }
+          },
+        },
+      }
+    );
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabaseAuth.auth.getUser();
+
+    if (userError || !user) {
+      return Response.json(
+        {
+          error: "يجب تسجيل الدخول أولاً.",
+        },
+        { status: 401 }
+      );
+    }
+
+    userId = user.id;
+
+    /*
+     * -----------------------------------------
+     * 2. قراءة الطلب
+     * -----------------------------------------
+     */
+
     const body = await request.json();
 
-    const product = body?.product || null;
+    const incomingProduct = body?.product || null;
 
-    if (!product) {
+    productId =
+      body?.productId ||
+      incomingProduct?.id ||
+      null;
+
+    if (!productId) {
       return Response.json(
-        { error: "بيانات المنتج غير موجودة" },
+        {
+          error: "معرف المنتج غير موجود.",
+        },
         { status: 400 }
       );
     }
 
-    productId = product.id || body.productId || null;
-
     /*
      * -----------------------------------------
-     * 1. الحصول على المحل وصاحب المنتج
+     * 3. جلب المنتج الحقيقي من قاعدة البيانات
      * -----------------------------------------
+     *
+     * لا نعتمد على بيانات المنتج المرسلة من المتصفح.
      */
 
-    if (productId) {
-      const { data: productData } = await supabaseAdmin
+    const { data: product, error: productError } =
+      await supabaseAdmin
         .from("products")
         .select(
           `
           id,
           shop_id,
-          shops (
-            id,
-            owner_id
-          )
+          name,
+          brand,
+          category,
+          price,
+          currency,
+          description,
+          specifications,
+          features,
+          uses,
+          target_audience,
+          manufacturer,
+          country_of_origin,
+          size_or_volume,
+          ingredients,
+          warnings,
+          storage,
+          warranty,
+          verification_notes,
+          confidence,
+          verification_status,
+          safety_status,
+          ai_status,
+          model_number
         `
         )
         .eq("id", productId)
         .maybeSingle();
 
-      if (productData) {
-        shopId = productData.shop_id || null;
-        userId = productData.shops?.owner_id || null;
-      }
+    if (productError) {
+      console.error(
+        "PRODUCT LOAD ERROR:",
+        productError
+      );
+
+      return Response.json(
+        {
+          error: "تعذر قراءة بيانات المنتج.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!product) {
+      return Response.json(
+        {
+          error: "المنتج غير موجود.",
+        },
+        { status: 404 }
+      );
+    }
+
+    shopId = product.shop_id || null;
+
+    /*
+     * -----------------------------------------
+     * 4. التحقق من ملكية المنتج
+     * -----------------------------------------
+     */
+
+    if (!shopId) {
+      return Response.json(
+        {
+          error:
+            "هذا المنتج غير مرتبط بمحل.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { data: shop, error: shopError } =
+      await supabaseAdmin
+        .from("shops")
+        .select(
+          `
+          id,
+          owner_id
+        `
+        )
+        .eq("id", shopId)
+        .maybeSingle();
+
+    if (shopError) {
+      console.error(
+        "SHOP LOAD ERROR:",
+        shopError
+      );
+
+      return Response.json(
+        {
+          error: "تعذر التحقق من المحل.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!shop) {
+      return Response.json(
+        {
+          error: "المحل غير موجود.",
+        },
+        { status: 404 }
+      );
+    }
+
+    if (shop.owner_id !== user.id) {
+      return Response.json(
+        {
+          error:
+            "ليس لديك صلاحية إنشاء محتوى لهذا المنتج.",
+        },
+        { status: 403 }
+      );
     }
 
     /*
      * -----------------------------------------
-     * 2. منع التسويق للمنتجات المقفلة
+     * 5. منع المنتجات المقفلة
      * -----------------------------------------
      */
 
-    if (productId) {
-      const { data: productStatus } = await supabaseAdmin
-        .from("products")
-        .select(
-          "id, safety_status, verification_status"
+    if (
+      product.safety_status === "locked" ||
+      product.verification_status === "locked"
+    ) {
+      return Response.json(
+        {
+          error:
+            "لا يمكن إنشاء محتوى تسويقي لهذا المنتج لأنه مقفل للمراجعة.",
+        },
+        { status: 403 }
+      );
+    }
+
+    /*
+     * -----------------------------------------
+     * 6. المنتجات غير الواضحة
+     * -----------------------------------------
+     *
+     * إذا كانت المعلومات غير واضحة:
+     * يجب أن يكون التاجر قد وافق على المسؤولية.
+     */
+
+    const unclear = isProductUnclear(product);
+
+    if (unclear) {
+      const {
+        data: responsibilityAcceptance,
+        error: responsibilityError,
+      } = await supabaseAdmin
+        .from(
+          "product_responsibility_acceptances"
         )
-        .eq("id", productId)
+        .select(
+          "id, user_id, shop_id, product_id, policy_version, accepted_at"
+        )
+        .eq("user_id", user.id)
+        .eq("shop_id", shopId)
+        .eq("product_id", product.id)
         .maybeSingle();
 
-      if (
-        productStatus?.safety_status === "locked" ||
-        productStatus?.verification_status === "locked"
-      ) {
+      if (responsibilityError) {
+        console.error(
+          "RESPONSIBILITY CHECK ERROR:",
+          responsibilityError
+        );
+
         return Response.json(
           {
             error:
-              "لا يمكن إنشاء محتوى تسويقي لهذا المنتج لأنه مقفل للمراجعة.",
+              "تعذر التحقق من موافقة مسؤولية المنتج.",
+          },
+          { status: 500 }
+        );
+      }
+
+      if (!responsibilityAcceptance) {
+        return Response.json(
+          {
+            error:
+              "هذا المنتج يحتاج إلى تأكيد مسؤولية التاجر قبل إنشاء المحتوى التسويقي.",
+            code: "RESPONSIBILITY_REQUIRED",
           },
           { status: 403 }
         );
@@ -95,7 +331,7 @@ export async function POST(request) {
 
     /*
      * -----------------------------------------
-     * 3. تجهيز بيانات المنتج
+     * 7. تجهيز بيانات المنتج
      * -----------------------------------------
      */
 
@@ -113,9 +349,6 @@ export async function POST(request) {
 
 الوصف:
 ${product.description || ""}
-
-الوصف التفصيلي:
-${product.full_description || ""}
 
 المواصفات:
 ${product.specifications || ""}
@@ -153,6 +386,9 @@ ${product.warranty || ""}
 ملاحظات التحقق:
 ${product.verification_notes || ""}
 
+رقم الموديل:
+${product.model_number || ""}
+
 قواعد مهمة جدًا:
 
 1. لا تخترع أي مواصفة أو معلومة غير موجودة.
@@ -187,7 +423,7 @@ ${product.verification_notes || ""}
 
     /*
      * -----------------------------------------
-     * 4. طلب الذكاء الاصطناعي
+     * 8. طلب الذكاء الاصطناعي
      * -----------------------------------------
      */
 
@@ -198,7 +434,7 @@ ${product.verification_notes || ""}
 
     /*
      * -----------------------------------------
-     * 5. تسجيل استخدام AI
+     * 9. قراءة استخدام AI
      * -----------------------------------------
      */
 
@@ -218,7 +454,7 @@ ${product.verification_notes || ""}
 
     /*
      * -----------------------------------------
-     * 6. قراءة النتيجة
+     * 10. قراءة النتيجة
      * -----------------------------------------
      */
 
@@ -246,7 +482,7 @@ ${product.verification_notes || ""}
       return Response.json(
         {
           error:
-            "تعذر قراءة نتيجة الذكاء الاصطناعي",
+            "تعذر قراءة نتيجة الذكاء الاصطناعي.",
         },
         { status: 500 }
       );
@@ -254,7 +490,7 @@ ${product.verification_notes || ""}
 
     /*
      * -----------------------------------------
-     * 7. تسجيل العملية الناجحة
+     * 11. تسجيل العملية الناجحة
      * -----------------------------------------
      */
 
@@ -271,12 +507,13 @@ ${product.verification_notes || ""}
       estimatedCost: 0,
       metadata: {
         source: "generate-marketing",
+        responsibility_required: unclear,
       },
     });
 
     /*
      * -----------------------------------------
-     * 8. إرجاع المحتوى
+     * 12. إرجاع المحتوى
      * -----------------------------------------
      */
 
@@ -286,10 +523,6 @@ ${product.verification_notes || ""}
       "OPENAI MARKETING ERROR:",
       error
     );
-
-    /*
-     * تسجيل فشل العملية إذا كان لدينا معرف المنتج
-     */
 
     await logAIUsage({
       userId,
@@ -310,7 +543,7 @@ ${product.verification_notes || ""}
     return Response.json(
       {
         error:
-          "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي",
+          "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي.",
       },
       { status: 500 }
     );
