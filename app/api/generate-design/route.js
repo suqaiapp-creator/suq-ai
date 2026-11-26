@@ -1,255 +1,152 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import OpenAI from "openai";
-import { logAIUsage } from "../../../lib/ai-usage";
 
 export const runtime = "nodejs";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-function createServiceClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
-}
-
-async function getAuthenticatedUser(request) {
-  const authHeader = request.headers.get("authorization");
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = authHeader.replace("Bearer ", "").trim();
-
-  if (!token) {
-    return null;
-  }
-
-  const supabase = createServiceClient();
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser(token);
-
-  if (error || !user) {
-    return null;
-  }
-
-  return user;
-}
-
-function isLocked(product) {
-  return (
-    product?.verification_status === "locked" ||
-    product?.safety_status === "locked" ||
-    product?.safety_status === "violation" ||
-    product?.safety_level === "critical"
-  );
-}
-
-function isUnclear(product) {
-  if (!product) return true;
-
-  if (isLocked(product)) return false;
-
-  return (
-    product.verification_status === "review" ||
-    product.verification_status === "unverified" ||
-    product.ai_status === "pending" ||
-    product.confidence === "low" ||
-    product.confidence === "medium" ||
-    !product.brand ||
-    !product.category ||
-    !product.description
-  );
-}
-
 export async function POST(request) {
-  let body = null;
-
   try {
-    const user = await getAuthenticatedUser(request);
+    const authHeader = request.headers.get("authorization");
 
-    if (!user) {
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
-        {
-          error: "غير مصرح. يجب تسجيل الدخول أولاً.",
-        },
+        { error: "غير مصرح" },
         { status: 401 }
       );
     }
 
-    body = await request.json();
+    const token = authHeader.replace("Bearer ", "").trim();
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(token);
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "الجلسة غير صالحة" },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
 
     const {
       productId,
-      mode = "simple",
-      template = null,
-      style = null,
-      background = null,
-      format = "1:1",
-      description = "",
-    } = body || {};
+      mode,
+      template,
+      style,
+      background,
+      format,
+      description,
+    } = body;
 
     if (!productId) {
       return NextResponse.json(
-        {
-          error: "معرّف المنتج مطلوب.",
-        },
+        { error: "معرّف المنتج مطلوب" },
         { status: 400 }
       );
     }
 
     if (!["simple", "professional"].includes(mode)) {
       return NextResponse.json(
-        {
-          error: "نوع التصميم غير صحيح.",
-        },
+        { error: "نوع التصميم غير صحيح" },
         { status: 400 }
       );
     }
 
-    const allowedFormats = ["1:1", "4:5", "9:16", "16:9"];
+    const allowedFormats = [
+      "1:1",
+      "4:5",
+      "9:16",
+      "16:9",
+    ];
 
     if (!allowedFormats.includes(format)) {
       return NextResponse.json(
-        {
-          error: "مقاس التصميم غير مدعوم.",
-        },
+        { error: "مقاس التصميم غير صحيح" },
         { status: 400 }
       );
     }
 
-    const supabase = createServiceClient();
+    const { data: product, error: productError } =
+      await supabase
+        .from("products")
+        .select("*")
+        .eq("id", productId)
+        .single();
 
-    /*
-     * 1. تحميل المنتج
-     */
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .select("*")
-      .eq("id", productId)
-      .maybeSingle();
-
-    if (productError) {
-      console.error("Product lookup error:", productError);
-
+    if (productError || !product) {
       return NextResponse.json(
-        {
-          error: "تعذر تحميل المنتج.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!product) {
-      return NextResponse.json(
-        {
-          error: "المنتج غير موجود.",
-        },
+        { error: "المنتج غير موجود" },
         { status: 404 }
       );
     }
 
-    /*
-     * 2. تحميل المحل
-     */
-    if (!product.shop_id) {
+    const { data: shop, error: shopError } =
+      await supabase
+        .from("shops")
+        .select("*")
+        .eq("id", product.shop_id)
+        .single();
+
+    if (shopError || !shop) {
       return NextResponse.json(
-        {
-          error: "المنتج غير مرتبط بمحل.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const { data: shop, error: shopError } = await supabase
-      .from("shops")
-      .select("*")
-      .eq("id", product.shop_id)
-      .maybeSingle();
-
-    if (shopError) {
-      console.error("Shop lookup error:", shopError);
-
-      return NextResponse.json(
-        {
-          error: "تعذر تحميل بيانات المحل.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!shop) {
-      return NextResponse.json(
-        {
-          error: "المحل غير موجود.",
-        },
+        { error: "المحل غير موجود" },
         { status: 404 }
       );
     }
 
-    /*
-     * 3. التأكد أن المنتج تابع للمستخدم
-     */
     if (shop.owner_id !== user.id) {
       return NextResponse.json(
-        {
-          error: "لا يمكنك إنشاء تصميم لمنتج لا يخص حسابك.",
-        },
+        { error: "غير مصرح لك باستخدام هذا المنتج" },
         { status: 403 }
       );
     }
 
-    /*
-     * 4. المنتجات المقفلة ممنوعة تماماً
-     */
-    if (isLocked(product)) {
+    const isLocked =
+      product.verification_status === "locked" ||
+      product.safety_status === "locked" ||
+      product.safety_status === "violation" ||
+      product.safety_level === "critical";
+
+    if (isLocked) {
       return NextResponse.json(
         {
           error:
-            "هذا المنتج مقفل ولا يمكن استخدامه في التصميم حتى تتم مراجعته.",
+            "هذا المنتج مقفل ولا يمكن استخدامه في التصميم.",
         },
         { status: 403 }
       );
     }
 
-    /*
-     * 5. المنتج غير الواضح يحتاج تأكيد المسؤولية
-     */
-    if (isUnclear(product)) {
-      const { data: acceptance, error: acceptanceError } =
+    const isUnclear =
+      product.verification_status === "review" ||
+      product.verification_status === "unverified" ||
+      product.confidence === "low" ||
+      product.confidence === "medium" ||
+      !product.brand ||
+      !product.category ||
+      !product.description;
+
+    if (isUnclear) {
+      const { data: acceptance } =
         await supabase
           .from("product_responsibility_acceptances")
           .select("id")
           .eq("user_id", user.id)
           .eq("product_id", product.id)
           .maybeSingle();
-
-      if (acceptanceError) {
-        console.error(
-          "Responsibility acceptance error:",
-          acceptanceError
-        );
-
-        return NextResponse.json(
-          {
-            error: "تعذر التحقق من مسؤولية المنتج.",
-          },
-          { status: 500 }
-        );
-      }
 
       if (!acceptance) {
         return NextResponse.json(
@@ -258,50 +155,36 @@ export async function POST(request) {
               "يجب تأكيد مسؤولية المنتج قبل إنشاء التصميم.",
             requiresResponsibility: true,
           },
-          { status: 403 }
+          { status: 400 }
         );
       }
     }
 
-    /*
-     * 6. يجب وجود صورة أصلية
-     */
     if (!product.image_url) {
       return NextResponse.json(
         {
           error:
-            "لا يمكن إنشاء تصميم بدون صورة أصلية للمنتج.",
+            "المنتج لا يحتوي على صورة.",
         },
         { status: 400 }
       );
     }
 
-    /*
-     * مهم:
-     * هذه المرحلة تجهز الطلب فقط.
-     *
-     * لا يوجد استدعاء OpenAI هنا حالياً.
-     * الهدف هو تثبيت التحقق والأمان قبل استهلاك الرصيد.
-     */
-
     const designPrompt = {
-      type: "product_ad_design",
-
       mode,
-
       template:
         mode === "simple"
-          ? template
+          ? template || null
           : null,
 
       style:
         mode === "professional"
-          ? style
+          ? style || null
           : null,
 
       background:
         mode === "professional"
-          ? background
+          ? background || null
           : null,
 
       format,
@@ -313,27 +196,26 @@ export async function POST(request) {
 
       shop: {
         id: shop.id,
-        name: shop.name || "",
-        logo_url: shop.logo_url || "",
-        phone: shop.phone || "",
-        whatsapp: shop.whatsapp || "",
-        instagram: shop.instagram || "",
-        tiktok: shop.tiktok || "",
-        snapchat: shop.snapchat || "",
-        website: shop.website || "",
+        name: shop.name,
+        logo_url: shop.logo_url,
+        phone: shop.phone,
+        whatsapp: shop.whatsapp,
+        email: shop.email,
+        instagram: shop.instagram,
+        tiktok: shop.tiktok,
+        snapchat: shop.snapchat,
+        website: shop.website,
       },
 
       product: {
         id: product.id,
-        name: product.name || "",
-        brand: product.brand || "",
-        category: product.category || "",
-        price: product.price ?? null,
-        currency: product.currency || "AED",
+        name: product.name,
+        brand: product.brand,
+        category: product.category,
+        price: product.price,
+        currency: product.currency,
+        description: product.description,
         image_url: product.image_url,
-        description: product.description || "",
-        features: product.features || "",
-        specifications: product.specifications || "",
       },
 
       rules: {
@@ -345,28 +227,32 @@ export async function POST(request) {
       },
     };
 
-    /*
-     * 7. حفظ الطلب
-     */
-    const { data: design, error: designError } = await supabase
-      .from("ad_images")
-      .insert({
-        product_id: product.id,
-        shop_id: shop.id,
-        image_url: null,
-        format,
-        prompt: JSON.stringify(designPrompt),
-        status: "pending",
-      })
-      .select()
-      .single();
+    const { data: design, error: insertError } =
+      await supabase
+        .from("ad_images")
+        .insert({
+          product_id: product.id,
+          shop_id: shop.id,
+          image_url: null,
+          format,
+          prompt: designPrompt,
+          status: "pending",
+          generated_at: null,
+          error_message: null,
+        })
+        .select("id, status, created_at")
+        .single();
 
-    if (designError) {
-      console.error("Design creation error:", designError);
+    if (insertError) {
+      console.error(
+        "Create design error:",
+        insertError
+      );
 
       return NextResponse.json(
         {
-          error: "تعذر حفظ طلب التصميم.",
+          error:
+            "تعذر حفظ طلب التصميم.",
         },
         { status: 500 }
       );
@@ -375,17 +261,18 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       designId: design.id,
-      status: "pending",
-      message:
-        "تم تجهيز طلب التصميم بنجاح.",
+      status: design.status,
+      createdAt: design.created_at,
     });
   } catch (error) {
-    console.error("Generate design route error:", error);
+    console.error(
+      "Generate design API error:",
+      error
+    );
 
     return NextResponse.json(
       {
         error:
-          error?.message ||
           "حدث خطأ غير متوقع أثناء تجهيز التصميم.",
       },
       { status: 500 }
