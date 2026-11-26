@@ -247,30 +247,59 @@ export async function POST(request) {
     }
 
     /*
-     * 6. جلب المحل
+     * 6. محاولة جلب المحل بالـ ID فقط
      *
-     * مهم:
-     * نربط المحل بالمستخدم الحالي مباشرة.
+     * هذه الخطوة مهمة للتشخيص.
      */
 
     const {
-      data: shop,
-      error: shopError,
+      data: shopById,
+      error: shopByIdError,
     } = await supabase
       .from("shops")
       .select("*")
       .eq("id", product.shop_id)
-      .eq("owner_id", user.id)
       .maybeSingle();
 
-    if (shopError) {
+    /*
+     * إذا كان المحل غير موجود أصلاً
+     */
+
+    if (shopByIdError) {
       console.error(
-        "SHOP QUERY ERROR:",
+        "SHOP BY ID ERROR:",
+        shopByIdError
+      );
+
+      return NextResponse.json(
         {
-          message: shopError.message,
-          details: shopError.details,
-          hint: shopError.hint,
-          code: shopError.code,
+          success: false,
+          error:
+            "تعذر قراءة بيانات المحل.",
+          debug: {
+            productId: product.id,
+            productName: product.name,
+            productShopId: product.shop_id,
+            currentUserId: user.id,
+            shopByIdError:
+              shopByIdError.message || null,
+            shopByIdCode:
+              shopByIdError.code || null,
+            shopByIdDetails:
+              shopByIdError.details || null,
+            shopByIdHint:
+              shopByIdError.hint || null,
+          },
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!shopById) {
+      console.error(
+        "SHOP DOES NOT EXIST:",
+        {
+          productId: product.id,
           productShopId: product.shop_id,
           currentUserId: user.id,
         }
@@ -280,47 +309,14 @@ export async function POST(request) {
         {
           success: false,
           error:
-            "تعذر الوصول إلى بيانات المحل.",
-          debug: {
-            productId: product.id,
-            productShopId: product.shop_id,
-            currentUserId: user.id,
-            shopQueryError:
-              shopError.message || null,
-            shopQueryCode:
-              shopError.code || null,
-            shopQueryDetails:
-              shopError.details || null,
-            shopQueryHint:
-              shopError.hint || null,
-          },
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!shop) {
-      console.error(
-        "SHOP NOT FOUND FOR PRODUCT:",
-        {
-          productId: product.id,
-          productName: product.name,
-          productShopId: product.shop_id,
-          currentUserId: user.id,
-        }
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          error: "المحل غير موجود.",
+            "المحل غير موجود في قاعدة البيانات.",
           debug: {
             productId: product.id,
             productName: product.name,
             productShopId: product.shop_id,
             currentUserId: user.id,
-            reason:
-              "لم يتم العثور على محل يطابق shop_id و owner_id معاً.",
+            shopFoundById: false,
+            ownerMatches: false,
           },
         },
         { status: 404 }
@@ -328,24 +324,49 @@ export async function POST(request) {
     }
 
     /*
-     * 7. التحقق النهائي من ملكية المحل
+     * 7. التأكد من مالك المحل
      */
 
-    if (shop.owner_id !== user.id) {
+    const ownerMatches =
+      shopById.owner_id === user.id;
+
+    if (!ownerMatches) {
+      console.error(
+        "SHOP OWNER MISMATCH:",
+        {
+          productId: product.id,
+          productShopId: product.shop_id,
+          currentUserId: user.id,
+          shopOwnerId: shopById.owner_id,
+          shopName: shopById.name,
+        }
+      );
+
       return NextResponse.json(
         {
           success: false,
           error:
-            "غير مصرح لك باستخدام هذا المنتج.",
+            "المحل موجود لكن غير مرتبط بحسابك.",
           debug: {
-            shopId: shop.id,
-            shopOwnerId: shop.owner_id,
+            productId: product.id,
+            productName: product.name,
+            productShopId: product.shop_id,
             currentUserId: user.id,
+            shopFoundById: true,
+            shopName: shopById.name,
+            shopOwnerId: shopById.owner_id,
+            ownerMatches: false,
           },
         },
         { status: 403 }
       );
     }
+
+    /*
+     * المحل موجود والمالك صحيح
+     */
+
+    const shop = shopById;
 
     /*
      * 8. فحص المنتج المقفل
@@ -550,7 +571,8 @@ export async function POST(request) {
     /*
      * 14. توليد الصورة
      *
-     * هنا فقط يتم استدعاء OpenAI.
+     * OpenAI يتم استدعاؤه فقط بعد
+     * نجاح كل فحوصات المحل والمنتج.
      */
 
     try {
