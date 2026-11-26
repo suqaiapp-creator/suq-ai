@@ -32,16 +32,18 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 1. جلب الفيديو
-     */
+    // -----------------------------------------
+    // جلب الفيديو
+    // -----------------------------------------
 
-    const { data: video, error: videoError } =
-      await supabase
-        .from("ad_videos")
-        .select("*")
-        .eq("id", videoId)
-        .maybeSingle();
+    const {
+      data: video,
+      error: videoError,
+    } = await supabase
+      .from("ad_videos")
+      .select("*")
+      .eq("id", videoId)
+      .maybeSingle();
 
     if (videoError) {
       throw videoError;
@@ -57,9 +59,9 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * إذا الفيديو مكتمل بالفعل
-     */
+    // -----------------------------------------
+    // إذا اكتمل الفيديو مسبقاً
+    // -----------------------------------------
 
     if (
       video.status === "completed" &&
@@ -73,9 +75,9 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * إذا المحرك غير مفعّل
-     */
+    // -----------------------------------------
+    // إذا المحرك غير مفعّل
+    // -----------------------------------------
 
     if (
       process.env.VIDEO_GENERATION_ENABLED !==
@@ -90,9 +92,9 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * 2. التأكد من وجود Task ID
-     */
+    // -----------------------------------------
+    // التأكد من وجود Task ID
+    // -----------------------------------------
 
     if (!video.provider_task_id) {
       return NextResponse.json(
@@ -105,9 +107,9 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 3. التأكد من API Key
-     */
+    // -----------------------------------------
+    // التأكد من وجود Runway API
+    // -----------------------------------------
 
     if (
       !process.env.RUNWAYML_API_SECRET
@@ -117,9 +119,9 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * 4. سؤال Runway عن حالة المهمة
-     */
+    // -----------------------------------------
+    // فحص حالة المهمة
+    // -----------------------------------------
 
     const response = await fetch(
       `${RUNWAY_API_URL}/v1/tasks/${video.provider_task_id}`,
@@ -138,8 +140,13 @@ export async function POST(request) {
       }
     );
 
-    const result =
-      await response.json();
+    let result = null;
+
+    try {
+      result = await response.json();
+    } catch {
+      result = null;
+    }
 
     if (!response.ok) {
       console.error(
@@ -147,10 +154,14 @@ export async function POST(request) {
         result
       );
 
-      throw new Error(
+      const providerMessage =
         result?.error ||
-          result?.message ||
-          "تعذر الحصول على حالة الفيديو."
+        result?.message ||
+        result?.issues?.[0]?.message ||
+        `HTTP ${response.status}`;
+
+      throw new Error(
+        `تعذر الحصول على حالة الفيديو: ${providerMessage}`
       );
     }
 
@@ -159,15 +170,17 @@ export async function POST(request) {
         result?.status || ""
       ).toUpperCase();
 
-    /*
-     * 5. ما زال قيد التنفيذ
-     */
+    // -----------------------------------------
+    // ما زال يعمل
+    // -----------------------------------------
 
     if (
       runwayStatus === "PENDING" ||
       runwayStatus === "RUNNING"
     ) {
-      await supabase
+      const {
+        error: updateError,
+      } = await supabase
         .from("ad_videos")
         .update({
           status: "processing",
@@ -176,19 +189,26 @@ export async function POST(request) {
         })
         .eq("id", video.id);
 
+      if (updateError) {
+        throw updateError;
+      }
+
       return NextResponse.json({
         success: true,
+
         status: "processing",
+
         provider_status:
           runwayStatus,
+
         task_id:
           video.provider_task_id,
       });
     }
 
-    /*
-     * 6. فشل
-     */
+    // -----------------------------------------
+    // فشل أو إلغاء
+    // -----------------------------------------
 
     if (
       runwayStatus === "FAILED" ||
@@ -200,14 +220,17 @@ export async function POST(request) {
         result?.message ||
         "فشل إنشاء الفيديو.";
 
-      await supabase
+      const finalStatus =
+        runwayStatus === "CANCELLED"
+          ? "cancelled"
+          : "failed";
+
+      const {
+        error: updateError,
+      } = await supabase
         .from("ad_videos")
         .update({
-          status:
-            runwayStatus ===
-            "CANCELLED"
-              ? "cancelled"
-              : "failed",
+          status: finalStatus,
 
           error_message:
             String(errorMessage),
@@ -220,14 +243,14 @@ export async function POST(request) {
         })
         .eq("id", video.id);
 
+      if (updateError) {
+        throw updateError;
+      }
+
       return NextResponse.json({
         success: true,
 
-        status:
-          runwayStatus ===
-          "CANCELLED"
-            ? "cancelled"
-            : "failed",
+        status: finalStatus,
 
         provider_status:
           runwayStatus,
@@ -237,18 +260,15 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * 7. نجاح
-     */
+    // -----------------------------------------
+    // نجح التوليد
+    // -----------------------------------------
 
     if (
-      runwayStatus ===
-      "SUCCEEDED"
+      runwayStatus === "SUCCEEDED"
     ) {
       const outputUrl =
-        Array.isArray(
-          result?.output
-        )
+        Array.isArray(result?.output)
           ? result.output[0]
           : result?.output;
 
@@ -258,9 +278,9 @@ export async function POST(request) {
         );
       }
 
-      /*
-       * 8. تحميل الفيديو من المزود
-       */
+      // ---------------------------------------
+      // تحميل الفيديو من Runway
+      // ---------------------------------------
 
       const videoResponse =
         await fetch(outputUrl);
@@ -282,16 +302,16 @@ export async function POST(request) {
         );
       }
 
-      /*
-       * 9. اسم الملف
-       */
+      // ---------------------------------------
+      // مسار الفيديو داخل Supabase Storage
+      // ---------------------------------------
 
       const filePath =
         `${video.shop_id}/${video.product_id}/${video.id}.mp4`;
 
-      /*
-       * 10. رفع MP4 إلى Storage
-       */
+      // ---------------------------------------
+      // رفع الفيديو إلى Storage
+      // ---------------------------------------
 
       const {
         error: uploadError,
@@ -315,9 +335,9 @@ export async function POST(request) {
         throw uploadError;
       }
 
-      /*
-       * 11. الحصول على الرابط
-       */
+      // ---------------------------------------
+      // الحصول على الرابط النهائي
+      // ---------------------------------------
 
       const {
         data: publicUrlData,
@@ -333,13 +353,13 @@ export async function POST(request) {
 
       if (!finalVideoUrl) {
         throw new Error(
-          "تعذر إنشاء رابط الفيديو."
+          "تعذر إنشاء رابط الفيديو النهائي."
         );
       }
 
-      /*
-       * 12. حفظ النتيجة النهائية
-       */
+      // ---------------------------------------
+      // تحديث قاعدة البيانات
+      // ---------------------------------------
 
       const now =
         new Date().toISOString();
@@ -380,6 +400,10 @@ export async function POST(request) {
         throw completedError;
       }
 
+      // ---------------------------------------
+      // النتيجة النهائية
+      // ---------------------------------------
+
       return NextResponse.json({
         success: true,
 
@@ -393,9 +417,9 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * حالة غير معروفة
-     */
+    // -----------------------------------------
+    // حالة غير معروفة
+    // -----------------------------------------
 
     return NextResponse.json({
       success: true,
@@ -413,6 +437,10 @@ export async function POST(request) {
       "VIDEO STATUS ERROR:",
       error
     );
+
+    // -----------------------------------------
+    // تسجيل الخطأ
+    // -----------------------------------------
 
     if (videoId) {
       try {
