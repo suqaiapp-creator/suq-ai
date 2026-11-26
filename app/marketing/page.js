@@ -85,6 +85,7 @@ export default function MarketingCenterPage() {
       setMarketingContents(marketingData || []);
     } catch (err) {
       console.error(err);
+
       setError(
         err?.message ||
           "حدث خطأ أثناء تحميل مركز التسويق."
@@ -107,6 +108,8 @@ export default function MarketingCenterPage() {
   }, [marketingContents]);
 
   const marketingProducts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
     return products
       .map((product) => {
         const marketing =
@@ -118,15 +121,17 @@ export default function MarketingCenterPage() {
         };
       })
       .filter(({ product, marketing }) => {
-        const query = search.trim().toLowerCase();
-
         const matchesSearch =
           !query ||
           [
             product.name,
             product.brand,
             product.category,
+            product.model_number,
+            product.barcode,
+            product.description,
             marketing?.marketing_description,
+            marketing?.seo_title,
           ]
             .filter(Boolean)
             .some((value) =>
@@ -144,7 +149,7 @@ export default function MarketingCenterPage() {
         }
 
         if (filter === "not_ready") {
-          return !marketing;
+          return !marketing && !isProductLocked(product);
         }
 
         if (filter === "locked") {
@@ -190,6 +195,25 @@ export default function MarketingCenterPage() {
         isProductUnclear(product)
     ).length;
 
+    const completedContents = marketingContents.filter(
+      (item) =>
+        item.status === "completed" ||
+        item.status === "ready"
+    ).length;
+
+    const processingContents = marketingContents.filter(
+      (item) =>
+        item.status === "processing" ||
+        item.status === "generating" ||
+        item.status === "pending"
+    ).length;
+
+    const failedContents = marketingContents.filter(
+      (item) =>
+        item.status === "failed" ||
+        item.status === "error"
+    ).length;
+
     return {
       totalProducts,
       ready,
@@ -197,6 +221,9 @@ export default function MarketingCenterPage() {
       locked,
       review,
       totalContents: marketingContents.length,
+      completedContents,
+      processingContents,
+      failedContents,
     };
   }, [
     products,
@@ -210,7 +237,7 @@ export default function MarketingCenterPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f7f8fa",
+          background: "#f6f8f7",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -225,6 +252,7 @@ export default function MarketingCenterPage() {
             padding: 35,
             textAlign: "center",
             color: "#374151",
+            border: "1px solid #e1e7e3",
           }}
         >
           جاري تحميل مركز التسويق...
@@ -238,14 +266,15 @@ export default function MarketingCenterPage() {
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7f8fa",
+        background: "#f6f8f7",
         padding: "24px",
         fontFamily: "Arial, sans-serif",
+        color: "#17201c",
       }}
     >
       <div
         style={{
-          maxWidth: 1180,
+          maxWidth: 1200,
           margin: "0 auto",
         }}
       >
@@ -264,7 +293,7 @@ export default function MarketingCenterPage() {
             <Link
               href="/dashboard"
               style={{
-                color: "#6b7280",
+                color: "#66736d",
                 textDecoration: "none",
                 fontSize: 14,
               }}
@@ -272,11 +301,22 @@ export default function MarketingCenterPage() {
               ← لوحة التحكم
             </Link>
 
+            <div
+              style={{
+                color: "#15803d",
+                fontWeight: 800,
+                fontSize: 13,
+                marginTop: 10,
+              }}
+            >
+              سوق AI
+            </div>
+
             <h1
               style={{
-                margin: "10px 0 5px",
+                margin: "5px 0",
                 fontSize: 30,
-                color: "#111827",
+                fontWeight: 900,
               }}
             >
               🚀 مركز التسويق
@@ -285,7 +325,7 @@ export default function MarketingCenterPage() {
             <p
               style={{
                 margin: 0,
-                color: "#6b7280",
+                color: "#66736d",
                 fontSize: 14,
               }}
             >
@@ -294,20 +334,44 @@ export default function MarketingCenterPage() {
             </p>
           </div>
 
-          <Link
-            href="/products"
+          <div
             style={{
-              textDecoration: "none",
-              background: "#111827",
-              color: "#fff",
-              padding: "13px 18px",
-              borderRadius: 12,
-              fontWeight: "bold",
-              fontSize: 14,
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            📦 إدارة المنتجات
-          </Link>
+            <Link
+              href="/products"
+              style={{
+                textDecoration: "none",
+                background: "#fff",
+                color: "#17201c",
+                padding: "12px 16px",
+                borderRadius: 12,
+                fontWeight: 800,
+                fontSize: 14,
+                border: "1px solid #d9e1dc",
+              }}
+            >
+              📦 المنتجات
+            </Link>
+
+            <Link
+              href="/dashboard"
+              style={{
+                textDecoration: "none",
+                background: "#15803d",
+                color: "#fff",
+                padding: "12px 16px",
+                borderRadius: 12,
+                fontWeight: 800,
+                fontSize: 14,
+              }}
+            >
+              لوحة التحكم
+            </Link>
+          </div>
         </div>
 
         {/* Error */}
@@ -317,9 +381,9 @@ export default function MarketingCenterPage() {
               marginBottom: 20,
               padding: 15,
               borderRadius: 14,
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              color: "#b91c1c",
+              background: "#fef3f2",
+              border: "1px solid #fecdca",
+              color: "#b42318",
               lineHeight: 1.7,
             }}
           >
@@ -327,12 +391,12 @@ export default function MarketingCenterPage() {
           </div>
         )}
 
-        {/* Stats */}
+        {/* Main stats */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns:
-              "repeat(auto-fit, minmax(155px, 1fr))",
+              "repeat(auto-fit, minmax(150px, 1fr))",
             gap: 12,
             marginBottom: 20,
           }}
@@ -344,8 +408,8 @@ export default function MarketingCenterPage() {
           />
 
           <StatCard
-            icon="✅"
-            title="لديها محتوى"
+            icon="🟢"
+            title="جاهزة للتسويق"
             value={stats.ready}
           />
 
@@ -374,11 +438,40 @@ export default function MarketingCenterPage() {
           />
         </div>
 
-        {/* Search / Filters */}
+        {/* Content stats */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          <MiniStat
+            icon="✅"
+            title="محتوى مكتمل"
+            value={stats.completedContents}
+          />
+
+          <MiniStat
+            icon="⏳"
+            title="قيد المعالجة"
+            value={stats.processingContents}
+          />
+
+          <MiniStat
+            icon="❌"
+            title="فشل"
+            value={stats.failedContents}
+          />
+        </div>
+
+        {/* Search */}
         <div
           style={{
             background: "#fff",
-            border: "1px solid #e5e7eb",
+            border: "1px solid #e1e7e3",
             borderRadius: 18,
             padding: 16,
             marginBottom: 20,
@@ -393,19 +486,21 @@ export default function MarketingCenterPage() {
           >
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث باسم المنتج أو البراند أو التصنيف..."
+              onChange={(e) =>
+                setSearch(e.target.value)
+              }
+              placeholder="ابحث باسم المنتج أو البراند أو التصنيف أو الموديل..."
               style={{
                 flex: "1 1 280px",
                 minWidth: 220,
                 boxSizing: "border-box",
                 padding: "13px 15px",
                 borderRadius: 12,
-                border: "1px solid #d1d5db",
+                border: "1px solid #cfd8d3",
                 outline: "none",
                 fontSize: 14,
                 background: "#fff",
-                color: "#111827",
+                color: "#17201c",
               }}
             />
 
@@ -418,7 +513,7 @@ export default function MarketingCenterPage() {
             <FilterButton
               active={filter === "ready"}
               onClick={() => setFilter("ready")}
-              text={`✅ جاهز (${stats.ready})`}
+              text={`🟢 جاهز (${stats.ready})`}
             />
 
             <FilterButton
@@ -445,16 +540,16 @@ export default function MarketingCenterPage() {
         <div
           style={{
             background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: 16,
-            padding: 16,
+            border: "1px solid #e1e7e3",
+            borderRadius: 18,
+            padding: 17,
             marginBottom: 20,
           }}
         >
           <div
             style={{
-              fontWeight: "bold",
-              color: "#111827",
+              fontWeight: 900,
+              color: "#17201c",
               marginBottom: 10,
             }}
           >
@@ -490,7 +585,7 @@ export default function MarketingCenterPage() {
           </div>
         </div>
 
-        {/* No products */}
+        {/* Products */}
         {products.length === 0 ? (
           <EmptyProducts />
         ) : marketingProducts.length === 0 ? (
@@ -498,7 +593,7 @@ export default function MarketingCenterPage() {
             style={{
               background: "#fff",
               borderRadius: 20,
-              border: "1px solid #e5e7eb",
+              border: "1px solid #e1e7e3",
               padding: "50px 20px",
               textAlign: "center",
             }}
@@ -515,7 +610,6 @@ export default function MarketingCenterPage() {
             <h2
               style={{
                 margin: "0 0 8px",
-                color: "#111827",
               }}
             >
               لا توجد نتائج
@@ -524,7 +618,7 @@ export default function MarketingCenterPage() {
             <p
               style={{
                 margin: 0,
-                color: "#6b7280",
+                color: "#66736d",
               }}
             >
               جرّب تغيير كلمة البحث أو الفلتر.
@@ -551,6 +645,14 @@ export default function MarketingCenterPage() {
           </div>
         )}
       </div>
+
+      <style jsx>{`
+        @media (max-width: 600px) {
+          main {
+            padding: 14px !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
@@ -565,6 +667,9 @@ function MarketingProductCard({
 
   const hasMarketing = Boolean(marketing);
 
+  const marketingStatus =
+    getMarketingStatus(marketing);
+
   return (
     <div
       style={{
@@ -575,20 +680,22 @@ function MarketingProductCard({
           ? "2px solid #dc2626"
           : unclear
           ? "2px solid #f59e0b"
-          : "1px solid #e5e7eb",
+          : "1px solid #e1e7e3",
         boxShadow:
           "0 5px 20px rgba(0,0,0,0.04)",
       }}
     >
-      {/* Image */}
+      {/* Product image */}
       <div
         style={{
-          height: 210,
-          background: "#f3f4f6",
+          height: 220,
+          background: "#f5f7f6",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           position: "relative",
+          padding: 12,
+          boxSizing: "border-box",
         }}
       >
         {product.image_url ? (
@@ -599,6 +706,7 @@ function MarketingProductCard({
               width: "100%",
               height: "100%",
               objectFit: "contain",
+              borderRadius: 12,
             }}
           />
         ) : (
@@ -630,8 +738,8 @@ function MarketingProductCard({
             />
           ) : hasMarketing ? (
             <StatusBadge
-              text="🟢 جاهز"
-              type="clear"
+              text={marketingStatus.text}
+              type={marketingStatus.type}
             />
           ) : (
             <StatusBadge
@@ -642,35 +750,55 @@ function MarketingProductCard({
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ padding: 18 }}>
-        <h2
+      <div
+        style={{
+          padding: 18,
+        }}
+      >
+        <div
           style={{
-            margin: "0 0 7px",
-            color: "#111827",
-            fontSize: 19,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 10,
+            marginBottom: 8,
           }}
         >
-          {product.name || "منتج بدون اسم"}
-        </h2>
-
-        {product.brand && (
           <div
             style={{
-              color: "#6b7280",
-              fontSize: 14,
-              marginBottom: 5,
+              minWidth: 0,
             }}
           >
-            {product.brand}
+            <h2
+              style={{
+                margin: 0,
+                color: "#17201c",
+                fontSize: 19,
+                lineHeight: 1.5,
+              }}
+            >
+              {product.name || "منتج بدون اسم"}
+            </h2>
+
+            {product.brand && (
+              <div
+                style={{
+                  color: "#66736d",
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
+                {product.brand}
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {product.category && (
           <div
             style={{
-              color: "#9ca3af",
-              fontSize: 13,
+              color: "#8a958f",
+              fontSize: 12,
               marginBottom: 12,
             }}
           >
@@ -678,47 +806,48 @@ function MarketingProductCard({
           </div>
         )}
 
-        {/* Marketing status */}
+        {/* Marketing information */}
         <div
           style={{
-            background: "#f8f9fb",
-            borderRadius: 12,
+            background: "#f8faf9",
+            borderRadius: 13,
             padding: 12,
-            marginBottom: 14,
+            marginBottom: 13,
           }}
         >
           <div
             style={{
-              fontSize: 12,
-              color: "#6b7280",
+              fontSize: 11,
+              color: "#7a857f",
               marginBottom: 5,
             }}
           >
             حالة المحتوى التسويقي
           </div>
 
-          <strong
+          <div
             style={{
+              fontWeight: 900,
+              fontSize: 14,
               color: hasMarketing
                 ? "#047857"
-                : "#6b7280",
+                : "#66736d",
             }}
           >
             {hasMarketing
-              ? "✅ محتوى تسويقي جاهز"
+              ? marketingStatus.text
               : "📝 لم يتم إنشاء المحتوى بعد"}
-          </strong>
+          </div>
         </div>
 
-        {/* Preview */}
         {hasMarketing &&
           marketing.marketing_description && (
             <div
               style={{
                 marginBottom: 14,
-                color: "#4b5563",
+                color: "#56625c",
                 fontSize: 13,
-                lineHeight: 1.7,
+                lineHeight: 1.8,
                 display: "-webkit-box",
                 WebkitLineClamp: 3,
                 WebkitBoxOrient: "vertical",
@@ -729,13 +858,32 @@ function MarketingProductCard({
             </div>
           )}
 
+        {hasMarketing &&
+          marketing.call_to_action && (
+            <div
+              style={{
+                background: "#f0fdf4",
+                border:
+                  "1px solid #bbf7d0",
+                color: "#166534",
+                borderRadius: 10,
+                padding: 9,
+                marginBottom: 13,
+                fontSize: 12,
+                fontWeight: 800,
+              }}
+            >
+              CTA: {marketing.call_to_action}
+            </div>
+          )}
+
         {/* Locked */}
         {locked && (
           <div
             style={{
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              color: "#991b1b",
+              background: "#fef3f2",
+              border: "1px solid #fecdca",
+              color: "#b42318",
               borderRadius: 12,
               padding: 11,
               marginBottom: 14,
@@ -743,8 +891,8 @@ function MarketingProductCard({
               lineHeight: 1.7,
             }}
           >
-            🔒 لا يمكن إنشاء أو استخدام المحتوى
-            التسويقي لهذا المنتج حتى تتم مراجعته.
+            🔒 لا يمكن إنشاء أو استخدام المحتوى التسويقي لهذا المنتج حتى تتم مراجعته.
+
             {product.safety_reason && (
               <>
                 <br />
@@ -755,13 +903,13 @@ function MarketingProductCard({
           </div>
         )}
 
-        {/* Responsibility */}
+        {/* Unclear */}
         {unclear && (
           <div
             style={{
-              background: "#fff8e1",
-              border: "1px solid #f0d98a",
-              color: "#7c5a00",
+              background: "#fffaeb",
+              border: "1px solid #fedf89",
+              color: "#92400e",
               borderRadius: 12,
               padding: 11,
               marginBottom: 14,
@@ -769,12 +917,11 @@ function MarketingProductCard({
               lineHeight: 1.7,
             }}
           >
-            ⚠️ المنتج يحتاج تأكيد مسؤولية التاجر
-            قبل إنشاء المحتوى.
+            ⚠️ المنتج يحتاج تأكيد مسؤولية التاجر قبل إنشاء المحتوى.
           </div>
         )}
 
-        {/* Buttons */}
+        {/* Actions */}
         <div
           style={{
             display: "grid",
@@ -782,42 +929,51 @@ function MarketingProductCard({
             gap: 8,
           }}
         >
-          <Link
-            href={`/marketing/${product.id}`}
-            style={{
-              textDecoration: "none",
-              textAlign: "center",
-              padding: "11px 8px",
-              borderRadius: 10,
-              background: locked
-                ? "#f3f4f6"
-                : "#111827",
-              color: locked
-                ? "#9ca3af"
-                : "#fff",
-              fontSize: 13,
-              fontWeight: "bold",
-              pointerEvents: locked
-                ? "none"
-                : "auto",
-            }}
-          >
-            {hasMarketing
-              ? "📣 فتح التسويق"
-              : "🚀 إنشاء التسويق"}
-          </Link>
+          {!locked ? (
+            <Link
+              href={`/marketing/${product.id}`}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+                padding: "12px 8px",
+                borderRadius: 10,
+                background: "#15803d",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 900,
+              }}
+            >
+              {hasMarketing
+                ? "📣 فتح التسويق"
+                : "🚀 إنشاء التسويق"}
+            </Link>
+          ) : (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "12px 8px",
+                borderRadius: 10,
+                background: "#f3f4f6",
+                color: "#9ca3af",
+                fontSize: 13,
+                fontWeight: 800,
+              }}
+            >
+              🔒 التسويق مقفل
+            </div>
+          )}
 
           <Link
             href={`/product-intelligence/${product.id}`}
             style={{
               textDecoration: "none",
               textAlign: "center",
-              padding: "11px 8px",
+              padding: "12px 8px",
               borderRadius: 10,
-              background: "#f3f4f6",
-              color: "#111827",
+              background: "#f3f5f4",
+              color: "#17201c",
               fontSize: 13,
-              fontWeight: "bold",
+              fontWeight: 800,
             }}
           >
             🧠 الذكاء
@@ -828,57 +984,106 @@ function MarketingProductCard({
             style={{
               textDecoration: "none",
               textAlign: "center",
-              padding: "11px 8px",
+              padding: "12px 8px",
               borderRadius: 10,
-              background: "#f3f4f6",
-              color: "#111827",
+              background: "#f3f5f4",
+              color: "#17201c",
               fontSize: 13,
-              fontWeight: "bold",
+              fontWeight: 800,
             }}
           >
-            ✏️ تعديل المنتج
+            ✏️ تعديل
           </Link>
 
           {!locked && (
-            <>
-              <Link
-                href={`/videos/new?product=${product.id}`}
-                style={{
-                  textDecoration: "none",
-                  textAlign: "center",
-                  padding: "11px 8px",
-                  borderRadius: 10,
-                  background: "#f3f4f6",
-                  color: "#111827",
-                  fontSize: 13,
-                  fontWeight: "bold",
-                }}
-              >
-                🎬 الفيديو
-              </Link>
+            <Link
+              href={`/videos/new?product=${product.id}`}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+                padding: "12px 8px",
+                borderRadius: 10,
+                background: "#f3f5f4",
+                color: "#17201c",
+                fontSize: 13,
+                fontWeight: 800,
+              }}
+            >
+              🎬 فيديو
+            </Link>
+          )}
 
-              <Link
-                href={`/designs?product=${product.id}`}
-                style={{
-                  textDecoration: "none",
-                  textAlign: "center",
-                  padding: "11px 8px",
-                  borderRadius: 10,
-                  background: "#f3f4f6",
-                  color: "#111827",
-                  fontSize: 13,
-                  fontWeight: "bold",
-                  gridColumn: "1 / -1",
-                }}
-              >
-                🎨 التصميم
-              </Link>
-            </>
+          {!locked && (
+            <Link
+              href={`/designs?product=${product.id}`}
+              style={{
+                textDecoration: "none",
+                textAlign: "center",
+                padding: "12px 8px",
+                borderRadius: 10,
+                background: "#f3f5f4",
+                color: "#17201c",
+                fontSize: 13,
+                fontWeight: 800,
+                gridColumn: "1 / -1",
+              }}
+            >
+              🎨 تصميم
+            </Link>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function getMarketingStatus(marketing) {
+  if (!marketing) {
+    return {
+      type: "neutral",
+      text: "📝 يحتاج محتوى",
+    };
+  }
+
+  const status = String(
+    marketing.status || ""
+  ).toLowerCase();
+
+  if (
+    status === "completed" ||
+    status === "ready"
+  ) {
+    return {
+      type: "clear",
+      text: "🟢 مكتمل",
+    };
+  }
+
+  if (
+    status === "processing" ||
+    status === "generating" ||
+    status === "pending"
+  ) {
+    return {
+      type: "review",
+      text: "⏳ قيد المعالجة",
+    };
+  }
+
+  if (
+    status === "failed" ||
+    status === "error"
+  ) {
+    return {
+      type: "locked",
+      text: "❌ فشل",
+    };
+  }
+
+  return {
+    type: "neutral",
+    text: `ℹ️ ${marketing.status || "موجود"}`,
+  };
 }
 
 function isProductLocked(product) {
@@ -904,17 +1109,17 @@ function isProductUnclear(product) {
     return false;
   }
 
-  const verification =
-    String(
-      product.verification_status || ""
-    ).toLowerCase();
+  const verification = String(
+    product.verification_status || ""
+  )
+    .trim()
+    .toLowerCase();
 
-  const confidence =
-    String(
-      product.confidence || ""
-    )
-      .trim()
-      .toLowerCase();
+  const confidence = String(
+    product.confidence || ""
+  )
+    .trim()
+    .toLowerCase();
 
   if (
     verification === "review" ||
@@ -926,8 +1131,8 @@ function isProductUnclear(product) {
 
   if (
     confidence === "low" ||
-    confidence === "منخفض" ||
     confidence === "medium" ||
+    confidence === "منخفض" ||
     confidence === "متوسط"
   ) {
     return true;
@@ -970,7 +1175,7 @@ function StatCard({
     <div
       style={{
         background: "#fff",
-        border: "1px solid #e5e7eb",
+        border: "1px solid #e1e7e3",
         borderRadius: 16,
         padding: 15,
       }}
@@ -986,7 +1191,7 @@ function StatCard({
 
       <div
         style={{
-          color: "#6b7280",
+          color: "#66736d",
           fontSize: 12,
           marginBottom: 4,
         }}
@@ -996,12 +1201,68 @@ function StatCard({
 
       <div
         style={{
-          color: "#111827",
+          color: "#17201c",
           fontSize: 23,
-          fontWeight: "bold",
+          fontWeight: 900,
         }}
       >
         {value}
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({
+  icon,
+  title,
+  value,
+}) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #e1e7e3",
+        borderRadius: 14,
+        padding: 13,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 11,
+          background: "#f0fdf4",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+        }}
+      >
+        {icon}
+      </div>
+
+      <div>
+        <div
+          style={{
+            color: "#66736d",
+            fontSize: 11,
+          }}
+        >
+          {title}
+        </div>
+
+        <div
+          style={{
+            fontSize: 19,
+            fontWeight: 900,
+            marginTop: 2,
+          }}
+        >
+          {value}
+        </div>
       </div>
     </div>
   );
@@ -1020,16 +1281,16 @@ function FilterButton({
         padding: "11px 13px",
         borderRadius: 11,
         border: active
-          ? "1px solid #111827"
-          : "1px solid #e5e7eb",
+          ? "1px solid #15803d"
+          : "1px solid #e1e7e3",
         background: active
-          ? "#111827"
+          ? "#15803d"
           : "#fff",
         color: active
           ? "#fff"
           : "#374151",
         fontSize: 13,
-        fontWeight: "bold",
+        fontWeight: 800,
         cursor: "pointer",
         whiteSpace: "nowrap",
       }}
@@ -1045,27 +1306,27 @@ function StatusBadge({
 }) {
   const styles = {
     clear: {
-      background: "#ecfdf5",
-      color: "#047857",
-      border: "1px solid #a7f3d0",
+      background: "#ecfdf3",
+      color: "#067647",
+      border: "1px solid #abefc6",
     },
 
     review: {
-      background: "#fff7ed",
-      color: "#c2410c",
-      border: "1px solid #fed7aa",
+      background: "#fffaeb",
+      color: "#b54708",
+      border: "1px solid #fedf89",
     },
 
     neutral: {
-      background: "#f3f4f6",
-      color: "#4b5563",
-      border: "1px solid #e5e7eb",
+      background: "#f3f5f4",
+      color: "#56625c",
+      border: "1px solid #e1e7e3",
     },
 
     locked: {
-      background: "#fef2f2",
-      color: "#b91c1c",
-      border: "1px solid #fecaca",
+      background: "#fef3f2",
+      color: "#b42318",
+      border: "1px solid #fecdca",
     },
   };
 
@@ -1075,14 +1336,16 @@ function StatusBadge({
   return (
     <span
       style={{
-        display: "inline-block",
+        display: "inline-flex",
+        alignItems: "center",
         padding: "6px 9px",
-        borderRadius: 9,
+        borderRadius: 999,
         background: style.background,
         color: style.color,
         border: style.border,
         fontSize: 12,
-        fontWeight: "bold",
+        fontWeight: 800,
+        lineHeight: 1.2,
       }}
     >
       {text}
@@ -1098,7 +1361,7 @@ function EmptyProducts() {
         borderRadius: 22,
         padding: "55px 25px",
         textAlign: "center",
-        border: "1px solid #e5e7eb",
+        border: "1px solid #e1e7e3",
       }}
     >
       <div
@@ -1113,7 +1376,6 @@ function EmptyProducts() {
       <h2
         style={{
           margin: "0 0 8px",
-          color: "#111827",
         }}
       >
         لا توجد منتجات
@@ -1121,12 +1383,11 @@ function EmptyProducts() {
 
       <p
         style={{
-          color: "#6b7280",
+          color: "#66736d",
           marginBottom: 20,
         }}
       >
-        أضف منتجًا أولًا حتى تتمكن من إنشاء
-        المحتوى التسويقي.
+        أضف منتجًا أولًا حتى تتمكن من إنشاء المحتوى التسويقي.
       </p>
 
       <Link
@@ -1134,11 +1395,11 @@ function EmptyProducts() {
         style={{
           display: "inline-block",
           textDecoration: "none",
-          background: "#111827",
+          background: "#15803d",
           color: "#fff",
           padding: "13px 20px",
           borderRadius: 12,
-          fontWeight: "bold",
+          fontWeight: 900,
         }}
       >
         ➕ إضافة منتج
