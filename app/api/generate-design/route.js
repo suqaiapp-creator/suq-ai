@@ -1,10 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { buildDesignPrompt } from "../../../lib/design-generator";
+import { generateDesignImage } from "../../../lib/image-generator";
+import { logAIUsage } from "../../../lib/ai-usage";
 
 export const runtime = "nodejs";
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
+);
+
 export async function POST(request) {
+  let designId = null;
+
   try {
     const authHeader = request.headers.get("authorization");
 
@@ -16,17 +31,6 @@ export async function POST(request) {
     }
 
     const token = authHeader.replace("Bearer ", "").trim();
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-      }
-    );
 
     const {
       data: { user },
@@ -110,7 +114,10 @@ export async function POST(request) {
 
     if (shop.owner_id !== user.id) {
       return NextResponse.json(
-        { error: "غير مصرح لك باستخدام هذا المنتج" },
+        {
+          error:
+            "غير مصرح لك باستخدام هذا المنتج.",
+        },
         { status: 403 }
       );
     }
@@ -143,7 +150,9 @@ export async function POST(request) {
     if (isUnclear) {
       const { data: acceptance } =
         await supabase
-          .from("product_responsibility_acceptances")
+          .from(
+            "product_responsibility_acceptances"
+          )
           .select("id")
           .eq("user_id", user.id)
           .eq("product_id", product.id)
@@ -193,12 +202,15 @@ export async function POST(request) {
           prompt: designPrompt,
           status: "pending",
           generated_at: null,
+          completed_at: null,
           error_message: null,
+          error_code: null,
+          generation_started_at: null,
         })
         .select("id, status, created_at")
         .single();
 
-    if (insertError) {
+    if (insertError || !design) {
       console.error(
         "Create design error:",
         insertError
@@ -207,28 +219,198 @@ export async function POST(request) {
       return NextResponse.json(
         {
           error:
-            "تعذر حفظ طلب التصميم.",
+            "تعذر إنشاء طلب التصميم.",
         },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      designId: design.id,
-      status: design.status,
-      createdAt: design.created_at,
-    });
+    designId = design.id;
+
+    await supabase
+      .from("ad_images")
+      .update({
+        status: "generating",
+        generation_started_at: new Date().toISOString(),
+        error_message: null,
+        error_code: null,
+      })
+      .eq("id", designId);
+
+    try {
+      const generated = await generateDesignImage({
+        productImageUrl: product.image_url,
+        prompt: designPrompt,
+        format,
+      });
+
+      if (!generated?.b64_json) {
+        throw new Error(
+          "لم يتم استلام الصورة الناتجة من محرك الصور."
+        );
+      }
+
+      const imageBuffer = Buffer.from(
+        generated.b64_json,
+        "base64"
+      );
+
+      const storagePath =
+        `${shop.id}/${product.id}/${designId}.png`;
+
+      const {
+        error: uploadError,
+      } = await supabase.storage
+        .from("ad-images")
+        .upload(
+          storagePath,
+          imageBuffer,
+          {
+            contentType: "image/png",
+            upsert: false,
+          }
+        );
+
+      if (uploadError) {
+        throw new Error(
+          `تعذر حفظ الصورة: ${uploadError.message}`
+        );
+      }
+
+      const {
+        data: publicUrlData,
+      } = supabase.storage
+        .from("ad-images")
+        .getPublicUrl(storagePath);
+
+      const imageUrl =
+        publicUrlData?.publicUrl;
+
+      if (!imageUrl) {
+        throw new Error(
+          "تعذر الحصول على رابط الصورة."
+        );
+      }
+
+      const completedAt =
+        new Date().toISOString();
+
+      const {
+        error: updateError,
+      } = await supabase
+        .from("ad_images")
+        .update({
+          image_url: imageUrl,
+          status: "completed",
+          generated_at: completedAt,
+          completed_at: completedAt,
+          error_message: null,
+          error_code: null,
+        })
+        .eq("id", designId);
+
+      if (updateError) {
+        throw new Error(
+          `تعذر تحديث التصميم: ${updateError.message}`
+        );
+      }
+
+      await logAIUsage({
+        userId: user.id,
+        shopId: shop.id,
+        productId: product.id,
+        operation: "design_generation",
+        model: generated.model || "gpt-image-2",
+        status: "success",
+        estimatedCost: 0,
+        metadata: {
+          design_id: designId,
+          format,
+          mode,
+          template: template || null,
+          style: style || null,
+          background: background || null,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        designId,
+        status: "completed",
+        imageUrl,
+      });
+    } catch (generationError) {
+      console.error(
+        "Image generation error:",
+        generationError
+      );
+
+      const errorMessage =
+        generationError?.message ||
+        "فشل توليد التصميم.";
+
+      await supabase
+        .from("ad_images")
+        .update({
+          status: "failed",
+          error_message: errorMessage,
+          error_code: "GENERATION_FAILED",
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", designId);
+
+      await logAIUsage({
+        userId: user.id,
+        shopId: shop.id,
+        productId: product.id,
+        operation: "design_generation",
+        model: "gpt-image-2",
+        status: "failed",
+        estimatedCost: 0,
+        metadata: {
+          design_id: designId,
+          error: errorMessage,
+          format,
+          mode,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          designId,
+          status: "failed",
+          error:
+            "تعذر توليد التصميم. تم تسجيل سبب الخطأ.",
+        },
+        { status: 500 }
+      );
+    }
   } catch (error) {
     console.error(
       "Generate design API error:",
       error
     );
 
+    if (designId) {
+      await supabase
+        .from("ad_images")
+        .update({
+          status: "failed",
+          error_message:
+            error?.message ||
+            "خطأ غير متوقع.",
+          error_code: "UNEXPECTED_ERROR",
+          completed_at:
+            new Date().toISOString(),
+        })
+        .eq("id", designId);
+    }
+
     return NextResponse.json(
       {
         error:
-          "حدث خطأ غير متوقع أثناء تجهيز التصميم.",
+          "حدث خطأ غير متوقع أثناء إنشاء التصميم.",
       },
       { status: 500 }
     );
