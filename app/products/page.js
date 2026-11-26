@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "../../lib/supabase/client";
@@ -13,6 +13,9 @@ export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [shop, setShop] = useState(null);
   const [error, setError] = useState("");
+
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
 
   useEffect(() => {
     loadProducts();
@@ -103,15 +106,87 @@ export default function ProductsPage() {
       }
 
       setProducts((current) =>
-        current.filter(
-          (item) => item.id !== product.id
-        )
+        current.filter((item) => item.id !== product.id)
       );
     } catch (err) {
       console.error(err);
       setError("حدث خطأ أثناء حذف المنتج.");
     }
   }
+
+  const productStats = useMemo(() => {
+    let ready = 0;
+    let review = 0;
+    let locked = 0;
+    let processing = 0;
+
+    for (const product of products) {
+      const status = getProductStatus(product);
+
+      if (status === "locked") {
+        locked++;
+      } else if (status === "review") {
+        review++;
+      } else if (status === "processing") {
+        processing++;
+      } else {
+        ready++;
+      }
+    }
+
+    return {
+      total: products.length,
+      ready,
+      review,
+      locked,
+      processing,
+    };
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return products.filter((product) => {
+      const matchesSearch =
+        !query ||
+        [
+          product.name,
+          product.brand,
+          product.category,
+          product.model_number,
+          product.barcode,
+          product.description,
+        ]
+          .filter(Boolean)
+          .some((value) =>
+            String(value).toLowerCase().includes(query)
+          );
+
+      if (!matchesSearch) {
+        return false;
+      }
+
+      const status = getProductStatus(product);
+
+      if (filter === "ready") {
+        return status === "ready";
+      }
+
+      if (filter === "review") {
+        return status === "review";
+      }
+
+      if (filter === "locked") {
+        return status === "locked";
+      }
+
+      if (filter === "processing") {
+        return status === "processing";
+      }
+
+      return true;
+    });
+  }, [products, search, filter]);
 
   if (loading) {
     return (
@@ -125,6 +200,7 @@ export default function ProductsPage() {
           justifyContent: "center",
           fontFamily: "Arial, sans-serif",
           color: "#374151",
+          padding: "24px",
         }}
       >
         جاري تحميل المنتجات...
@@ -144,7 +220,7 @@ export default function ProductsPage() {
     >
       <div
         style={{
-          maxWidth: "1100px",
+          maxWidth: "1180px",
           margin: "0 auto",
         }}
       >
@@ -174,11 +250,11 @@ export default function ProductsPage() {
             <h1
               style={{
                 margin: "10px 0 5px",
-                fontSize: "28px",
+                fontSize: "30px",
                 color: "#111827",
               }}
             >
-              منتجات {shop?.name || "المحل"}
+              منتجاتي
             </h1>
 
             <p
@@ -188,7 +264,7 @@ export default function ProductsPage() {
                 fontSize: "14px",
               }}
             >
-              إدارة منتجات محلك ومعلوماتها التسويقية.
+              إدارة منتجات {shop?.name || "المحل"} ومعلوماتها وذكائها التسويقي.
             </p>
           </div>
 
@@ -217,6 +293,7 @@ export default function ProductsPage() {
               borderRadius: "14px",
               background: "#fef2f2",
               color: "#b91c1c",
+              border: "1px solid #fecaca",
               lineHeight: "1.7",
             }}
           >
@@ -224,7 +301,121 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Status Guide */}
+        {/* Stats */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: "12px",
+            marginBottom: "20px",
+          }}
+        >
+          <StatCard
+            icon="📦"
+            title="كل المنتجات"
+            value={productStats.total}
+          />
+
+          <StatCard
+            icon="🟢"
+            title="جاهزة"
+            value={productStats.ready}
+          />
+
+          <StatCard
+            icon="🟡"
+            title="تحتاج مراجعة"
+            value={productStats.review}
+          />
+
+          <StatCard
+            icon="⏳"
+            title="قيد المعالجة"
+            value={productStats.processing}
+          />
+
+          <StatCard
+            icon="🔴"
+            title="مقفلة"
+            value={productStats.locked}
+          />
+        </div>
+
+        {/* Search + Filters */}
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: "18px",
+            padding: "16px",
+            marginBottom: "20px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{
+                flex: "1 1 280px",
+                position: "relative",
+              }}
+            >
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="ابحث باسم المنتج أو البراند أو التصنيف..."
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  padding: "13px 15px",
+                  borderRadius: "12px",
+                  border: "1px solid #d1d5db",
+                  outline: "none",
+                  fontSize: "14px",
+                  background: "#ffffff",
+                  color: "#111827",
+                }}
+              />
+            </div>
+
+            <FilterButton
+              active={filter === "all"}
+              onClick={() => setFilter("all")}
+              text={`الكل (${productStats.total})`}
+            />
+
+            <FilterButton
+              active={filter === "ready"}
+              onClick={() => setFilter("ready")}
+              text={`🟢 جاهز (${productStats.ready})`}
+            />
+
+            <FilterButton
+              active={filter === "review"}
+              onClick={() => setFilter("review")}
+              text={`🟡 مراجعة (${productStats.review})`}
+            />
+
+            <FilterButton
+              active={filter === "processing"}
+              onClick={() => setFilter("processing")}
+              text={`⏳ معالجة (${productStats.processing})`}
+            />
+
+            <FilterButton
+              active={filter === "locked"}
+              onClick={() => setFilter("locked")}
+              text={`🔴 مقفل (${productStats.locked})`}
+            />
+          </div>
+        </div>
+
+        {/* Status Explanation */}
         {products.length > 0 && (
           <div
             style={{
@@ -242,7 +433,7 @@ export default function ProductsPage() {
                 color: "#111827",
               }}
             >
-              حالة المنتجات
+              حالات المنتج
             </div>
 
             <div
@@ -253,13 +444,18 @@ export default function ProductsPage() {
               }}
             >
               <StatusBadge
-                text="🟢 واضح / موثّق"
+                text="🟢 جاهز للاستخدام"
                 type="clear"
               />
 
               <StatusBadge
-                text="🟡 معلومات غير واضحة"
+                text="🟡 يحتاج مراجعة"
                 type="review"
+              />
+
+              <StatusBadge
+                text="⏳ قيد المعالجة"
+                type="processing"
               />
 
               <StatusBadge
@@ -270,24 +466,26 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Empty */}
+        {/* No products at all */}
         {products.length === 0 ? (
+          <EmptyState />
+        ) : filteredProducts.length === 0 ? (
           <div
             style={{
               background: "#ffffff",
-              borderRadius: "22px",
-              padding: "50px 25px",
-              textAlign: "center",
+              borderRadius: "20px",
               border: "1px solid #e5e7eb",
+              padding: "45px 20px",
+              textAlign: "center",
             }}
           >
             <div
               style={{
-                fontSize: "48px",
-                marginBottom: "12px",
+                fontSize: "45px",
+                marginBottom: "10px",
               }}
             >
-              📦
+              🔎
             </div>
 
             <h2
@@ -296,43 +494,28 @@ export default function ProductsPage() {
                 color: "#111827",
               }}
             >
-              لا توجد منتجات
+              لا توجد نتائج
             </h2>
 
             <p
               style={{
+                margin: 0,
                 color: "#6b7280",
-                marginBottom: "20px",
               }}
             >
-              أضف أول منتج إلى محلك للبدء.
+              جرّب تغيير كلمة البحث أو الفلتر.
             </p>
-
-            <Link
-              href="/add-product"
-              style={{
-                display: "inline-block",
-                textDecoration: "none",
-                background: "#111827",
-                color: "#ffffff",
-                padding: "13px 20px",
-                borderRadius: "12px",
-                fontWeight: "bold",
-              }}
-            >
-              ➕ إضافة أول منتج
-            </Link>
           </div>
         ) : (
           <div
             style={{
               display: "grid",
               gridTemplateColumns:
-                "repeat(auto-fill, minmax(280px, 1fr))",
+                "repeat(auto-fill, minmax(290px, 1fr))",
               gap: "18px",
             }}
           >
-            {products.map((product) => (
+            {filteredProducts.map((product) => (
               <ProductCard
                 key={product.id}
                 product={product}
@@ -347,28 +530,16 @@ export default function ProductsPage() {
 }
 
 function ProductCard({ product, onDelete }) {
-  const isLocked =
-    product.verification_status === "locked" ||
-    product.safety_status === "locked";
+  const status = getProductStatus(product);
 
-  const isUnclear = isProductUnclear(product);
+  const isLocked = status === "locked";
+  const isUnclear = status === "review";
+  const isProcessing = status === "processing";
+
+  const statusInfo = getStatusInfo(status);
 
   const isCompleted =
     product.ai_status === "completed";
-
-  const isVerified =
-    product.verification_status === "verified";
-
-  let statusText = "🟡 معلومات غير واضحة";
-  let statusType = "review";
-
-  if (isLocked) {
-    statusText = "🔴 مقفل";
-    statusType = "locked";
-  } else if (isVerified && !isUnclear) {
-    statusText = "🟢 واضح / موثّق";
-    statusType = "clear";
-  }
 
   return (
     <div
@@ -380,9 +551,10 @@ function ProductCard({ product, onDelete }) {
           ? "2px solid #dc2626"
           : isUnclear
           ? "2px solid #f59e0b"
+          : isProcessing
+          ? "2px solid #d97706"
           : "1px solid #e5e7eb",
-        boxShadow:
-          "0 5px 20px rgba(0,0,0,0.04)",
+        boxShadow: "0 5px 20px rgba(0,0,0,0.04)",
       }}
     >
       {/* Image */}
@@ -424,8 +596,8 @@ function ProductCard({ product, onDelete }) {
           }}
         >
           <StatusBadge
-            text={statusText}
-            type={statusType}
+            text={statusInfo.text}
+            type={statusInfo.type}
           />
         </div>
       </div>
@@ -476,8 +648,7 @@ function ProductCard({ product, onDelete }) {
                 marginBottom: "12px",
               }}
             >
-              {product.price}{" "}
-              {product.currency || "AED"}
+              {product.price} {product.currency || "AED"}
             </div>
           )}
 
@@ -499,7 +670,7 @@ function ProductCard({ product, onDelete }) {
             type={
               isCompleted
                 ? "clear"
-                : "review"
+                : "processing"
             }
           />
 
@@ -515,13 +686,30 @@ function ProductCard({ product, onDelete }) {
                 fontWeight: "bold",
               }}
             >
-              {product.product_type ===
-              "imported"
+              {product.product_type === "imported"
                 ? "مستورد"
                 : "محلي"}
             </span>
           )}
         </div>
+
+        {/* Verification */}
+        {product.verification_status && (
+          <div
+            style={{
+              fontSize: "12px",
+              color: "#6b7280",
+              marginBottom: "12px",
+            }}
+          >
+            حالة التحقق:{" "}
+            <strong style={{ color: "#374151" }}>
+              {getVerificationLabel(
+                product.verification_status
+              )}
+            </strong>
+          </div>
+        )}
 
         {/* Responsibility notice */}
         {isUnclear && !isLocked && (
@@ -537,11 +725,30 @@ function ProductCard({ product, onDelete }) {
               lineHeight: "1.7",
             }}
           >
-            ⚠️ المعلومات غير مكتملة أو غير
-            واضحة.
+            ⚠️ المعلومات غير مكتملة أو غير واضحة.
             <br />
             عند استخدام المنتج للتسويق أو التصميم،
             سيطلب منك تأكيد مسؤوليتك عنه.
+          </div>
+        )}
+
+        {/* Processing */}
+        {isProcessing && (
+          <div
+            style={{
+              background: "#fff7ed",
+              border: "1px solid #fed7aa",
+              borderRadius: "12px",
+              padding: "11px",
+              marginBottom: "14px",
+              color: "#9a3412",
+              fontSize: "13px",
+              lineHeight: "1.7",
+            }}
+          >
+            ⏳ يجري تحليل المنتج والتحقق من معلوماته.
+            <br />
+            ستظهر الحالة النهائية بعد اكتمال المعالجة.
           </div>
         )}
 
@@ -561,21 +768,19 @@ function ProductCard({ product, onDelete }) {
           >
             🔒 هذا المنتج مقفل حاليًا.
             <br />
-            لا يمكن استخدامه في التسويق أو
-            التصاميم حتى تتم مراجعته.
+            لا يمكن استخدامه في التسويق أو التصاميم أو
+            الفيديو حتى تتم مراجعته.
             {product.safety_reason && (
               <>
                 <br />
-                <strong>
-                  السبب:
-                </strong>{" "}
+                <strong>السبب:</strong>{" "}
                 {product.safety_reason}
               </>
             )}
           </div>
         )}
 
-        {/* Buttons */}
+        {/* Main buttons */}
         <div
           style={{
             display: "grid",
@@ -634,7 +839,7 @@ function ProductCard({ product, onDelete }) {
               </Link>
 
               <Link
-                href="/designs"
+                href={`/videos/new?product=${product.id}`}
                 style={{
                   textDecoration: "none",
                   textAlign: "center",
@@ -646,7 +851,24 @@ function ProductCard({ product, onDelete }) {
                   fontWeight: "bold",
                 }}
               >
-                🎨 التصميم
+                🎬 الفيديو
+              </Link>
+
+              <Link
+                href={`/designs?product=${product.id}`}
+                style={{
+                  textDecoration: "none",
+                  textAlign: "center",
+                  padding: "11px 8px",
+                  borderRadius: "10px",
+                  background: "#111827",
+                  color: "#ffffff",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                  gridColumn: "1 / -1",
+                }}
+              >
+                🎨 إنشاء تصميم
               </Link>
             </>
           )}
@@ -674,23 +896,82 @@ function ProductCard({ product, onDelete }) {
   );
 }
 
+function getProductStatus(product) {
+  if (!product) {
+    return "review";
+  }
+
+  const safetyStatus = String(
+    product.safety_status || ""
+  ).toLowerCase();
+
+  const verificationStatus = String(
+    product.verification_status || ""
+  ).toLowerCase();
+
+  const safetyLevel = String(
+    product.safety_level || ""
+  ).toLowerCase();
+
+  if (
+    safetyStatus === "locked" ||
+    safetyStatus === "violation" ||
+    verificationStatus === "locked" ||
+    verificationStatus === "violation" ||
+    safetyLevel === "critical"
+  ) {
+    return "locked";
+  }
+
+  if (
+    product.ai_status === "pending" ||
+    product.ai_status === "processing" ||
+    product.ai_status === "analyzing"
+  ) {
+    return "processing";
+  }
+
+  if (isProductUnclear(product)) {
+    return "review";
+  }
+
+  if (
+    verificationStatus === "verified" ||
+    verificationStatus === "approved" ||
+    verificationStatus === "clear"
+  ) {
+    return "ready";
+  }
+
+  return "review";
+}
+
 function isProductUnclear(product) {
   if (!product) {
     return true;
   }
 
+  const verificationStatus = String(
+    product.verification_status || ""
+  ).toLowerCase();
+
   if (
-    product.verification_status === "review" ||
-    product.verification_status === "unverified"
+    verificationStatus === "review" ||
+    verificationStatus === "unverified" ||
+    verificationStatus === "pending"
   ) {
     return true;
   }
 
+  const confidence = String(
+    product.confidence || ""
+  ).toLowerCase();
+
   if (
-    product.confidence === "low" ||
-    product.confidence === "منخفض" ||
-    product.confidence === "medium" ||
-    product.confidence === "متوسط"
+    confidence === "low" ||
+    confidence === "منخفض" ||
+    confidence === "medium" ||
+    confidence === "متوسط"
   ) {
     return true;
   }
@@ -707,6 +988,194 @@ function isProductUnclear(product) {
   return false;
 }
 
+function getStatusInfo(status) {
+  if (status === "ready") {
+    return {
+      text: "🟢 جاهز للاستخدام",
+      type: "clear",
+    };
+  }
+
+  if (status === "locked") {
+    return {
+      text: "🔴 مقفل",
+      type: "locked",
+    };
+  }
+
+  if (status === "processing") {
+    return {
+      text: "⏳ قيد المعالجة",
+      type: "processing",
+    };
+  }
+
+  return {
+    text: "🟡 يحتاج مراجعة",
+    type: "review",
+  };
+}
+
+function getVerificationLabel(status) {
+  const value = String(status || "").toLowerCase();
+
+  if (
+    value === "verified" ||
+    value === "approved" ||
+    value === "clear"
+  ) {
+    return "موثّق";
+  }
+
+  if (
+    value === "review" ||
+    value === "pending"
+  ) {
+    return "يحتاج مراجعة";
+  }
+
+  if (
+    value === "unverified"
+  ) {
+    return "غير موثّق بعد";
+  }
+
+  if (
+    value === "locked" ||
+    value === "violation"
+  ) {
+    return "مقفل";
+  }
+
+  return status || "غير محدد";
+}
+
+function StatCard({ icon, title, value }) {
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "16px",
+        padding: "15px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "22px",
+          marginBottom: "7px",
+        }}
+      >
+        {icon}
+      </div>
+
+      <div
+        style={{
+          color: "#6b7280",
+          fontSize: "12px",
+          marginBottom: "4px",
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          color: "#111827",
+          fontSize: "23px",
+          fontWeight: "bold",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FilterButton({ active, onClick, text }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "11px 13px",
+        borderRadius: "11px",
+        border: active
+          ? "1px solid #111827"
+          : "1px solid #e5e7eb",
+        background: active
+          ? "#111827"
+          : "#ffffff",
+        color: active
+          ? "#ffffff"
+          : "#374151",
+        fontSize: "13px",
+        fontWeight: "bold",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {text}
+    </button>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: "22px",
+        padding: "55px 25px",
+        textAlign: "center",
+        border: "1px solid #e5e7eb",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "52px",
+          marginBottom: "12px",
+        }}
+      >
+        📦
+      </div>
+
+      <h2
+        style={{
+          margin: "0 0 8px",
+          color: "#111827",
+        }}
+      >
+        لا توجد منتجات
+      </h2>
+
+      <p
+        style={{
+          color: "#6b7280",
+          marginBottom: "20px",
+        }}
+      >
+        أضف أول منتج إلى محلك للبدء.
+      </p>
+
+      <Link
+        href="/add-product"
+        style={{
+          display: "inline-block",
+          textDecoration: "none",
+          background: "#111827",
+          color: "#ffffff",
+          padding: "13px 20px",
+          borderRadius: "12px",
+          fontWeight: "bold",
+        }}
+      >
+        ➕ إضافة أول منتج
+      </Link>
+    </div>
+  );
+}
+
 function StatusBadge({ text, type }) {
   const styles = {
     clear: {
@@ -714,11 +1183,19 @@ function StatusBadge({ text, type }) {
       color: "#047857",
       border: "1px solid #a7f3d0",
     },
+
     review: {
       background: "#fff7ed",
       color: "#c2410c",
       border: "1px solid #fed7aa",
     },
+
+    processing: {
+      background: "#fff7ed",
+      color: "#b45309",
+      border: "1px solid #fcd34d",
+    },
+
     locked: {
       background: "#fef2f2",
       color: "#b91c1c",
