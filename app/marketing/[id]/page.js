@@ -30,6 +30,7 @@ export default function MarketingPage() {
     useState(false);
 
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("success");
 
   useEffect(() => {
     loadPage();
@@ -57,9 +58,7 @@ export default function MarketingPage() {
         .eq("owner_id", user.id)
         .maybeSingle();
 
-      if (shopError) {
-        throw shopError;
-      }
+      if (shopError) throw shopError;
 
       if (!shopData) {
         router.replace("/setup-shop");
@@ -67,6 +66,7 @@ export default function MarketingPage() {
       }
 
       if (shopData.status !== "active") {
+        setMessageType("error");
         setMessage("حساب المحل غير نشط حاليًا.");
         return;
       }
@@ -81,9 +81,7 @@ export default function MarketingPage() {
           .eq("shop_id", shopData.id)
           .maybeSingle();
 
-      if (productError) {
-        throw productError;
-      }
+      if (productError) throw productError;
 
       if (!productData) {
         router.replace("/products");
@@ -101,10 +99,6 @@ export default function MarketingPage() {
         return;
       }
 
-      /*
-       * إذا كان المنتج غير واضح أو يحتاج مراجعة،
-       * نتحقق هل التاجر وافق سابقًا على إقرار المسؤولية.
-       */
       const needsResponsibility =
         isProductUnclear(productData);
 
@@ -169,6 +163,7 @@ export default function MarketingPage() {
     } catch (error) {
       console.error(error);
 
+      setMessageType("error");
       setMessage(
         error?.message ||
           "حدث خطأ أثناء تحميل صفحة التسويق."
@@ -206,19 +201,19 @@ export default function MarketingPage() {
           }
         );
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       setResponsibilityAccepted(true);
       setShowResponsibility(false);
 
+      setMessageType("success");
       setMessage(
         "تم تسجيل إقرار المسؤولية. يمكنك الآن متابعة التسويق."
       );
     } catch (error) {
       console.error(error);
 
+      setMessageType("error");
       setMessage(
         error?.message ||
           "تعذر تسجيل إقرار المسؤولية."
@@ -236,22 +231,20 @@ export default function MarketingPage() {
       product.safety_status === "locked";
 
     if (isLocked) {
+      setMessageType("error");
       setMessage(
         "🔒 هذا المنتج مقفول ولا يمكن إنشاء محتوى تسويقي له."
       );
       return;
     }
 
-    /*
-     * إذا كان المنتج غير واضح،
-     * يجب أن تكون موافقة المسؤولية موجودة أولًا.
-     */
     if (
       isProductUnclear(product) &&
       !responsibilityAccepted
     ) {
       setShowResponsibility(true);
 
+      setMessageType("error");
       setMessage(
         "⚠️ يجب قراءة إقرار المسؤولية والموافقة عليه قبل متابعة التسويق."
       );
@@ -263,15 +256,18 @@ export default function MarketingPage() {
     setMessage("");
 
     try {
-      const response = await fetch("/api/generate-marketing", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          product,
-        }),
-      });
+      const response = await fetch(
+        "/api/generate-marketing",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            product,
+          }),
+        }
+      );
 
       const result = await response.json();
 
@@ -320,9 +316,7 @@ export default function MarketingPage() {
         .select()
         .single();
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       setMarketing(data);
 
@@ -338,14 +332,17 @@ export default function MarketingPage() {
       setProduct({
         ...product,
         ai_status: "completed",
+        updated_at: new Date().toISOString(),
       });
 
+      setMessageType("success");
       setMessage(
         "تم إنشاء المحتوى التسويقي بنجاح."
       );
     } catch (error) {
       console.error(error);
 
+      setMessageType("error");
       setMessage(
         error?.message ||
           "حدث خطأ أثناء إنشاء المحتوى التسويقي."
@@ -361,12 +358,25 @@ export default function MarketingPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
+          background: "#f7f8fa",
           padding: 30,
           fontFamily: "Arial, sans-serif",
           textAlign: "center",
         }}
       >
-        جاري تحميل صفحة التسويق...
+        <div
+          style={{
+            maxWidth: 600,
+            margin: "80px auto",
+            background: "#fff",
+            padding: 30,
+            borderRadius: 20,
+            boxShadow:
+              "0 5px 25px rgba(0,0,0,0.06)",
+          }}
+        >
+          جاري تحميل صفحة التسويق...
+        </div>
       </main>
     );
   }
@@ -377,6 +387,7 @@ export default function MarketingPage() {
         dir="rtl"
         style={{
           minHeight: "100vh",
+          background: "#f7f8fa",
           padding: 30,
           fontFamily: "Arial, sans-serif",
         }}
@@ -384,7 +395,7 @@ export default function MarketingPage() {
         <div
           style={{
             maxWidth: 700,
-            margin: "0 auto",
+            margin: "50px auto",
             background: "#fff",
             padding: 25,
             borderRadius: 18,
@@ -442,14 +453,40 @@ export default function MarketingPage() {
               "0 5px 25px rgba(0,0,0,0.06)",
           }}
         >
-          <h1 style={{ marginTop: 0 }}>
-            🚀 التسويق الذكي
-          </h1>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "flex-start",
+              gap: 15,
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h1
+                style={{
+                  marginTop: 0,
+                  marginBottom: 8,
+                }}
+              >
+                🚀 التسويق الذكي
+              </h1>
 
-          <p style={{ color: "#666" }}>
-            إنشاء المحتوى التسويقي للمنتج:
-            <strong> {product.name}</strong>
-          </p>
+              <p
+                style={{
+                  color: "#666",
+                  marginTop: 0,
+                }}
+              >
+                إنشاء المحتوى التسويقي للمنتج:
+                <strong> {product.name}</strong>
+              </p>
+            </div>
+
+            <StatusBadge
+              product={product}
+            />
+          </div>
 
           {isLocked ? (
             <div
@@ -457,26 +494,45 @@ export default function MarketingPage() {
                 marginTop: 20,
                 padding: 20,
                 borderRadius: 16,
-                background: "#fff3cd",
-                border: "1px solid #ffe08a",
+                background: "#fff1f1",
+                border: "1px solid #f1b5b5",
                 lineHeight: 1.9,
               }}
             >
               <div
                 style={{
-                  fontSize: 24,
+                  fontSize: 28,
                   marginBottom: 8,
                 }}
               >
                 🔒
               </div>
 
-              <strong>المنتج مقفول</strong>
+              <strong>
+                المنتج مقفول
+              </strong>
 
-              <p style={{ marginBottom: 0 }}>
-                لا يمكن إنشاء محتوى تسويقي لهذا المنتج
-                حاليًا بسبب وجود حالة تستدعي المراجعة.
+              <p>
+                لا يمكن إنشاء محتوى تسويقي لهذا
+                المنتج حاليًا بسبب وجود حالة تستدعي
+                المراجعة.
               </p>
+
+              {product.safety_reason && (
+                <div
+                  style={{
+                    padding: 12,
+                    background: "#fff",
+                    borderRadius: 10,
+                    color: "#8a2222",
+                  }}
+                >
+                  <strong>
+                    السبب:
+                  </strong>{" "}
+                  {product.safety_reason}
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -513,8 +569,9 @@ export default function MarketingPage() {
                     </h2>
 
                     <p>
-                      لم يتمكن النظام من التحقق بشكل
-                      كافٍ من بعض معلومات هذا المنتج.
+                      لم يتمكن النظام من التحقق
+                      بشكل كافٍ من بعض معلومات هذا
+                      المنتج.
                     </p>
 
                     <p>
@@ -720,7 +777,18 @@ export default function MarketingPage() {
                 marginTop: 18,
                 padding: 14,
                 borderRadius: 12,
-                background: "#eef7ee",
+                background:
+                  messageType === "error"
+                    ? "#fff1f1"
+                    : "#eef7ee",
+                border:
+                  messageType === "error"
+                    ? "1px solid #f1c0c0"
+                    : "1px solid #cce8cc",
+                color:
+                  messageType === "error"
+                    ? "#9b2226"
+                    : "#256029",
                 lineHeight: 1.7,
               }}
             >
@@ -730,7 +798,31 @@ export default function MarketingPage() {
 
           {marketing && !isLocked && (
             <div style={{ marginTop: 30 }}>
-              <h2>📣 المحتوى التسويقي</h2>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <h2 style={{ margin: 0 }}>
+                  📣 المحتوى التسويقي
+                </h2>
+
+                <span
+                  style={{
+                    background: "#eef7ee",
+                    color: "#256029",
+                    padding: "7px 11px",
+                    borderRadius: 20,
+                    fontSize: 13,
+                  }}
+                >
+                  ✅ جاهز
+                </span>
+              </div>
 
               <MarketingSection
                 title="الوصف التسويقي"
@@ -853,12 +945,6 @@ function isProductUnclear(product) {
       .trim()
       .toLowerCase();
 
-  /*
-   * المخالفة والقفل لها مسار مختلف.
-   * هنا نبحث فقط عن المنتج الذي يحتاج
-   * إقرار مسؤولية بسبب عدم وضوح المعلومات.
-   */
-
   if (
     safety === "locked" ||
     verification === "locked"
@@ -889,10 +975,6 @@ function isProductUnclear(product) {
     return true;
   }
 
-  /*
-   * إذا كانت البيانات الأساسية ناقصة بشكل واضح،
-   * نعتبر المنتج غير واضح.
-   */
   const hasName = Boolean(
     String(product.name || "").trim()
   );
@@ -919,6 +1001,64 @@ function isProductUnclear(product) {
   }
 
   return false;
+}
+
+function StatusBadge({ product }) {
+  const isLocked =
+    product.verification_status === "locked" ||
+    product.safety_status === "locked";
+
+  if (isLocked) {
+    return (
+      <span
+        style={{
+          background: "#fff1f1",
+          color: "#9b2226",
+          border: "1px solid #f1c0c0",
+          padding: "8px 13px",
+          borderRadius: 20,
+          fontSize: 13,
+          fontWeight: "bold",
+        }}
+      >
+        🔒 مقفل
+      </span>
+    );
+  }
+
+  if (isProductUnclear(product)) {
+    return (
+      <span
+        style={{
+          background: "#fff8e1",
+          color: "#8a6500",
+          border: "1px solid #f4d477",
+          padding: "8px 13px",
+          borderRadius: 20,
+          fontSize: 13,
+          fontWeight: "bold",
+        }}
+      >
+        🟡 يحتاج تأكيد
+      </span>
+    );
+  }
+
+  return (
+    <span
+      style={{
+        background: "#eef7ee",
+        color: "#256029",
+        border: "1px solid #cce8cc",
+        padding: "8px 13px",
+        borderRadius: 20,
+        fontSize: 13,
+        fontWeight: "bold",
+      }}
+    >
+      🟢 جاهز للتسويق
+    </span>
+  );
 }
 
 function InfoCard({ title, value }) {
