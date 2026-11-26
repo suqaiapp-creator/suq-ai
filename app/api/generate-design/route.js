@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { buildDesignPrompt } from "../../../lib/design-generator";
 
 export const runtime = "nodejs";
 
@@ -170,62 +171,16 @@ export async function POST(request) {
       );
     }
 
-    const designPrompt = {
+    const designPrompt = buildDesignPrompt({
+      product,
+      shop,
       mode,
-      template:
-        mode === "simple"
-          ? template || null
-          : null,
-
-      style:
-        mode === "professional"
-          ? style || null
-          : null,
-
-      background:
-        mode === "professional"
-          ? background || null
-          : null,
-
+      template,
+      style,
+      background,
       format,
-
-      description:
-        typeof description === "string"
-          ? description.trim()
-          : "",
-
-      shop: {
-        id: shop.id,
-        name: shop.name,
-        logo_url: shop.logo_url,
-        phone: shop.phone,
-        whatsapp: shop.whatsapp,
-        email: shop.email,
-        instagram: shop.instagram,
-        tiktok: shop.tiktok,
-        snapchat: shop.snapchat,
-        website: shop.website,
-      },
-
-      product: {
-        id: product.id,
-        name: product.name,
-        brand: product.brand,
-        category: product.category,
-        price: product.price,
-        currency: product.currency,
-        description: product.description,
-        image_url: product.image_url,
-      },
-
-      rules: {
-        preserve_original_product_image: true,
-        do_not_change_product_identity: true,
-        do_not_invent_product_information: true,
-        use_shop_identity: true,
-        advertising_first: true,
-      },
-    };
+      description,
+    });
 
     const { data: design, error: insertError } =
       await supabase
