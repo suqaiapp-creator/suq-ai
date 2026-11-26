@@ -209,7 +209,7 @@ function StatusBadge({ type, children }) {
   return (
     <span
       style={{
-        ...styles[type],
+        ...(styles[type] || styles.pending),
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
@@ -459,9 +459,15 @@ export default function DesignsPage() {
 
       if (!designError) {
         setDesigns(designData || []);
+      } else {
+        console.error(
+          "DESIGNS FETCH ERROR:",
+          designError
+        );
       }
     } catch (err) {
       console.error(err);
+
       setError(
         "حدث خطأ أثناء تحميل صفحة التصميم."
       );
@@ -502,6 +508,7 @@ export default function DesignsPage() {
       console.error(
         acceptanceError
       );
+
       return false;
     }
 
@@ -553,6 +560,7 @@ export default function DesignsPage() {
       );
     } catch (err) {
       console.error(err);
+
       setError(
         "تعذر حفظ تأكيد المسؤولية."
       );
@@ -595,6 +603,7 @@ export default function DesignsPage() {
         setError(
           "هذا المنتج يحتاج تأكيد مسؤولية المنتج قبل إنشاء التصميم."
         );
+
         return;
       }
 
@@ -702,7 +711,7 @@ export default function DesignsPage() {
       }
 
       setMessage(
-        "تم تجهيز طلب التصميم بنجاح. التصميم بانتظار مرحلة التوليد."
+        "تم إنشاء التصميم بنجاح."
       );
 
       await loadPage();
@@ -739,6 +748,7 @@ export default function DesignsPage() {
           justifyContent: "center",
           fontFamily:
             "Arial, sans-serif",
+          color: "#17201c",
         }}
       >
         جاري تحميل استوديو التصميم...
@@ -1596,7 +1606,7 @@ export default function DesignsPage() {
                   fontSize: 19,
                 }}
               >
-                {mode === "simple" ? "4" : "4"}. مقاس الإعلان
+                4. مقاس الإعلان
               </h2>
 
               <div
@@ -2254,6 +2264,7 @@ export default function DesignsPage() {
                   >
                     ✓
                   </span>
+
                   <span>
                     المنتج هو محور الإعلان
                   </span>
@@ -2277,6 +2288,7 @@ export default function DesignsPage() {
                   >
                     ✓
                   </span>
+
                   <span>
                     الحفاظ على هوية المنتج الأصلية
                   </span>
@@ -2300,6 +2312,7 @@ export default function DesignsPage() {
                   >
                     ✓
                   </span>
+
                   <span>
                     عدم اختراع معلومات عن المنتج
                   </span>
@@ -2323,6 +2336,7 @@ export default function DesignsPage() {
                   >
                     ✓
                   </span>
+
                   <span>
                     استخدام هوية المحل
                   </span>
@@ -2346,6 +2360,7 @@ export default function DesignsPage() {
                   >
                     ✓
                   </span>
+
                   <span>
                     التصميم موجه للإعلان والنشر
                   </span>
@@ -2412,7 +2427,7 @@ export default function DesignsPage() {
                 <div
                   style={{
                     display: "grid",
-                    gap: 10,
+                    gap: 14,
                   }}
                 >
                   {designs
@@ -2438,59 +2453,203 @@ export default function DesignsPage() {
                           style={{
                             border:
                               "1px solid #e5ebe7",
-                            borderRadius: 12,
-                            padding: 11,
+                            borderRadius: 16,
+                            overflow:
+                              "hidden",
+                            background:
+                              "#fff",
                           }}
                         >
-                          <div
-                            style={{
-                              fontWeight: 800,
-                              fontSize: 13,
-                              marginBottom: 8,
-                              lineHeight:
-                                1.5,
-                            }}
-                          >
-                            {product?.name ||
-                              "منتج"}
-                          </div>
-
-                          <div
-                            style={{
-                              display:
-                                "flex",
-                              justifyContent:
-                                "space-between",
-                              alignItems:
-                                "center",
-                              gap: 8,
-                              flexWrap:
-                                "wrap",
-                            }}
-                          >
-                            <span
+                          {/* صورة التصميم */}
+                          {design.status ===
+                            "completed" &&
+                          design.image_url ? (
+                            <div
                               style={{
-                                color:
-                                  "#66736d",
-                                fontSize: 12,
+                                width:
+                                  "100%",
+                                background:
+                                  "#f5f7f6",
+                                display:
+                                  "flex",
+                                justifyContent:
+                                  "center",
+                                alignItems:
+                                  "center",
+                                padding: 10,
+                                boxSizing:
+                                  "border-box",
                               }}
                             >
-                              {design.format ||
-                                "1:1"}
-                            </span>
-
-                            <StatusBadge
-                              type={
-                                status.type
-                              }
+                              <img
+                                src={
+                                  design.image_url
+                                }
+                                alt={
+                                  product?.name ||
+                                  "التصميم"
+                                }
+                                style={{
+                                  display:
+                                    "block",
+                                  width:
+                                    "100%",
+                                  maxHeight: 420,
+                                  objectFit:
+                                    "contain",
+                                  borderRadius: 10,
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                minHeight:
+                                  180,
+                                background:
+                                  "#f8faf9",
+                                display:
+                                  "flex",
+                                alignItems:
+                                  "center",
+                                justifyContent:
+                                  "center",
+                                color:
+                                  "#7a857f",
+                                fontSize: 13,
+                              }}
                             >
-                              {
-                                status.icon
-                              }{" "}
-                              {
-                                status.text
-                              }
-                            </StatusBadge>
+                              {design.status ===
+                              "failed"
+                                ? "تعذر إنشاء التصميم"
+                                : "جاري تجهيز التصميم..."}
+                            </div>
+                          )}
+
+                          {/* معلومات التصميم */}
+                          <div
+                            style={{
+                              padding: 13,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight: 900,
+                                fontSize: 14,
+                                marginBottom: 8,
+                                lineHeight:
+                                  1.5,
+                              }}
+                            >
+                              {product?.name ||
+                                "منتج"}
+                            </div>
+
+                            <div
+                              style={{
+                                display:
+                                  "flex",
+                                justifyContent:
+                                  "space-between",
+                                alignItems:
+                                  "center",
+                                gap: 8,
+                                flexWrap:
+                                  "wrap",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color:
+                                    "#66736d",
+                                  fontSize: 12,
+                                }}
+                              >
+                                مقاس{" "}
+                                {design.format ||
+                                  "1:1"}
+                              </span>
+
+                              <StatusBadge
+                                type={
+                                  status.type
+                                }
+                              >
+                                {
+                                  status.icon
+                                }{" "}
+                                {
+                                  status.text
+                                }
+                              </StatusBadge>
+                            </div>
+
+                            {/* أزرار التصميم */}
+                            {design.status ===
+                              "completed" &&
+                              design.image_url && (
+                                <div
+                                  style={{
+                                    display:
+                                      "flex",
+                                    gap: 8,
+                                    marginTop: 12,
+                                  }}
+                                >
+                                  <a
+                                    href={
+                                      design.image_url
+                                    }
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      flex: 1,
+                                      textAlign:
+                                        "center",
+                                      textDecoration:
+                                        "none",
+                                      background:
+                                        "#15803d",
+                                      color:
+                                        "#fff",
+                                      borderRadius: 10,
+                                      padding:
+                                        "10px 12px",
+                                      fontSize: 13,
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    👁️ عرض التصميم
+                                  </a>
+
+                                  <a
+                                    href={
+                                      design.image_url
+                                    }
+                                    download
+                                    style={{
+                                      flex: 1,
+                                      textAlign:
+                                        "center",
+                                      textDecoration:
+                                        "none",
+                                      background:
+                                        "#f0fdf4",
+                                      color:
+                                        "#166534",
+                                      border:
+                                        "1px solid #bbf7d0",
+                                      borderRadius: 10,
+                                      padding:
+                                        "10px 12px",
+                                      fontSize: 13,
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    ⬇️ تحميل
+                                  </a>
+                                </div>
+                              )}
                           </div>
                         </div>
                       );
@@ -2505,6 +2664,10 @@ export default function DesignsPage() {
       <style jsx>{`
         button {
           font-family: Arial, sans-serif;
+        }
+
+        a {
+          -webkit-tap-highlight-color: transparent;
         }
 
         @media (max-width: 900px) {
