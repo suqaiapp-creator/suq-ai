@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { buildDesignPrompt } from "../../../lib/design-generator";
 import { generateDesignImage } from "../../../lib/image-generator";
 import { logAIUsage } from "../../../lib/ai-usage";
+
 export const runtime = "nodejs";
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -14,23 +16,28 @@ const supabase = createClient(
     },
   }
 );
+
 const ALLOWED_MODES = [
   "simple",
   "professional",
 ];
+
 const ALLOWED_FORMATS = [
   "1:1",
   "4:5",
   "9:16",
   "16:9",
 ];
+
 function getErrorMessage(error) {
   if (!error) {
     return "خطأ غير معروف.";
   }
+
   if (typeof error === "string") {
     return error;
   }
+
   return (
     error.message ||
     error.error?.message ||
@@ -39,6 +46,7 @@ function getErrorMessage(error) {
     "خطأ غير معروف."
   );
 }
+
 async function markDesignFailed(
   designId,
   errorMessage,
@@ -47,6 +55,7 @@ async function markDesignFailed(
   if (!designId) {
     return;
   }
+
   try {
     await supabase
       .from("ad_images")
@@ -64,14 +73,18 @@ async function markDesignFailed(
     );
   }
 }
+
 export async function POST(request) {
   let designId = null;
+
   try {
     /*
      * 1. التحقق من الجلسة
      */
+
     const authHeader =
       request.headers.get("authorization");
+
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         {
@@ -81,9 +94,11 @@ export async function POST(request) {
         { status: 401 }
       );
     }
+
     const token = authHeader
       .replace("Bearer ", "")
       .trim();
+
     if (!token) {
       return NextResponse.json(
         {
@@ -93,27 +108,34 @@ export async function POST(request) {
         { status: 401 }
       );
     }
+
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser(token);
+
     if (userError || !user) {
       console.error(
         "Auth error:",
         userError
       );
+
       return NextResponse.json(
         {
           success: false,
-          error: "الجلسة غير صالحة. سجل الدخول مرة أخرى.",
+          error:
+            "الجلسة غير صالحة. سجل الدخول مرة أخرى.",
         },
         { status: 401 }
       );
     }
+
     /*
      * 2. قراءة الطلب
      */
+
     let body;
+
     try {
       body = await request.json();
     } catch {
@@ -125,6 +147,7 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
     const {
       productId,
       mode,
@@ -134,9 +157,11 @@ export async function POST(request) {
       format,
       description,
     } = body || {};
+
     /*
      * 3. التحقق من البيانات الأساسية
      */
+
     if (!productId) {
       return NextResponse.json(
         {
@@ -146,6 +171,7 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
     if (!ALLOWED_MODES.includes(mode)) {
       return NextResponse.json(
         {
@@ -155,6 +181,7 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
     if (!ALLOWED_FORMATS.includes(format)) {
       return NextResponse.json(
         {
@@ -164,9 +191,11 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
     /*
      * 4. جلب المنتج
      */
+
     const {
       data: product,
       error: productError,
@@ -175,74 +204,115 @@ export async function POST(request) {
       .select("*")
       .eq("id", productId)
       .single();
+
     if (productError || !product) {
       console.error(
         "Product fetch error:",
         productError
       );
+
       return NextResponse.json(
         {
           success: false,
           error: "المنتج غير موجود.",
+          details:
+            productError?.message || null,
         },
         { status: 404 }
       );
     }
+
     /*
-     * 5. التأكد من وجود المحل
+     * 5. التأكد من ارتباط المنتج بمحل
      */
+
     if (!product.shop_id) {
       return NextResponse.json(
         {
           success: false,
           error:
             "هذا المنتج غير مرتبط بمحل.",
+          productId: product.id,
+          productName: product.name,
+          shopId: null,
         },
         { status: 400 }
       );
     }
+
+    /*
+     * 6. جلب المحل المرتبط فعلياً بالمنتج
+     */
+
     const {
       data: shop,
       error: shopError,
     } = await supabase
       .from("shops")
-      .select("*")
+      .select(
+        "id, owner_id, name, description, logo_url, phone, whatsapp, email, instagram, tiktok, snapchat, website, address, emirate, country, currency, working_hours, status"
+      )
       .eq("id", product.shop_id)
-      .single();
+      .maybeSingle();
+
+    /*
+     * إذا لم نجد المحل، نرجع معلومات تشخيصية
+     * بدون استدعاء OpenAI.
+     */
+
     if (shopError || !shop) {
       console.error(
         "Shop fetch error:",
         shopError
       );
+
       return NextResponse.json(
         {
           success: false,
           error: "المحل غير موجود.",
+          debug: {
+            productId: product.id,
+            productName: product.name,
+            productShopId: product.shop_id,
+            shopQueryError:
+              shopError?.message || null,
+            currentUserId: user.id,
+          },
         },
         { status: 404 }
       );
     }
+
     /*
-     * 6. التأكد أن المستخدم هو صاحب المحل
+     * 7. التأكد أن المستخدم هو صاحب المحل
      */
+
     if (shop.owner_id !== user.id) {
       return NextResponse.json(
         {
           success: false,
           error:
             "غير مصرح لك باستخدام هذا المنتج.",
+          debug: {
+            productShopId: shop.id,
+            shopOwnerId: shop.owner_id,
+            currentUserId: user.id,
+          },
         },
         { status: 403 }
       );
     }
+
     /*
-     * 7. فحص حالة المنتج
+     * 8. فحص حالة المنتج
      */
+
     const isLocked =
       product.verification_status === "locked" ||
       product.safety_status === "locked" ||
       product.safety_status === "violation" ||
       product.safety_level === "critical";
+
     if (isLocked) {
       return NextResponse.json(
         {
@@ -254,12 +324,13 @@ export async function POST(request) {
         { status: 403 }
       );
     }
+
     /*
-     * 8. التحقق من وضوح المنتج
+     * 9. التحقق من وضوح المنتج
      *
      * عدم وضوح المعلومات ليس مخالفة.
-     * لذلك نطلب تأكيد المسؤولية فقط.
      */
+
     const isUnclear =
       product.verification_status === "review" ||
       product.verification_status === "unverified" ||
@@ -268,6 +339,7 @@ export async function POST(request) {
       !product.brand ||
       !product.category ||
       !product.description;
+
     if (isUnclear) {
       const {
         data: acceptance,
@@ -280,11 +352,13 @@ export async function POST(request) {
         .eq("user_id", user.id)
         .eq("product_id", product.id)
         .maybeSingle();
+
       if (acceptanceError) {
         console.error(
           "Responsibility acceptance error:",
           acceptanceError
         );
+
         return NextResponse.json(
           {
             success: false,
@@ -294,6 +368,7 @@ export async function POST(request) {
           { status: 500 }
         );
       }
+
       if (!acceptance) {
         return NextResponse.json(
           {
@@ -306,9 +381,11 @@ export async function POST(request) {
         );
       }
     }
+
     /*
-     * 9. التحقق من صورة المنتج
+     * 10. التحقق من صورة المنتج
      */
+
     if (!product.image_url) {
       return NextResponse.json(
         {
@@ -319,9 +396,11 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+
     /*
-     * 10. بناء تعليمات التصميم
+     * 11. بناء تعليمات التصميم
      */
+
     const designPrompt = buildDesignPrompt({
       product,
       shop,
@@ -332,9 +411,11 @@ export async function POST(request) {
       format,
       description,
     });
+
     /*
-     * 11. إنشاء سجل التصميم
+     * 12. إنشاء سجل التصميم
      */
+
     const {
       data: design,
       error: insertError,
@@ -357,11 +438,13 @@ export async function POST(request) {
         "id, status, created_at"
       )
       .single();
+
     if (insertError || !design) {
       console.error(
         "Create design error:",
         insertError
       );
+
       return NextResponse.json(
         {
           success: false,
@@ -373,10 +456,13 @@ export async function POST(request) {
         { status: 500 }
       );
     }
+
     designId = design.id;
+
     /*
-     * 12. تغيير الحالة إلى generating
+     * 13. تغيير الحالة إلى generating
      */
+
     const {
       error: generatingError,
     } = await supabase
@@ -389,16 +475,19 @@ export async function POST(request) {
         error_code: null,
       })
       .eq("id", designId);
+
     if (generatingError) {
       console.error(
         "Generating status error:",
         generatingError
       );
+
       await markDesignFailed(
         designId,
         generatingError.message,
         "STATUS_UPDATE_FAILED"
       );
+
       return NextResponse.json(
         {
           success: false,
@@ -411,9 +500,11 @@ export async function POST(request) {
         { status: 500 }
       );
     }
+
     /*
-     * 13. إنشاء الصورة
+     * 14. إنشاء الصورة
      */
+
     try {
       const generated =
         await generateDesignImage({
@@ -422,28 +513,35 @@ export async function POST(request) {
           prompt: designPrompt,
           format,
         });
+
       if (!generated?.b64_json) {
         throw new Error(
           "لم يتم استلام الصورة الناتجة من محرك الصور."
         );
       }
+
       /*
-       * 14. تحويل الصورة
+       * 15. تحويل الصورة
        */
+
       const imageBuffer = Buffer.from(
         generated.b64_json,
         "base64"
       );
+
       if (!imageBuffer.length) {
         throw new Error(
           "بيانات الصورة الناتجة فارغة."
         );
       }
+
       /*
-       * 15. حفظ الصورة في Storage
+       * 16. حفظ الصورة في Storage
        */
+
       const storagePath =
         `${shop.id}/${product.id}/${designId}.png`;
+
       const {
         error: uploadError,
       } = await supabase.storage
@@ -456,31 +554,39 @@ export async function POST(request) {
             upsert: false,
           }
         );
+
       if (uploadError) {
         throw new Error(
           `تعذر حفظ الصورة في التخزين: ${uploadError.message}`
         );
       }
+
       /*
-       * 16. الحصول على رابط الصورة
+       * 17. الحصول على رابط الصورة
        */
+
       const {
         data: publicUrlData,
       } = supabase.storage
         .from("ad-images")
         .getPublicUrl(storagePath);
+
       const imageUrl =
         publicUrlData?.publicUrl;
+
       if (!imageUrl) {
         throw new Error(
           "تعذر الحصول على رابط الصورة الناتجة."
         );
       }
+
       /*
-       * 17. تحديث التصميم كمكتمل
+       * 18. تحديث التصميم كمكتمل
        */
+
       const completedAt =
         new Date().toISOString();
+
       const {
         error: updateError,
       } = await supabase
@@ -494,14 +600,17 @@ export async function POST(request) {
           error_code: null,
         })
         .eq("id", designId);
+
       if (updateError) {
         throw new Error(
           `تعذر تحديث سجل التصميم: ${updateError.message}`
         );
       }
+
       /*
-       * 18. تسجيل استخدام AI
+       * 19. تسجيل استخدام AI
        */
+
       try {
         await logAIUsage({
           userId: user.id,
@@ -531,9 +640,11 @@ export async function POST(request) {
           usageError
         );
       }
+
       /*
-       * 19. النجاح
+       * 20. النجاح
        */
+
       return NextResponse.json({
         success: true,
         designId,
@@ -545,15 +656,18 @@ export async function POST(request) {
         "IMAGE GENERATION ERROR:",
         generationError
       );
+
       const errorMessage =
         getErrorMessage(
           generationError
         );
+
       await markDesignFailed(
         designId,
         errorMessage,
         "GENERATION_FAILED"
       );
+
       try {
         await logAIUsage({
           userId: user.id,
@@ -577,11 +691,7 @@ export async function POST(request) {
           usageError
         );
       }
-      /*
-       * مهم:
-       * نرجع الخطأ الحقيقي للواجهة
-       * حتى نعرف المشكلة بدون تخمين.
-       */
+
       return NextResponse.json(
         {
           success: false,
@@ -597,8 +707,10 @@ export async function POST(request) {
       "GENERATE DESIGN API ERROR:",
       error
     );
+
     const errorMessage =
       getErrorMessage(error);
+
     if (designId) {
       await markDesignFailed(
         designId,
@@ -606,6 +718,7 @@ export async function POST(request) {
         "UNEXPECTED_ERROR"
       );
     }
+
     return NextResponse.json(
       {
         success: false,
