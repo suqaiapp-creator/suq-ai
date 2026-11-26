@@ -60,7 +60,9 @@ export default function MarketingPage() {
           .eq("owner_id", currentUser.id)
           .maybeSingle();
 
-      if (shopError) throw shopError;
+      if (shopError) {
+        throw shopError;
+      }
 
       if (!shopData) {
         router.replace("/setup-shop");
@@ -83,7 +85,9 @@ export default function MarketingPage() {
           .eq("shop_id", shopData.id)
           .maybeSingle();
 
-      if (productError) throw productError;
+      if (productError) {
+        throw productError;
+      }
 
       if (!productData) {
         router.replace("/products");
@@ -154,18 +158,7 @@ export default function MarketingPage() {
       }
 
       if (marketingData) {
-        const marketingDate = new Date(
-          marketingData.created_at
-        ).getTime();
-
-        const productDate = new Date(
-          productData.updated_at ||
-            productData.created_at
-        ).getTime();
-
-        if (marketingDate >= productDate) {
-          setMarketing(marketingData);
-        }
+        setMarketing(marketingData);
       }
     } catch (error) {
       console.error(error);
@@ -208,7 +201,9 @@ export default function MarketingPage() {
           }
         );
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
 
       setResponsibilityAccepted(true);
       setShowResponsibility(false);
@@ -231,7 +226,13 @@ export default function MarketingPage() {
   }
 
   async function generateMarketing() {
-    if (!product || !shop || generating) return;
+    if (
+      !product ||
+      !shop ||
+      generating
+    ) {
+      return;
+    }
 
     const locked =
       product.verification_status === "locked" ||
@@ -250,19 +251,41 @@ export default function MarketingPage() {
       !responsibilityAccepted
     ) {
       setShowResponsibility(true);
-
       setMessageType("error");
       setMessage(
         "⚠️ يجب الموافقة على إقرار المسؤولية قبل متابعة التسويق."
       );
-
       return;
     }
 
     setGenerating(true);
     setMessage("");
 
+    let createdMarketingId = null;
+
     try {
+      /*
+       * ننشئ سجلًا بحالة processing أولًا.
+       * هذا يجعل النظام يعرف أن عملية التوليد بدأت.
+       */
+      const { data: processingRecord, error: processingError } =
+        await supabase
+          .from("marketing_contents")
+          .insert({
+            product_id: product.id,
+            shop_id: shop.id,
+            status: "processing",
+          })
+          .select()
+          .single();
+
+      if (processingError) {
+        throw processingError;
+      }
+
+      createdMarketingId = processingRecord.id;
+      setMarketing(processingRecord);
+
       const response = await fetch(
         "/api/generate-marketing",
         {
@@ -272,6 +295,7 @@ export default function MarketingPage() {
           },
           body: JSON.stringify({
             product,
+            shop,
           }),
         }
       );
@@ -288,64 +312,82 @@ export default function MarketingPage() {
       const generated =
         result?.marketing || result;
 
-      const { data, error } = await supabase
+      const updatePayload = {
+        marketing_description:
+          generated.marketing_description ||
+          null,
+
+        instagram:
+          generated.instagram ||
+          null,
+
+        whatsapp:
+          generated.whatsapp ||
+          null,
+
+        tiktok_snapchat:
+          generated.tiktok_snapchat ||
+          null,
+
+        seo_title:
+          generated.seo_title ||
+          null,
+
+        seo_description:
+          generated.seo_description ||
+          null,
+
+        seo_keywords:
+          generated.seo_keywords ||
+          null,
+
+        call_to_action:
+          generated.call_to_action ||
+          null,
+
+        status: "completed",
+
+        updated_at:
+          new Date().toISOString(),
+      };
+
+      const {
+        data: completedMarketing,
+        error: updateError,
+      } = await supabase
         .from("marketing_contents")
-        .insert({
-          product_id: product.id,
-          shop_id: shop.id,
-
-          marketing_description:
-            generated.marketing_description ||
-            null,
-
-          instagram:
-            generated.instagram ||
-            null,
-
-          whatsapp:
-            generated.whatsapp ||
-            null,
-
-          tiktok_snapchat:
-            generated.tiktok_snapchat ||
-            null,
-
-          seo_title:
-            generated.seo_title ||
-            null,
-
-          seo_description:
-            generated.seo_description ||
-            null,
-
-          seo_keywords:
-            generated.seo_keywords ||
-            null,
-
-          call_to_action:
-            generated.call_to_action ||
-            null,
-
-          status: "completed",
-        })
+        .update(updatePayload)
+        .eq("id", createdMarketingId)
+        .eq("product_id", product.id)
+        .eq("shop_id", shop.id)
         .select()
         .single();
 
-      if (error) throw error;
+      if (updateError) {
+        throw updateError;
+      }
 
-      setMarketing(data);
+      setMarketing(completedMarketing);
 
       const newUpdatedAt =
         new Date().toISOString();
 
-      await supabase
-        .from("products")
-        .update({
-          ai_status: "completed",
-          updated_at: newUpdatedAt,
-        })
-        .eq("id", product.id)
-        .eq("shop_id", shop.id);
+      const { error: productUpdateError } =
+        await supabase
+          .from("products")
+          .update({
+            ai_status: "completed",
+            updated_at: newUpdatedAt,
+          })
+          .eq("id", product.id)
+          .eq("shop_id", shop.id);
+
+      if (productUpdateError) {
+        console.warn(
+          "Product status update warning:",
+          productUpdateError
+        );
+      }
 
       setProduct((previous) => ({
         ...previous,
@@ -360,20 +402,41 @@ export default function MarketingPage() {
     } catch (error) {
       console.error(error);
 
+      /*
+       * إذا فشل التوليد وكان عندنا سجل processing
+       * نحوله إلى failed بدل تركه معلقًا.
+       */
+      if (createdMarketingId) {
+        await supabase
+          .from("marketing_contents")
+          .update({
+            status: "failed",
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", createdMarketingId)
+          .eq("shop_id", shop.id);
+      }
+
       setMessageType("error");
       setMessage(
         error?.message ||
           "حدث خطأ أثناء إنشاء المحتوى التسويقي."
       );
+
+      /*
+       * لا نعرض السجل الفاشل كمحتوى جاهز.
+       */
+      if (createdMarketingId) {
+        setMarketing(null);
+      }
     } finally {
       setGenerating(false);
     }
   }
 
   if (loading) {
-    return (
-      <LoadingScreen />
-    );
+    return <LoadingScreen />;
   }
 
   if (!product) {
@@ -424,6 +487,9 @@ export default function MarketingPage() {
   const productNeedsResponsibility =
     isProductUnclear(product);
 
+  const marketingProcessing =
+    marketing?.status === "processing";
+
   return (
     <main
       dir="rtl"
@@ -444,7 +510,8 @@ export default function MarketingPage() {
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent:
+                "space-between",
               alignItems: "flex-start",
               gap: 18,
               flexWrap: "wrap",
@@ -458,7 +525,8 @@ export default function MarketingPage() {
                   gap: 7,
                   background: "#ecfdf5",
                   color: "#047857",
-                  border: "1px solid #bbf7d0",
+                  border:
+                    "1px solid #bbf7d0",
                   padding: "7px 11px",
                   borderRadius: 20,
                   fontSize: 13,
@@ -536,7 +604,9 @@ export default function MarketingPage() {
             <InfoCard
               title="حالة التسويق"
               value={
-                marketing
+                marketingProcessing
+                  ? "جاري الإنشاء"
+                  : marketing
                   ? "محتوى جاهز"
                   : "لم يتم الإنشاء"
               }
@@ -580,7 +650,9 @@ export default function MarketingPage() {
                   lineHeight: 1.7,
                 }}
               >
-                <strong>سبب القفل:</strong>{" "}
+                <strong>
+                  سبب القفل:
+                </strong>{" "}
                 {product.safety_reason}
               </div>
             )}
@@ -622,7 +694,9 @@ export default function MarketingPage() {
               !responsibilityAccepted &&
               showResponsibility && (
                 <div
-                  style={responsibilityCardStyle}
+                  style={
+                    responsibilityCardStyle
+                  }
                 >
                   <div
                     style={{
@@ -763,7 +837,8 @@ export default function MarketingPage() {
                       height: 280,
                       objectFit: "contain",
                       borderRadius: 16,
-                      background: "#f8fafc",
+                      background:
+                        "#f8fafc",
                       border:
                         "1px solid #e2e8f0",
                     }}
@@ -773,12 +848,15 @@ export default function MarketingPage() {
                     style={{
                       height: 280,
                       borderRadius: 16,
-                      background: "#f8fafc",
+                      background:
+                        "#f8fafc",
                       border:
                         "1px solid #e2e8f0",
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      alignItems:
+                        "center",
+                      justifyContent:
+                        "center",
                       color: "#94a3b8",
                     }}
                   >
@@ -815,7 +893,8 @@ export default function MarketingPage() {
                     display: "flex",
                     justifyContent:
                       "space-between",
-                    alignItems: "center",
+                    alignItems:
+                      "center",
                     gap: 10,
                     flexWrap: "wrap",
                   }}
@@ -841,11 +920,28 @@ export default function MarketingPage() {
                     </p>
                   </div>
 
-                  {marketing && (
+                  {marketing?.status ===
+                    "completed" && (
                     <span
                       style={readyBadge}
                     >
                       ✅ جاهز
+                    </span>
+                  )}
+
+                  {marketingProcessing && (
+                    <span
+                      style={{
+                        ...readyBadge,
+                        background:
+                          "#fffbeb",
+                        color:
+                          "#a16207",
+                        border:
+                          "1px solid #fde68a",
+                      }}
+                    >
+                      ⏳ جاري الإنشاء
                     </span>
                   )}
                 </div>
@@ -901,6 +997,7 @@ export default function MarketingPage() {
                   }
                   disabled={
                     generating ||
+                    marketingProcessing ||
                     (productNeedsResponsibility &&
                       !responsibilityAccepted)
                   }
@@ -910,24 +1007,28 @@ export default function MarketingPage() {
                     marginTop: 20,
                     background:
                       generating ||
+                      marketingProcessing ||
                       (productNeedsResponsibility &&
                         !responsibilityAccepted)
                         ? "#94a3b8"
                         : "#059669",
                     cursor:
                       generating ||
+                      marketingProcessing ||
                       (productNeedsResponsibility &&
                         !responsibilityAccepted)
                         ? "not-allowed"
                         : "pointer",
                   }}
                 >
-                  {generating
+                  {generating ||
+                  marketingProcessing
                     ? "⏳ جاري إنشاء المحتوى..."
                     : productNeedsResponsibility &&
                       !responsibilityAccepted
                     ? "⚠️ وافق على الإقرار أولًا"
-                    : marketing
+                    : marketing?.status ===
+                      "completed"
                     ? "🔄 إنشاء محتوى جديد"
                     : "🚀 إنشاء المحتوى التسويقي"}
                 </button>
@@ -941,15 +1042,18 @@ export default function MarketingPage() {
                   padding: 14,
                   borderRadius: 13,
                   background:
-                    messageType === "error"
+                    messageType ===
+                    "error"
                       ? "#fef2f2"
                       : "#ecfdf5",
                   border:
-                    messageType === "error"
+                    messageType ===
+                    "error"
                       ? "1px solid #fecaca"
                       : "1px solid #bbf7d0",
                   color:
-                    messageType === "error"
+                    messageType ===
+                    "error"
                       ? "#b91c1c"
                       : "#047857",
                   lineHeight: 1.7,
@@ -960,108 +1064,169 @@ export default function MarketingPage() {
               </div>
             )}
 
-            {marketing && (
-              <div
-                style={{
-                  ...cardStyle,
-                  marginTop: 18,
-                }}
-              >
+            {marketing &&
+              marketing.status ===
+                "completed" && (
                 <div
                   style={{
-                    display: "flex",
-                    justifyContent:
-                      "space-between",
-                    alignItems: "center",
-                    gap: 10,
-                    flexWrap: "wrap",
+                    ...cardStyle,
+                    marginTop: 18,
                   }}
                 >
-                  <div>
-                    <h2
-                      style={{
-                        margin:
-                          "0 0 5px",
-                      }}
-                    >
-                      📣 المحتوى التسويقي
-                    </h2>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent:
+                        "space-between",
+                      alignItems:
+                        "center",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div>
+                      <h2
+                        style={{
+                          margin:
+                            "0 0 5px",
+                        }}
+                      >
+                        📣 المحتوى التسويقي
+                      </h2>
 
-                    <p
-                      style={{
-                        margin: 0,
-                        color: "#64748b",
-                      }}
+                      <p
+                        style={{
+                          margin: 0,
+                          color: "#64748b",
+                        }}
+                      >
+                        المحتوى الذي تم إنشاؤه
+                        لهذا المنتج.
+                      </p>
+                    </div>
+
+                    <span
+                      style={readyBadge}
                     >
-                      المحتوى الذي تم إنشاؤه
-                      لهذا المنتج.
-                    </p>
+                      🟢 مكتمل
+                    </span>
                   </div>
 
-                  <span
-                    style={readyBadge}
+                  <MarketingSection
+                    title="📝 الوصف التسويقي"
+                    value={
+                      marketing.marketing_description
+                    }
+                  />
+
+                  <MarketingSection
+                    title="📸 Instagram"
+                    value={
+                      marketing.instagram
+                    }
+                  />
+
+                  <MarketingSection
+                    title="💬 WhatsApp"
+                    value={
+                      marketing.whatsapp
+                    }
+                  />
+
+                  <MarketingSection
+                    title="🎬 TikTok / Snapchat"
+                    value={
+                      marketing.tiktok_snapchat
+                    }
+                  />
+
+                  <MarketingSection
+                    title="🔎 SEO Title"
+                    value={
+                      marketing.seo_title
+                    }
+                  />
+
+                  <MarketingSection
+                    title="🔎 SEO Description"
+                    value={
+                      marketing.seo_description
+                    }
+                  />
+
+                  <MarketingSection
+                    title="🔑 SEO Keywords"
+                    value={
+                      marketing.seo_keywords
+                    }
+                  />
+
+                  <MarketingSection
+                    title="🎯 Call To Action"
+                    value={
+                      marketing.call_to_action
+                    }
+                  />
+
+                  <div
+                    style={{
+                      marginTop: 20,
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(180px, 1fr))",
+                      gap: 10,
+                    }}
                   >
-                    🟢 مكتمل
-                  </span>
+                    <ActionButton
+                      onClick={() =>
+                        copyText(
+                          marketing.marketing_description,
+                          setMessage,
+                          setMessageType
+                        )
+                      }
+                      icon="📋"
+                      title="نسخ الوصف"
+                    />
+
+                    <ActionButton
+                      onClick={() =>
+                        copyText(
+                          marketing.instagram,
+                          setMessage,
+                          setMessageType
+                        )
+                      }
+                      icon="📸"
+                      title="نسخ Instagram"
+                    />
+
+                    <ActionButton
+                      onClick={() =>
+                        copyText(
+                          marketing.whatsapp,
+                          setMessage,
+                          setMessageType
+                        )
+                      }
+                      icon="💬"
+                      title="نسخ WhatsApp"
+                    />
+
+                    <ActionButton
+                      onClick={() =>
+                        copyText(
+                          marketing.seo_description,
+                          setMessage,
+                          setMessageType
+                        )
+                      }
+                      icon="🔎"
+                      title="نسخ SEO"
+                    />
+                  </div>
                 </div>
-
-                <MarketingSection
-                  title="📝 الوصف التسويقي"
-                  value={
-                    marketing.marketing_description
-                  }
-                />
-
-                <MarketingSection
-                  title="📸 Instagram"
-                  value={
-                    marketing.instagram
-                  }
-                />
-
-                <MarketingSection
-                  title="💬 WhatsApp"
-                  value={
-                    marketing.whatsapp
-                  }
-                />
-
-                <MarketingSection
-                  title="🎬 TikTok / Snapchat"
-                  value={
-                    marketing.tiktok_snapchat
-                  }
-                />
-
-                <MarketingSection
-                  title="🔎 SEO Title"
-                  value={
-                    marketing.seo_title
-                  }
-                />
-
-                <MarketingSection
-                  title="🔎 SEO Description"
-                  value={
-                    marketing.seo_description
-                  }
-                />
-
-                <MarketingSection
-                  title="🔑 SEO Keywords"
-                  value={
-                    marketing.seo_keywords
-                  }
-                />
-
-                <MarketingSection
-                  title="🎯 Call To Action"
-                  value={
-                    marketing.call_to_action
-                  }
-                />
-              </div>
-            )}
+              )}
 
             <div
               style={{
@@ -1162,6 +1327,34 @@ export default function MarketingPage() {
   );
 }
 
+async function copyText(
+  value,
+  setMessage,
+  setMessageType
+) {
+  if (!value) {
+    setMessageType("error");
+    setMessage("لا يوجد محتوى لنسخه.");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(
+      value
+    );
+
+    setMessageType("success");
+    setMessage("✅ تم نسخ المحتوى.");
+  } catch (error) {
+    console.error(error);
+
+    setMessageType("error");
+    setMessage(
+      "تعذر النسخ تلقائيًا. حاول تحديد النص ونسخه يدويًا."
+    );
+  }
+}
+
 function isProductUnclear(product) {
   if (!product) return false;
 
@@ -1237,7 +1430,8 @@ function isProductUnclear(product) {
 
 function StatusBadge({ product }) {
   const isLocked =
-    product.verification_status === "locked" ||
+    product.verification_status ===
+      "locked" ||
     product.safety_status === "locked";
 
   if (isLocked) {
@@ -1246,7 +1440,8 @@ function StatusBadge({ product }) {
         style={{
           background: "#fef2f2",
           color: "#b91c1c",
-          border: "1px solid #fecaca",
+          border:
+            "1px solid #fecaca",
           padding: "8px 13px",
           borderRadius: 20,
           fontSize: 13,
@@ -1264,7 +1459,8 @@ function StatusBadge({ product }) {
         style={{
           background: "#fffbeb",
           color: "#a16207",
-          border: "1px solid #fde68a",
+          border:
+            "1px solid #fde68a",
           padding: "8px 13px",
           borderRadius: 20,
           fontSize: 13,
@@ -1281,7 +1477,8 @@ function StatusBadge({ product }) {
       style={{
         background: "#ecfdf5",
         color: "#047857",
-        border: "1px solid #bbf7d0",
+        border:
+          "1px solid #bbf7d0",
         padding: "8px 13px",
         borderRadius: 20,
         fontSize: 13,
@@ -1298,7 +1495,8 @@ function InfoCard({ title, value }) {
     <div
       style={{
         background: "#f8fafc",
-        border: "1px solid #e2e8f0",
+        border:
+          "1px solid #e2e8f0",
         borderRadius: 14,
         padding: 14,
       }}
@@ -1324,7 +1522,11 @@ function InfoCard({ title, value }) {
   );
 }
 
-function FeatureRow({ icon, title, text }) {
+function FeatureRow({
+  icon,
+  title,
+  text,
+}) {
   return (
     <div
       style={{
@@ -1334,7 +1536,8 @@ function FeatureRow({ icon, title, text }) {
         padding: 12,
         borderRadius: 12,
         background: "#f8fafc",
-        border: "1px solid #e2e8f0",
+        border:
+          "1px solid #e2e8f0",
       }}
     >
       <div
@@ -1345,7 +1548,8 @@ function FeatureRow({ icon, title, text }) {
           background: "#ecfdf5",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
+          justifyContent:
+            "center",
           fontSize: 19,
           flexShrink: 0,
         }}
@@ -1389,7 +1593,8 @@ function MarketingSection({
         padding: 18,
         borderRadius: 15,
         background: "#f8fafc",
-        border: "1px solid #e2e8f0",
+        border:
+          "1px solid #e2e8f0",
       }}
     >
       <h3
@@ -1425,7 +1630,8 @@ function ActionButton({
       type="button"
       onClick={onClick}
       style={{
-        border: "1px solid #bbf7d0",
+        border:
+          "1px solid #bbf7d0",
         background: "#f0fdf4",
         color: "#047857",
         padding: "13px 15px",
@@ -1493,7 +1699,8 @@ const cardStyle = {
   padding: 22,
   boxShadow:
     "0 8px 30px rgba(15, 23, 42, 0.06)",
-  border: "1px solid #e2e8f0",
+  border:
+    "1px solid #e2e8f0",
 };
 
 const heroCardStyle = {
@@ -1507,7 +1714,8 @@ const lockedCardStyle = {
   padding: 22,
   borderRadius: 18,
   background: "#fef2f2",
-  border: "1px solid #fecaca",
+  border:
+    "1px solid #fecaca",
   color: "#991b1b",
   lineHeight: 1.8,
 };
@@ -1517,7 +1725,8 @@ const responsibilityCardStyle = {
   padding: 22,
   borderRadius: 18,
   background: "#fffbeb",
-  border: "1px solid #fde68a",
+  border:
+    "1px solid #fde68a",
   color: "#713f12",
   lineHeight: 1.8,
 };
@@ -1534,7 +1743,8 @@ const primaryButton = {
 };
 
 const secondaryButton = {
-  border: "1px solid #cbd5e1",
+  border:
+    "1px solid #cbd5e1",
   background: "#fff",
   color: "#334155",
   padding: "11px 15px",
@@ -1565,7 +1775,8 @@ const readyBadge = {
   alignItems: "center",
   background: "#ecfdf5",
   color: "#047857",
-  border: "1px solid #bbf7d0",
+  border:
+    "1px solid #bbf7d0",
   padding: "7px 11px",
   borderRadius: 20,
   fontSize: 13,
