@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
 
@@ -22,6 +22,9 @@ export default function VideoDetailsPage() {
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  // يمنع إرسال طلب التوليد أكثر من مرة
+  const generationStartedRef = useRef(false);
 
   async function loadVideo() {
     if (!videoId) return;
@@ -130,12 +133,126 @@ export default function VideoDetailsPage() {
     }
   }
 
+  async function startVideoPreparation() {
+    if (!videoId || !video) return;
+
+    // لا نعيد إرسال طلب التوليد إذا بدأ مسبقاً
+    if (generationStartedRef.current) {
+      return;
+    }
+
+    // إذا كان الفيديو أصلاً قيد التوليد فلا نرسل طلب جديد
+    if (
+      video.status !== "pending"
+    ) {
+      return;
+    }
+
+    generationStartedRef.current = true;
+
+    try {
+      setChecking(true);
+      setError("");
+      setMessage("جاري تجهيز الفيديو...");
+
+      const response = await fetch(
+        "/api/generate-video",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            video_id: videoId,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+            "تعذر تجهيز الفيديو."
+        );
+      }
+
+      // المحرك غير مفعّل
+      if (
+        result.engine_enabled === false
+      ) {
+        setVideo((current) => ({
+          ...current,
+          status:
+            result.video?.status ||
+            "pending",
+        }));
+
+        setMessage(
+          "تم تجهيز الفيديو، لكن محرك التوليد غير مفعّل حالياً."
+        );
+
+        // يسمح بالمحاولة اليدوية لاحقاً
+        generationStartedRef.current = false;
+
+        return;
+      }
+
+      // التوليد بدأ بنجاح
+      setVideo((current) => ({
+        ...current,
+        status:
+          result.video?.status ||
+          "processing",
+        provider:
+          result.video?.provider ||
+          "runway",
+        provider_task_id:
+          result.task_id ||
+          current.provider_task_id,
+        generation_started_at:
+          new Date().toISOString(),
+      }));
+
+      setMessage(
+        "تم إرسال الفيديو إلى محرك الذكاء الاصطناعي، وجاري التوليد..."
+      );
+    } catch (err) {
+      console.error(err);
+
+      generationStartedRef.current = false;
+
+      setError(
+        err?.message ||
+          "حدث خطأ أثناء تجهيز الفيديو."
+      );
+
+      setVideo((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          status: "failed",
+          error_message:
+            err?.message ||
+            "حدث خطأ أثناء تجهيز الفيديو.",
+        };
+      });
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function checkVideoStatus() {
     if (!videoId || !video) return;
 
     if (
       video.status !== "processing"
     ) {
+      return;
+    }
+
+    if (checking) {
       return;
     }
 
@@ -147,8 +264,7 @@ export default function VideoDetailsPage() {
         {
           method: "POST",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             video_id: videoId,
@@ -156,8 +272,7 @@ export default function VideoDetailsPage() {
         }
       );
 
-      const result =
-        await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
         throw new Error(
@@ -166,6 +281,7 @@ export default function VideoDetailsPage() {
         );
       }
 
+      // الفيديو مكتمل
       if (
         result.status === "completed" &&
         result.video_url
@@ -180,12 +296,13 @@ export default function VideoDetailsPage() {
         }));
 
         setMessage(
-          "تم إنشاء الفيديو بنجاح."
+          "🎉 تم إنشاء الفيديو بنجاح."
         );
 
         return;
       }
 
+      // فشل
       if (
         result.status === "failed"
       ) {
@@ -197,9 +314,15 @@ export default function VideoDetailsPage() {
             "فشل إنشاء الفيديو.",
         }));
 
+        setError(
+          result.error ||
+            "فشل إنشاء الفيديو."
+        );
+
         return;
       }
 
+      // إلغاء
       if (
         result.status === "cancelled"
       ) {
@@ -214,6 +337,7 @@ export default function VideoDetailsPage() {
         return;
       }
 
+      // ما زال قيد التوليد
       setVideo((current) => ({
         ...current,
         status:
@@ -232,83 +356,10 @@ export default function VideoDetailsPage() {
     }
   }
 
-  async function startVideoPreparation() {
-    if (!videoId || !video) return;
-
-    try {
-      setChecking(true);
-      setError("");
-      setMessage("");
-
-      const response = await fetch(
-        "/api/generate-video",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            video_id: videoId,
-          }),
-        }
-      );
-
-      const result =
-        await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          result?.error ||
-            "تعذر تجهيز الفيديو."
-        );
-      }
-
-      if (
-        result.engine_enabled ===
-        false
-      ) {
-        setVideo((current) => ({
-          ...current,
-          status:
-            result.video?.status ||
-            "pending",
-        }));
-
-        setMessage(
-          "تم تجهيز الفيديو. محرك الذكاء الاصطناعي غير مفعّل حالياً."
-        );
-
-        return;
-      }
-
-      setVideo((current) => ({
-        ...current,
-        status:
-          result.video?.status ||
-          "processing",
-        provider_task_id:
-          result.task_id ||
-          current.provider_task_id,
-      }));
-
-      setMessage(
-        "تم إرسال الفيديو إلى محرك التوليد."
-      );
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err?.message ||
-          "حدث خطأ أثناء تجهيز الفيديو."
-      );
-    } finally {
-      setChecking(false);
-    }
-  }
-
   async function deleteVideo() {
-    if (!videoId || !video) return;
+    if (!videoId || !video || !shop) {
+      return;
+    }
 
     const confirmed = window.confirm(
       "هل أنت متأكد من حذف هذا الفيديو؟"
@@ -345,10 +396,34 @@ export default function VideoDetailsPage() {
     }
   }
 
+  // تحميل الفيديو عند فتح الصفحة
   useEffect(() => {
     loadVideo();
   }, [videoId]);
 
+  // إذا وصل الفيديو بحالة pending
+  // نبدأ التوليد تلقائياً مرة واحدة
+  useEffect(() => {
+    if (
+      !video ||
+      video.status !== "pending"
+    ) {
+      return;
+    }
+
+    if (
+      generationStartedRef.current
+    ) {
+      return;
+    }
+
+    startVideoPreparation();
+  }, [
+    video?.status,
+    videoId,
+  ]);
+
+  // فحص حالة Runway أثناء التوليد
   useEffect(() => {
     if (
       !video ||
@@ -357,10 +432,12 @@ export default function VideoDetailsPage() {
       return;
     }
 
-    const interval =
-      setInterval(() => {
-        checkVideoStatus();
-      }, 8000);
+    const interval = setInterval(() => {
+      checkVideoStatus();
+    }, 8000);
+
+    // فحص أولي مباشرة
+    checkVideoStatus();
 
     return () => {
       clearInterval(interval);
@@ -377,8 +454,7 @@ export default function VideoDetailsPage() {
         style={{
           minHeight: "100vh",
           padding: 24,
-          fontFamily:
-            "Arial, sans-serif",
+          fontFamily: "Arial, sans-serif",
         }}
       >
         <div
@@ -409,8 +485,7 @@ export default function VideoDetailsPage() {
         style={{
           minHeight: "100vh",
           padding: 24,
-          fontFamily:
-            "Arial, sans-serif",
+          fontFamily: "Arial, sans-serif",
         }}
       >
         <div
@@ -463,16 +538,13 @@ export default function VideoDetailsPage() {
   };
 
   const statusLabel =
-    statusLabels[
-      video?.status
-    ] ||
+    statusLabels[video?.status] ||
     video?.status ||
     "غير معروف";
 
   const typeLabels = {
     product_ad: "إعلان منتج",
-    product_showcase:
-      "عرض منتج",
+    product_showcase: "عرض منتج",
     sale: "عرض وخصم",
     social: "سوشيال ميديا",
   };
@@ -484,8 +556,7 @@ export default function VideoDetailsPage() {
         minHeight: "100vh",
         background: "#f8fafc",
         padding: 20,
-        fontFamily:
-          "Arial, sans-serif",
+        fontFamily: "Arial, sans-serif",
       }}
     >
       <div
@@ -501,8 +572,7 @@ export default function VideoDetailsPage() {
           style={{
             marginBottom: 16,
             border: "none",
-            background:
-              "transparent",
+            background: "transparent",
             color: "#166534",
             fontWeight: 900,
             cursor: "pointer",
@@ -524,8 +594,7 @@ export default function VideoDetailsPage() {
           <div
             style={{
               display: "flex",
-              justifyContent:
-                "space-between",
+              justifyContent: "space-between",
               alignItems: "center",
               gap: 12,
               flexWrap: "wrap",
@@ -549,31 +618,29 @@ export default function VideoDetailsPage() {
                   color: "#64748b",
                 }}
               >
-                فيديو إعلاني بالذكاء
-                الاصطناعي
+                فيديو إعلاني بالذكاء الاصطناعي
               </p>
             </div>
 
             <span
               style={{
-                padding:
-                  "8px 14px",
+                padding: "8px 14px",
                 borderRadius: 999,
                 background:
-                  video?.status ===
-                  "completed"
+                  video?.status === "completed"
                     ? "#dcfce7"
-                    : video?.status ===
-                      "failed"
+                    : video?.status === "failed"
                     ? "#fee2e2"
+                    : video?.status === "processing"
+                    ? "#dbeafe"
                     : "#fef3c7",
                 color:
-                  video?.status ===
-                  "completed"
+                  video?.status === "completed"
                     ? "#166534"
-                    : video?.status ===
-                      "failed"
+                    : video?.status === "failed"
                     ? "#991b1b"
+                    : video?.status === "processing"
+                    ? "#1d4ed8"
                     : "#92400e",
                 fontWeight: 900,
               }}
@@ -588,8 +655,7 @@ export default function VideoDetailsPage() {
                 marginTop: 16,
                 padding: 14,
                 borderRadius: 12,
-                background:
-                  "#ecfdf5",
+                background: "#ecfdf5",
                 color: "#166534",
                 fontWeight: 800,
               }}
@@ -604,8 +670,7 @@ export default function VideoDetailsPage() {
                 marginTop: 16,
                 padding: 14,
                 borderRadius: 12,
-                background:
-                  "#fef2f2",
+                background: "#fef2f2",
                 color: "#991b1b",
                 fontWeight: 800,
               }}
@@ -646,9 +711,7 @@ export default function VideoDetailsPage() {
                 }}
               >
                 <img
-                  src={
-                    product.image_url
-                  }
+                  src={product.image_url}
                   alt={
                     product.name ||
                     "المنتج"
@@ -656,8 +719,7 @@ export default function VideoDetailsPage() {
                   style={{
                     maxWidth: "100%",
                     maxHeight: 500,
-                    objectFit:
-                      "contain",
+                    objectFit: "contain",
                     borderRadius: 12,
                   }}
                 />
@@ -673,12 +735,12 @@ export default function VideoDetailsPage() {
                   {video?.status ===
                   "processing"
                     ? "جاري إنشاء الفيديو..."
-                    : video?.status ===
-                      "pending"
-                    ? "الفيديو بانتظار التوليد"
-                    : video?.status ===
-                      "failed"
+                    : video?.status === "pending"
+                    ? "جاري تجهيز الفيديو..."
+                    : video?.status === "failed"
                     ? "تعذر إنشاء الفيديو"
+                    : video?.status === "cancelled"
+                    ? "تم إلغاء الفيديو"
                     : "لا يوجد فيديو جاهز حالياً"}
                 </div>
 
@@ -690,8 +752,7 @@ export default function VideoDetailsPage() {
                       color: "#cbd5e1",
                     }}
                   >
-                    يتم تحديث الحالة
-                    تلقائياً.
+                    يتم تحديث الحالة تلقائياً.
                   </div>
                 )}
               </div>
@@ -703,8 +764,7 @@ export default function VideoDetailsPage() {
                   textAlign: "center",
                 }}
               >
-                لا توجد صورة أو فيديو
-                متاح حالياً.
+                لا توجد صورة أو فيديو متاح حالياً.
               </div>
             )}
           </div>
@@ -720,22 +780,17 @@ export default function VideoDetailsPage() {
             {video?.video_url && (
               <>
                 <a
-                  href={
-                    video.video_url
-                  }
+                  href={video.video_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
                     flex: 1,
                     minWidth: 140,
-                    textAlign:
-                      "center",
-                    textDecoration:
-                      "none",
+                    textAlign: "center",
+                    textDecoration: "none",
                     padding: 13,
                     borderRadius: 12,
-                    background:
-                      "#15803d",
+                    background: "#15803d",
                     color: "#fff",
                     fontWeight: 900,
                   }}
@@ -744,21 +799,16 @@ export default function VideoDetailsPage() {
                 </a>
 
                 <a
-                  href={
-                    video.video_url
-                  }
+                  href={video.video_url}
                   download
                   style={{
                     flex: 1,
                     minWidth: 140,
-                    textAlign:
-                      "center",
-                    textDecoration:
-                      "none",
+                    textAlign: "center",
+                    textDecoration: "none",
                     padding: 13,
                     borderRadius: 12,
-                    background:
-                      "#0f172a",
+                    background: "#0f172a",
                     color: "#fff",
                     fontWeight: 900,
                   }}
@@ -768,12 +818,9 @@ export default function VideoDetailsPage() {
               </>
             )}
 
-            {video?.status ===
-              "pending" && (
+            {video?.status === "pending" && (
               <button
-                onClick={
-                  startVideoPreparation
-                }
+                onClick={startVideoPreparation}
                 disabled={checking}
                 style={{
                   flex: 1,
@@ -781,8 +828,7 @@ export default function VideoDetailsPage() {
                   padding: 13,
                   border: "none",
                   borderRadius: 12,
-                  background:
-                    "#15803d",
+                  background: "#15803d",
                   color: "#fff",
                   fontWeight: 900,
                   cursor: checking
@@ -796,12 +842,9 @@ export default function VideoDetailsPage() {
               </button>
             )}
 
-            {video?.status ===
-              "processing" && (
+            {video?.status === "processing" && (
               <button
-                onClick={
-                  checkVideoStatus
-                }
+                onClick={checkVideoStatus}
                 disabled={checking}
                 style={{
                   flex: 1,
@@ -809,8 +852,7 @@ export default function VideoDetailsPage() {
                   padding: 13,
                   border: "none",
                   borderRadius: 12,
-                  background:
-                    "#166534",
+                  background: "#166534",
                   color: "#fff",
                   fontWeight: 900,
                   cursor: checking
@@ -842,11 +884,7 @@ export default function VideoDetailsPage() {
               padding: 20,
             }}
           >
-            <h2
-              style={{
-                marginTop: 0,
-              }}
-            >
+            <h2 style={{ marginTop: 0 }}>
               المنتج
             </h2>
 
@@ -856,37 +894,24 @@ export default function VideoDetailsPage() {
                 lineHeight: 1.9,
               }}
             >
-              <strong>
-                الاسم:
-              </strong>{" "}
-              {product?.name ||
-                "—"}
+              <strong>الاسم:</strong>{" "}
+              {product?.name || "—"}
               <br />
 
-              <strong>
-                العلامة:
-              </strong>{" "}
-              {product?.brand ||
-                "—"}
+              <strong>العلامة:</strong>{" "}
+              {product?.brand || "—"}
               <br />
 
-              <strong>
-                السعر:
-              </strong>{" "}
-              {product?.price !=
-              null
+              <strong>السعر:</strong>{" "}
+              {product?.price != null
                 ? `${product.price} ${
-                    product.currency ||
-                    "AED"
+                    product.currency || "AED"
                   }`
                 : "—"}
               <br />
 
-              <strong>
-                التصنيف:
-              </strong>{" "}
-              {product?.category ||
-                "—"}
+              <strong>التصنيف:</strong>{" "}
+              {product?.category || "—"}
             </div>
           </section>
 
@@ -897,11 +922,7 @@ export default function VideoDetailsPage() {
               padding: 20,
             }}
           >
-            <h2
-              style={{
-                marginTop: 0,
-              }}
-            >
+            <h2 style={{ marginTop: 0 }}>
               إعدادات الفيديو
             </h2>
 
@@ -911,52 +932,33 @@ export default function VideoDetailsPage() {
                 lineHeight: 1.9,
               }}
             >
-              <strong>
-                النوع:
-              </strong>{" "}
-              {typeLabels[
-                video?.video_type
-              ] ||
+              <strong>النوع:</strong>{" "}
+              {typeLabels[video?.video_type] ||
                 video?.video_type ||
                 "—"}
               <br />
 
-              <strong>
-                الوضع:
-              </strong>{" "}
-              {video?.mode ===
-              "simple"
+              <strong>الوضع:</strong>{" "}
+              {video?.mode === "simple"
                 ? "بسيط"
                 : "احترافي"}
               <br />
 
-              <strong>
-                المقاس:
-              </strong>{" "}
-              {video?.format ||
-                "—"}
+              <strong>المقاس:</strong>{" "}
+              {video?.format || "—"}
               <br />
 
-              <strong>
-                المدة:
-              </strong>{" "}
-              {video?.duration_seconds ||
-                "—"}{" "}
+              <strong>المدة:</strong>{" "}
+              {video?.duration_seconds || "—"}{" "}
               ثانية
               <br />
 
-              <strong>
-                النمط:
-              </strong>{" "}
-              {video?.style ||
-                "—"}
+              <strong>النمط:</strong>{" "}
+              {video?.style || "—"}
               <br />
 
-              <strong>
-                الخلفية:
-              </strong>{" "}
-              {video?.background ||
-                "—"}
+              <strong>الخلفية:</strong>{" "}
+              {video?.background || "—"}
             </div>
           </section>
 
@@ -968,19 +970,13 @@ export default function VideoDetailsPage() {
                 padding: 20,
               }}
             >
-              <h2
-                style={{
-                  marginTop: 0,
-                }}
-              >
+              <h2 style={{ marginTop: 0 }}>
                 التصميم المستخدم
               </h2>
 
               {design.image_url && (
                 <img
-                  src={
-                    design.image_url
-                  }
+                  src={design.image_url}
                   alt="التصميم"
                   style={{
                     width: "100%",
@@ -1001,8 +997,7 @@ export default function VideoDetailsPage() {
                   padding: 12,
                   border: "none",
                   borderRadius: 10,
-                  background:
-                    "#f1f5f9",
+                  background: "#f1f5f9",
                   color: "#0f172a",
                   fontWeight: 900,
                   cursor: "pointer",
@@ -1022,11 +1017,7 @@ export default function VideoDetailsPage() {
             padding: 20,
           }}
         >
-          <h2
-            style={{
-              marginTop: 0,
-            }}
-          >
+          <h2 style={{ marginTop: 0 }}>
             بيانات المحل
           </h2>
 
@@ -1036,35 +1027,23 @@ export default function VideoDetailsPage() {
               lineHeight: 1.9,
             }}
           >
-            <strong>
-              المحل:
-            </strong>{" "}
+            <strong>المحل:</strong>{" "}
             {shop?.name || "—"}
             <br />
 
-            <strong>
-              الهاتف:
-            </strong>{" "}
+            <strong>الهاتف:</strong>{" "}
             {shop?.phone || "—"}
             <br />
 
-            <strong>
-              واتساب:
-            </strong>{" "}
-            {shop?.whatsapp ||
-              "—"}
+            <strong>واتساب:</strong>{" "}
+            {shop?.whatsapp || "—"}
             <br />
 
-            <strong>
-              Instagram:
-            </strong>{" "}
-            {shop?.instagram ||
-              "—"}
+            <strong>Instagram:</strong>{" "}
+            {shop?.instagram || "—"}
             <br />
 
-            <strong>
-              TikTok:
-            </strong>{" "}
+            <strong>TikTok:</strong>{" "}
             {shop?.tiktok || "—"}
           </div>
         </section>
@@ -1079,15 +1058,9 @@ export default function VideoDetailsPage() {
               padding: 20,
             }}
           >
-            <strong>
-              سبب الخطأ:
-            </strong>
+            <strong>سبب الخطأ:</strong>
 
-            <div
-              style={{
-                marginTop: 8,
-              }}
-            >
+            <div style={{ marginTop: 8 }}>
               {video.error_message}
             </div>
           </section>
@@ -1103,9 +1076,7 @@ export default function VideoDetailsPage() {
         >
           <button
             onClick={() =>
-              router.push(
-                "/videos/new"
-              )
+              router.push("/videos/new")
             }
             style={{
               flex: 1,
