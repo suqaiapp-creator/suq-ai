@@ -1,157 +1,618 @@
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const MODEL = "gpt-image-2";
-
-const SIZE_MAP = {
-  "1:1": "1024x1024",
-  "4:5": "1024x1536",
-  "9:16": "1024x1536",
-  "16:9": "1536x1024",
-};
-
-export async function generateDesignImage({
-  productImageUrl,
-  prompt,
-  format = "1:1",
-}) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error(
-      "OPENAI_API_KEY غير موجود في إعدادات Vercel."
-    );
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { buildDesignPrompt } from "../../../lib/design-generator";
+import { generateDesignImage } from "../../../lib/image-generator";
+import { logAIUsage } from "../../../lib/ai-usage";
+export const runtime = "nodejs";
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
   }
-
-  if (!productImageUrl) {
-    throw new Error("صورة المنتج مطلوبة.");
+);
+const ALLOWED_MODES = [
+  "simple",
+  "professional",
+];
+const ALLOWED_FORMATS = [
+  "1:1",
+  "4:5",
+  "9:16",
+  "16:9",
+];
+function getErrorMessage(error) {
+  if (!error) {
+    return "خطأ غير معروف.";
   }
-
-  if (!prompt) {
-    throw new Error("تعليمات التصميم مطلوبة.");
+  if (typeof error === "string") {
+    return error;
   }
-
-  const size = SIZE_MAP[format] || SIZE_MAP["1:1"];
-
-  // تحميل صورة المنتج
-  let imageResponse;
-
-  try {
-    imageResponse = await fetch(productImageUrl);
-  } catch (error) {
-    throw new Error(
-      `تعذر الاتصال بصورة المنتج: ${
-        error?.message || "خطأ غير معروف"
-      }`
-    );
-  }
-
-  if (!imageResponse.ok) {
-    throw new Error(
-      `تعذر الوصول إلى صورة المنتج. HTTP ${imageResponse.status}`
-    );
-  }
-
-  const imageBuffer = Buffer.from(
-    await imageResponse.arrayBuffer()
+  return (
+    error.message ||
+    error.error?.message ||
+    error.details ||
+    error.hint ||
+    "خطأ غير معروف."
   );
-
-  if (!imageBuffer.length) {
-    throw new Error("صورة المنتج فارغة.");
+}
+async function markDesignFailed(
+  designId,
+  errorMessage,
+  errorCode = "GENERATION_FAILED"
+) {
+  if (!designId) {
+    return;
   }
-
-  const contentType =
-    imageResponse.headers.get("content-type") ||
-    "image/png";
-
-  let extension = "png";
-
-  if (
-    contentType.includes("jpeg") ||
-    contentType.includes("jpg")
-  ) {
-    extension = "jpg";
-  } else if (contentType.includes("webp")) {
-    extension = "webp";
-  }
-
-  const inputFile = new File(
-    [imageBuffer],
-    `product.${extension}`,
-    {
-      type: contentType,
-    }
-  );
-
-  // تجهيز تعليمات التصميم
-  const finalPrompt =
-    typeof prompt === "string"
-      ? prompt
-      : `
-Create a professional advertising design using the provided product image.
-
-IMPORTANT:
-- Preserve the exact identity of the product.
-- Preserve the original product shape.
-- Do not change the product logo or branding.
-- Do not invent product specifications.
-- Do not invent prices.
-- Do not invent offers.
-- Do not add unsupported claims.
-- Keep the product clearly visible.
-- Create a clean professional advertising composition.
-- Make advertising text readable.
-
-DESIGN DATA:
-${JSON.stringify(prompt, null, 2)}
-`;
-
-  // إنشاء التصميم
-  let result;
-
   try {
-    result = await openai.images.edit({
-      model: MODEL,
-      image: inputFile,
-      prompt: finalPrompt,
-      size,
-      quality: "auto",
-    });
+    await supabase
+      .from("ad_images")
+      .update({
+        status: "failed",
+        error_message: errorMessage,
+        error_code: errorCode,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", designId);
   } catch (error) {
     console.error(
-      "OPENAI IMAGE GENERATION ERROR:",
+      "Failed to update design error:",
       error
     );
-
-    throw new Error(
-      `فشل إنشاء التصميم: ${
-        error?.message ||
-        error?.error?.message ||
-        "خطأ غير معروف من OpenAI"
-      }`
+  }
+}
+export async function POST(request) {
+  let designId = null;
+  try {
+    /*
+     * 1. التحقق من الجلسة
+     */
+    const authHeader =
+      request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "غير مصرح.",
+        },
+        { status: 401 }
+      );
+    }
+    const token = authHeader
+      .replace("Bearer ", "")
+      .trim();
+    if (!token) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "رمز الجلسة مفقود.",
+        },
+        { status: 401 }
+      );
+    }
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(token);
+    if (userError || !user) {
+      console.error(
+        "Auth error:",
+        userError
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error: "الجلسة غير صالحة. سجل الدخول مرة أخرى.",
+        },
+        { status: 401 }
+      );
+    }
+    /*
+     * 2. قراءة الطلب
+     */
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "بيانات الطلب غير صحيحة.",
+        },
+        { status: 400 }
+      );
+    }
+    const {
+      productId,
+      mode,
+      template,
+      style,
+      background,
+      format,
+      description,
+    } = body || {};
+    /*
+     * 3. التحقق من البيانات الأساسية
+     */
+    if (!productId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "معرّف المنتج مطلوب.",
+        },
+        { status: 400 }
+      );
+    }
+    if (!ALLOWED_MODES.includes(mode)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "نوع التصميم غير صحيح.",
+        },
+        { status: 400 }
+      );
+    }
+    if (!ALLOWED_FORMATS.includes(format)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "مقاس التصميم غير صحيح.",
+        },
+        { status: 400 }
+      );
+    }
+    /*
+     * 4. جلب المنتج
+     */
+    const {
+      data: product,
+      error: productError,
+    } = await supabase
+      .from("products")
+      .select("*")
+      .eq("id", productId)
+      .single();
+    if (productError || !product) {
+      console.error(
+        "Product fetch error:",
+        productError
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error: "المنتج غير موجود.",
+        },
+        { status: 404 }
+      );
+    }
+    /*
+     * 5. التأكد من وجود المحل
+     */
+    if (!product.shop_id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "هذا المنتج غير مرتبط بمحل.",
+        },
+        { status: 400 }
+      );
+    }
+    const {
+      data: shop,
+      error: shopError,
+    } = await supabase
+      .from("shops")
+      .select("*")
+      .eq("id", product.shop_id)
+      .single();
+    if (shopError || !shop) {
+      console.error(
+        "Shop fetch error:",
+        shopError
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error: "المحل غير موجود.",
+        },
+        { status: 404 }
+      );
+    }
+    /*
+     * 6. التأكد أن المستخدم هو صاحب المحل
+     */
+    if (shop.owner_id !== user.id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "غير مصرح لك باستخدام هذا المنتج.",
+        },
+        { status: 403 }
+      );
+    }
+    /*
+     * 7. فحص حالة المنتج
+     */
+    const isLocked =
+      product.verification_status === "locked" ||
+      product.safety_status === "locked" ||
+      product.safety_status === "violation" ||
+      product.safety_level === "critical";
+    if (isLocked) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "هذا المنتج مقفل ولا يمكن استخدامه في التصميم.",
+          locked: true,
+        },
+        { status: 403 }
+      );
+    }
+    /*
+     * 8. التحقق من وضوح المنتج
+     *
+     * عدم وضوح المعلومات ليس مخالفة.
+     * لذلك نطلب تأكيد المسؤولية فقط.
+     */
+    const isUnclear =
+      product.verification_status === "review" ||
+      product.verification_status === "unverified" ||
+      product.confidence === "low" ||
+      product.confidence === "medium" ||
+      !product.brand ||
+      !product.category ||
+      !product.description;
+    if (isUnclear) {
+      const {
+        data: acceptance,
+        error: acceptanceError,
+      } = await supabase
+        .from(
+          "product_responsibility_acceptances"
+        )
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("product_id", product.id)
+        .maybeSingle();
+      if (acceptanceError) {
+        console.error(
+          "Responsibility acceptance error:",
+          acceptanceError
+        );
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "تعذر التحقق من تأكيد مسؤولية المنتج.",
+          },
+          { status: 500 }
+        );
+      }
+      if (!acceptance) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "يجب تأكيد مسؤولية المنتج قبل إنشاء التصميم.",
+            requiresResponsibility: true,
+          },
+          { status: 400 }
+        );
+      }
+    }
+    /*
+     * 9. التحقق من صورة المنتج
+     */
+    if (!product.image_url) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "المنتج لا يحتوي على صورة.",
+        },
+        { status: 400 }
+      );
+    }
+    /*
+     * 10. بناء تعليمات التصميم
+     */
+    const designPrompt = buildDesignPrompt({
+      product,
+      shop,
+      mode,
+      template,
+      style,
+      background,
+      format,
+      description,
+    });
+    /*
+     * 11. إنشاء سجل التصميم
+     */
+    const {
+      data: design,
+      error: insertError,
+    } = await supabase
+      .from("ad_images")
+      .insert({
+        product_id: product.id,
+        shop_id: shop.id,
+        image_url: null,
+        format,
+        prompt: designPrompt,
+        status: "pending",
+        generated_at: null,
+        completed_at: null,
+        error_message: null,
+        error_code: null,
+        generation_started_at: null,
+      })
+      .select(
+        "id, status, created_at"
+      )
+      .single();
+    if (insertError || !design) {
+      console.error(
+        "Create design error:",
+        insertError
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "تعذر إنشاء طلب التصميم.",
+          details:
+            insertError?.message || null,
+        },
+        { status: 500 }
+      );
+    }
+    designId = design.id;
+    /*
+     * 12. تغيير الحالة إلى generating
+     */
+    const {
+      error: generatingError,
+    } = await supabase
+      .from("ad_images")
+      .update({
+        status: "generating",
+        generation_started_at:
+          new Date().toISOString(),
+        error_message: null,
+        error_code: null,
+      })
+      .eq("id", designId);
+    if (generatingError) {
+      console.error(
+        "Generating status error:",
+        generatingError
+      );
+      await markDesignFailed(
+        designId,
+        generatingError.message,
+        "STATUS_UPDATE_FAILED"
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          designId,
+          error:
+            "تعذر تجهيز طلب التصميم.",
+          details:
+            generatingError.message,
+        },
+        { status: 500 }
+      );
+    }
+    /*
+     * 13. إنشاء الصورة
+     */
+    try {
+      const generated =
+        await generateDesignImage({
+          productImageUrl:
+            product.image_url,
+          prompt: designPrompt,
+          format,
+        });
+      if (!generated?.b64_json) {
+        throw new Error(
+          "لم يتم استلام الصورة الناتجة من محرك الصور."
+        );
+      }
+      /*
+       * 14. تحويل الصورة
+       */
+      const imageBuffer = Buffer.from(
+        generated.b64_json,
+        "base64"
+      );
+      if (!imageBuffer.length) {
+        throw new Error(
+          "بيانات الصورة الناتجة فارغة."
+        );
+      }
+      /*
+       * 15. حفظ الصورة في Storage
+       */
+      const storagePath =
+        `${shop.id}/${product.id}/${designId}.png`;
+      const {
+        error: uploadError,
+      } = await supabase.storage
+        .from("ad-images")
+        .upload(
+          storagePath,
+          imageBuffer,
+          {
+            contentType: "image/png",
+            upsert: false,
+          }
+        );
+      if (uploadError) {
+        throw new Error(
+          `تعذر حفظ الصورة في التخزين: ${uploadError.message}`
+        );
+      }
+      /*
+       * 16. الحصول على رابط الصورة
+       */
+      const {
+        data: publicUrlData,
+      } = supabase.storage
+        .from("ad-images")
+        .getPublicUrl(storagePath);
+      const imageUrl =
+        publicUrlData?.publicUrl;
+      if (!imageUrl) {
+        throw new Error(
+          "تعذر الحصول على رابط الصورة الناتجة."
+        );
+      }
+      /*
+       * 17. تحديث التصميم كمكتمل
+       */
+      const completedAt =
+        new Date().toISOString();
+      const {
+        error: updateError,
+      } = await supabase
+        .from("ad_images")
+        .update({
+          image_url: imageUrl,
+          status: "completed",
+          generated_at: completedAt,
+          completed_at: completedAt,
+          error_message: null,
+          error_code: null,
+        })
+        .eq("id", designId);
+      if (updateError) {
+        throw new Error(
+          `تعذر تحديث سجل التصميم: ${updateError.message}`
+        );
+      }
+      /*
+       * 18. تسجيل استخدام AI
+       */
+      try {
+        await logAIUsage({
+          userId: user.id,
+          shopId: shop.id,
+          productId: product.id,
+          operation: "design_generation",
+          model:
+            generated.model ||
+            "gpt-image-2",
+          status: "success",
+          estimatedCost: 0,
+          metadata: {
+            design_id: designId,
+            format,
+            mode,
+            template:
+              template || null,
+            style:
+              style || null,
+            background:
+              background || null,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI usage logging error:",
+          usageError
+        );
+      }
+      /*
+       * 19. النجاح
+       */
+      return NextResponse.json({
+        success: true,
+        designId,
+        status: "completed",
+        imageUrl,
+      });
+    } catch (generationError) {
+      console.error(
+        "IMAGE GENERATION ERROR:",
+        generationError
+      );
+      const errorMessage =
+        getErrorMessage(
+          generationError
+        );
+      await markDesignFailed(
+        designId,
+        errorMessage,
+        "GENERATION_FAILED"
+      );
+      try {
+        await logAIUsage({
+          userId: user.id,
+          shopId: shop.id,
+          productId: product.id,
+          operation:
+            "design_generation",
+          model: "gpt-image-2",
+          status: "failed",
+          estimatedCost: 0,
+          metadata: {
+            design_id: designId,
+            error: errorMessage,
+            format,
+            mode,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI usage logging failed:",
+          usageError
+        );
+      }
+      /*
+       * مهم:
+       * نرجع الخطأ الحقيقي للواجهة
+       * حتى نعرف المشكلة بدون تخمين.
+       */
+      return NextResponse.json(
+        {
+          success: false,
+          designId,
+          status: "failed",
+          error: errorMessage,
+        },
+        { status: 500 }
+      );
+    }
+  } catch (error) {
+    console.error(
+      "GENERATE DESIGN API ERROR:",
+      error
+    );
+    const errorMessage =
+      getErrorMessage(error);
+    if (designId) {
+      await markDesignFailed(
+        designId,
+        errorMessage,
+        "UNEXPECTED_ERROR"
+      );
+    }
+    return NextResponse.json(
+      {
+        success: false,
+        designId,
+        error: errorMessage,
+      },
+      { status: 500 }
     );
   }
-
-  const image = result?.data?.[0];
-
-  if (!image) {
-    throw new Error(
-      "OpenAI لم يرجع نتيجة للصورة."
-    );
-  }
-
-  if (!image.b64_json) {
-    throw new Error(
-      "تم إنشاء الطلب ولكن لم يتم استلام بيانات الصورة."
-    );
-  }
-
-  return {
-    b64_json: image.b64_json,
-    revised_prompt:
-      image.revised_prompt || null,
-    model: MODEL,
-    size,
-  };
 }
