@@ -1,42 +1,270 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { createClient } from "../../../lib/supabase/client";
 
-export default function DesignDetailsPage() {
+// =========================================================
+// Constants
+// =========================================================
+
+const TEMPLATES = [
+  {
+    id: "product",
+    icon: "🛍️",
+    title: "عرض منتج",
+    description: "منتج واضح مع اسم المنتج وهوية المحل",
+  },
+  {
+    id: "discount",
+    icon: "💰",
+    title: "خصم وسعر",
+    description: "تركيز على السعر أو الخصم",
+  },
+  {
+    id: "new-product",
+    icon: "🆕",
+    title: "منتج جديد",
+    description: "إعلان إطلاق منتج جديد",
+  },
+  {
+    id: "best-seller",
+    icon: "⭐",
+    title: "الأكثر مبيعاً",
+    description: "إبراز منتج مميز أو مشهور",
+  },
+  {
+    id: "special-offer",
+    icon: "🔥",
+    title: "عرض خاص",
+    description: "تصميم قوي للعروض والمناسبات",
+  },
+  {
+    id: "simple-ad",
+    icon: "📢",
+    title: "إعلان بسيط",
+    description: "تصميم نظيف وسريع",
+  },
+  {
+    id: "social",
+    icon: "📱",
+    title: "إعلان سوشيال",
+    description: "تصميم جاهز للنشر على السوشيال",
+  },
+  {
+    id: "luxury",
+    icon: "✨",
+    title: "فاخر",
+    description: "شكل أنيق ومناسب للمنتجات الفاخرة",
+  },
+];
+
+const FORMATS = [
+  {
+    id: "1:1",
+    icon: "▣",
+    title: "منشور مربع",
+    description: "مناسب لمنشورات Instagram",
+  },
+  {
+    id: "4:5",
+    icon: "▯",
+    title: "منشور عمودي",
+    description: "مناسب للإعلانات والمنشورات",
+  },
+  {
+    id: "9:16",
+    icon: "▥",
+    title: "ستوري",
+    description: "Instagram / Snapchat / TikTok",
+  },
+  {
+    id: "16:9",
+    icon: "▭",
+    title: "أفقي",
+    description: "شاشات وإعلانات أفقية",
+  },
+];
+
+const STYLES = [
+  "احترافي",
+  "عصري",
+  "فاخر",
+  "بسيط",
+  "جريء",
+  "نظيف",
+];
+
+const BACKGROUNDS = [
+  "نظيف",
+  "فاتح",
+  "داكن",
+  "تدرج",
+  "محايد",
+];
+
+const MODES = [
+  {
+    id: "simple",
+    icon: "⚡",
+    title: "عادي وسريع",
+    description: "قوالب جاهزة وتصميم سريع",
+  },
+  {
+    id: "professional",
+    icon: "💎",
+    title: "احترافي",
+    description: "وصف حر وتحكم أكبر بالتصميم",
+  },
+];
+
+// =========================================================
+// Helpers
+// =========================================================
+
+function formatDate(value) {
+  if (!value) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("ar-AE", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "—";
+  }
+}
+
+function getStatus(status) {
+  const value = String(status || "").toLowerCase();
+
+  if (value === "completed" || value === "complete") {
+    return {
+      label: "✓ مكتمل",
+      className: "status completed",
+    };
+  }
+
+  if (
+    value === "generating" ||
+    value === "processing" ||
+    value === "pending"
+  ) {
+    return {
+      label: "⏳ قيد الإنشاء",
+      className: "status processing",
+    };
+  }
+
+  if (value === "failed" || value === "error") {
+    return {
+      label: "✕ فشل",
+      className: "status failed",
+    };
+  }
+
+  return {
+    label: value || "غير محدد",
+    className: "status",
+  };
+}
+
+function normalizeSettings(design, product) {
+  const settings =
+    design?.design_settings &&
+    typeof design.design_settings === "object"
+      ? design.design_settings
+      : {};
+
+  return {
+    template:
+      settings.template ||
+      settings.template_id ||
+      design?.template ||
+      "product",
+
+    template_id:
+      settings.template_id ||
+      settings.template ||
+      design?.template_id ||
+      "product",
+
+    mode:
+      settings.mode ||
+      design?.mode ||
+      "simple",
+
+    style:
+      settings.style ||
+      design?.style ||
+      "احترافي",
+
+    background:
+      settings.background ||
+      design?.background ||
+      "نظيف",
+
+    format:
+      settings.format ||
+      design?.format ||
+      "1:1",
+
+    title:
+      settings.title ||
+      product?.name ||
+      "",
+
+    price:
+      settings.price === null ||
+      settings.price === undefined
+        ? product?.price ?? ""
+        : settings.price,
+
+    discount:
+      settings.discount || "",
+
+    cta:
+      settings.cta || "",
+
+    custom_text:
+      settings.custom_text || "",
+  };
+}
+
+// =========================================================
+// Page
+// =========================================================
+
+function DesignDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const designId = params?.id;
 
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
+
+  const [design, setDesign] = useState(null);
+  const [product, setProduct] = useState(null);
+  const [shop, setShop] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const [user, setUser] = useState(null);
-  const [shop, setShop] = useState(null);
-  const [design, setDesign] = useState(null);
-  const [product, setProduct] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [showEditor, setShowEditor] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] =
-    useState(false);
-
-  // =====================================================
-  // Editor state
-  // =====================================================
+  const [editOpen, setEditOpen] = useState(false);
 
   const [editor, setEditor] = useState({
     template: "product",
+    template_id: "product",
     mode: "simple",
-    style: "professional",
-    background: "clean",
+    style: "احترافي",
+    background: "نظيف",
     format: "1:1",
     title: "",
     price: "",
@@ -45,341 +273,134 @@ export default function DesignDetailsPage() {
     custom_text: "",
   });
 
-  // =====================================================
-  // Templates
-  // =====================================================
+  // =======================================================
+  // Load
+  // =======================================================
 
-  const templates = [
-    {
-      id: "product",
-      name: "منتج",
-      description: "عرض المنتج بشكل واضح",
-      icon: "📦",
-    },
-    {
-      id: "discount",
-      name: "خصم",
-      description: "إبراز الخصم والسعر",
-      icon: "🏷️",
-    },
-    {
-      id: "new",
-      name: "جديد",
-      description: "إعلان وصول منتج جديد",
-      icon: "✨",
-    },
-    {
-      id: "bestseller",
-      name: "الأكثر مبيعاً",
-      description: "إبراز المنتج المميز",
-      icon: "🔥",
-    },
-    {
-      id: "offer",
-      name: "عرض",
-      description: "تصميم عروض وتسويق",
-      icon: "🎁",
-    },
-    {
-      id: "simple",
-      name: "بسيط",
-      description: "تصميم نظيف",
-      icon: "◻️",
-    },
-    {
-      id: "social",
-      name: "اجتماعي",
-      description: "مناسب لمنصات التواصل",
-      icon: "📱",
-    },
-    {
-      id: "premium",
-      name: "فاخر",
-      description: "مظهر احترافي فاخر",
-      icon: "💎",
-    },
-  ];
+  useEffect(() => {
+    let mounted = true;
 
-  // =====================================================
-  // Styles
-  // =====================================================
+    async function load() {
+      if (!designId) return;
 
-  const styles = [
-    {
-      id: "professional",
-      name: "احترافي",
-    },
-    {
-      id: "luxury",
-      name: "فاخر",
-    },
-    {
-      id: "modern",
-      name: "عصري",
-    },
-    {
-      id: "clean",
-      name: "نظيف",
-    },
-    {
-      id: "dark-tech",
-      name: "تقني داكن",
-    },
-    {
-      id: "premium",
-      name: "Premium",
-    },
-    {
-      id: "sale",
-      name: "عروض",
-    },
-  ];
+      setLoading(true);
+      setError("");
 
-  // =====================================================
-  // Backgrounds
-  // =====================================================
-
-  const backgrounds = [
-    {
-      id: "clean",
-      name: "نظيف",
-      preview: "bg-white",
-    },
-    {
-      id: "white",
-      name: "أبيض",
-      preview: "bg-slate-50",
-    },
-    {
-      id: "light",
-      name: "فاتح",
-      preview: "bg-gray-100",
-    },
-    {
-      id: "dark",
-      name: "داكن",
-      preview: "bg-slate-900",
-    },
-    {
-      id: "black",
-      name: "أسود",
-      preview: "bg-black",
-    },
-    {
-      id: "gradient",
-      name: "متدرج",
-      preview: "bg-gradient-to-br from-slate-100 to-slate-300",
-    },
-  ];
-
-  // =====================================================
-  // Formats
-  // =====================================================
-
-  const formats = [
-    {
-      id: "1:1",
-      name: "مربع",
-      size: "1080 × 1080",
-    },
-    {
-      id: "4:5",
-      name: "منشور",
-      size: "1080 × 1350",
-    },
-    {
-      id: "9:16",
-      name: "ستوري",
-      size: "1080 × 1920",
-    },
-    {
-      id: "16:9",
-      name: "أفقي",
-      size: "1920 × 1080",
-    },
-  ];
-
-  // =====================================================
-  // Load design
-  // =====================================================
-
-  const loadDesign = useCallback(async () => {
-    if (!designId) return;
-
-    setLoading(true);
-    setError("");
-
-    try {
-      const {
-        data: {
-          user: currentUser,
-        },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !currentUser) {
-        router.replace("/login");
-        return;
-      }
-
-      setUser(currentUser);
-
-      // ---------------------------------------------------
-      // Shop
-      // ---------------------------------------------------
-
-      const {
-        data: shopData,
-        error: shopError,
-      } = await supabase
-        .from("shops")
-        .select("*")
-        .eq("owner_id", currentUser.id)
-        .order("created_at", {
-          ascending: true,
-        })
-        .limit(1)
-        .maybeSingle();
-
-      if (shopError) {
-        throw new Error(
-          "تعذر قراءة بيانات المتجر"
-        );
-      }
-
-      if (!shopData) {
-        throw new Error(
-          "لا يوجد متجر مرتبط بالحساب"
-        );
-      }
-
-      setShop(shopData);
-
-      // ---------------------------------------------------
-      // Design
-      // ---------------------------------------------------
-
-      const {
-        data: designData,
-        error: designError,
-      } = await supabase
-        .from("ad_images")
-        .select("*")
-        .eq("id", designId)
-        .eq("shop_id", shopData.id)
-        .maybeSingle();
-
-      if (designError) {
-        throw new Error(
-          "تعذر قراءة بيانات التصميم"
-        );
-      }
-
-      if (!designData) {
-        throw new Error(
-          "التصميم غير موجود أو غير تابع لمتجرك"
-        );
-      }
-
-      setDesign(designData);
-
-      // ---------------------------------------------------
-      // Product
-      // ---------------------------------------------------
-
-      if (designData.product_id) {
+      try {
         const {
-          data: productData,
-          error: productError,
-        } = await supabase
-          .from("products")
-          .select("*")
-          .eq("id", designData.product_id)
-          .eq("shop_id", shopData.id)
-          .maybeSingle();
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-        if (productError) {
+        if (userError) {
+          throw userError;
+        }
+
+        if (!user) {
+          router.push("/login");
+          return;
+        }
+
+        const { data: designData, error: designError } =
+          await supabase
+            .from("ad_images")
+            .select("*")
+            .eq("id", designId)
+            .single();
+
+        if (designError) {
+          throw designError;
+        }
+
+        if (!designData) {
+          throw new Error("التصميم غير موجود");
+        }
+
+        if (!designData.shop_id) {
+          throw new Error("التصميم غير مرتبط بمحل");
+        }
+
+        const { data: shopData, error: shopError } =
+          await supabase
+            .from("shops")
+            .select("*")
+            .eq("id", designData.shop_id)
+            .single();
+
+        if (shopError) {
+          throw shopError;
+        }
+
+        if (!shopData || shopData.owner_id !== user.id) {
           throw new Error(
-            "تعذر قراءة بيانات المنتج"
+            "غير مصرح لك بالوصول إلى هذا التصميم"
           );
         }
 
+        if (!designData.product_id) {
+          throw new Error(
+            "التصميم غير مرتبط بمنتج"
+          );
+        }
+
+        const { data: productData, error: productError } =
+          await supabase
+            .from("products")
+            .select("*")
+            .eq("id", designData.product_id)
+            .eq("shop_id", designData.shop_id)
+            .single();
+
+        if (productError) {
+          throw productError;
+        }
+
+        if (!mounted) return;
+
+        setDesign(designData);
+        setShop(shopData);
         setProduct(productData);
 
-        // -------------------------------------------------
-        // Initialize editor
-        // -------------------------------------------------
+        setEditor(
+          normalizeSettings(
+            designData,
+            productData
+          )
+        );
+      } catch (loadError) {
+        if (!mounted) return;
 
-        setEditor((current) => ({
-          ...current,
-
-          title:
-            current.title ||
-            productData?.name ||
-            "",
-
-          price:
-            current.price !== ""
-              ? current.price
-              : productData?.price ??
-                "",
-
-          template:
-            designData.template ||
-            designData.template_id ||
-            "product",
-
-          mode:
-            designData.mode ||
-            "simple",
-
-          style:
-            designData.style ||
-            "professional",
-
-          background:
-            designData.background ||
-            "clean",
-
-          format:
-            designData.format ||
-            "1:1",
-
-          discount:
-            designData.discount ||
-            "",
-
-          cta:
-            designData.cta ||
-            "",
-
-          custom_text:
-            designData.custom_text ||
-            "",
-        }));
+        setError(
+          loadError?.message ||
+            "تعذر تحميل التصميم."
+        );
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-    } catch (loadError) {
-      console.error(
-        "Design details load error:",
-        loadError
-      );
-
-      setError(
-        loadError?.message ||
-          "حدث خطأ أثناء تحميل التصميم"
-      );
-    } finally {
-      setLoading(false);
     }
-  }, [designId, router]);
+
+    load();
+
+    return () => {
+      mounted = false;
+    };
+  }, [designId, router, supabase]);
+
+  // =======================================================
+  // Search params messages
+  // =======================================================
 
   useEffect(() => {
-    loadDesign();
-  }, [loadDesign]);
+    if (searchParams?.get("created") === "1") {
+      setSuccess("تم إنشاء التصميم بنجاح.");
+    }
+  }, [searchParams]);
 
-  // =====================================================
+  // =======================================================
   // Editor helpers
-  // =====================================================
+  // =======================================================
 
   function updateEditor(key, value) {
     setEditor((current) => ({
@@ -388,92 +409,49 @@ export default function DesignDetailsPage() {
     }));
   }
 
-  function openEditor() {
-    if (!design || !product) return;
-
-    setMessage("");
-    setError("");
-
-    setEditor((current) => ({
-      ...current,
-      title:
-        current.title ||
-        product.name ||
-        "",
-      price:
-        current.price !== ""
-          ? current.price
-          : product.price ?? "",
-    }));
-
-    setShowEditor(true);
+  function selectTemplate(id) {
+    updateEditor("template", id);
+    updateEditor("template_id", id);
   }
 
-  function closeEditor() {
-    if (saving) return;
-
-    setShowEditor(false);
-    setMessage("");
-    setError("");
+  function selectMode(id) {
+    updateEditor("mode", id);
   }
 
-  // =====================================================
-  // Save edit
-  // =====================================================
+  function selectFormat(id) {
+    updateEditor("format", id);
+  }
+
+  // =======================================================
+  // Edit
+  // =======================================================
 
   async function saveEdit() {
-    if (!design?.id) {
-      setError("التصميم غير موجود");
-      return;
-    }
-
-    if (!product?.id) {
-      setError("المنتج غير موجود");
-      return;
-    }
-
-    if (saving) return;
+    if (!design || !product) return;
 
     setSaving(true);
     setError("");
-    setMessage("");
+    setSuccess("");
 
     try {
       const response = await fetch(
-        "/api/generate-design",
+        "/api/edit-design",
         {
           method: "POST",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            action: "edit",
-            operation: "edit_design",
+            design_id: design.id,
+            product_id: product.id,
 
-            design_id:
-              design.id,
+            template: editor.template,
+            template_id: editor.template_id,
 
-            product_id:
-              product.id,
-
-            template:
-              editor.template,
-
-            template_id:
-              editor.template,
-
-            mode:
-              editor.mode,
-
-            style:
-              editor.style,
-
-            background:
-              editor.background,
-
-            format:
-              editor.format,
+            mode: editor.mode,
+            style: editor.style,
+            background: editor.background,
+            format: editor.format,
 
             title:
               editor.title ||
@@ -482,124 +460,102 @@ export default function DesignDetailsPage() {
             price:
               editor.price === ""
                 ? null
-                : Number(
-                    editor.price
-                  ),
+                : Number(editor.price),
 
             discount:
-              editor.discount ||
-              null,
+              editor.discount || null,
 
             cta:
-              editor.cta ||
-              null,
+              editor.cta || null,
 
             custom_text:
-              editor.custom_text ||
-              null,
+              editor.custom_text || null,
           }),
         }
       );
 
-      const result =
-        await response.json();
+      const result = await response.json();
 
       if (!response.ok || !result.success) {
         throw new Error(
           result?.error ||
-            "تعذر تعديل التصميم"
+            "تعذر تعديل التصميم."
         );
       }
 
       if (result.design) {
-        setDesign(
-          result.design
-        );
+        setDesign(result.design);
       }
 
       if (result.image_url) {
         setDesign((current) => ({
           ...(current || {}),
-          image_url:
-            result.image_url,
+          image_url: result.image_url,
+          status: "completed",
+          design_settings: {
+            ...editor,
+          },
         }));
       }
 
-      setMessage(
-        `تم تعديل التصميم بنجاح. تم خصم ${
-          result.pointsCharged ?? 1
-        } نقطة.`
+      setEditOpen(false);
+
+      setSuccess(
+        result.message ||
+          "تم تعديل التصميم بنجاح."
       );
-
-      setShowEditor(false);
-
-      // ---------------------------------------------------
-      // Refresh data
-      // ---------------------------------------------------
-
-      await loadDesign();
     } catch (saveError) {
-      console.error(
-        "Save design edit error:",
-        saveError
-      );
-
       setError(
         saveError?.message ||
-          "تعذر تعديل التصميم"
+          "تعذر تعديل التصميم."
       );
     } finally {
       setSaving(false);
     }
   }
 
-  // =====================================================
+  // =======================================================
   // Delete
-  // =====================================================
+  // =======================================================
 
   async function deleteDesign() {
-    if (!design?.id || !shop?.id) {
-      return;
-    }
+    if (!design?.id || deleting) return;
+
+    const confirmed = window.confirm(
+      "هل أنت متأكد من حذف هذا التصميم؟"
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setError("");
+    setSuccess("");
 
     try {
-      setError("");
-      setMessage("");
-
-      const {
-        error: deleteError,
-      } = await supabase
-        .from("ad_images")
-        .delete()
-        .eq("id", design.id)
-        .eq("shop_id", shop.id);
+      const { error: deleteError } =
+        await supabase
+          .from("ad_images")
+          .delete()
+          .eq("id", design.id);
 
       if (deleteError) {
-        throw new Error(
-          deleteError.message ||
-            "تعذر حذف التصميم"
-        );
+        throw deleteError;
       }
 
       router.push("/designs");
     } catch (deleteError) {
-      console.error(
-        "Delete design error:",
-        deleteError
-      );
-
       setError(
         deleteError?.message ||
-          "تعذر حذف التصميم"
+          "تعذر حذف التصميم."
       );
-
-      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
-  // =====================================================
+  // =======================================================
   // Download
-  // =====================================================
+  // =======================================================
 
   function downloadDesign() {
     if (!design?.image_url) return;
@@ -607,43 +563,21 @@ export default function DesignDetailsPage() {
     const link =
       document.createElement("a");
 
-    link.href =
-      design.image_url;
+    link.href = design.image_url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
 
     link.download =
-      `${product?.name || "suq-ai-design"}.png`;
+      `${product?.name || "design"}-suq-ai`;
 
-    link.target =
-      "_blank";
-
-    document.body.appendChild(
-      link
-    );
-
+    document.body.appendChild(link);
     link.click();
-
-    document.body.removeChild(
-      link
-    );
+    link.remove();
   }
 
-  // =====================================================
-  // Open image
-  // =====================================================
-
-  function openImage() {
-    if (!design?.image_url) return;
-
-    window.open(
-      design.image_url,
-      "_blank",
-      "noopener,noreferrer"
-    );
-  }
-
-  // =====================================================
+  // =======================================================
   // Share
-  // =====================================================
+  // =======================================================
 
   async function shareDesign() {
     if (!design?.image_url) return;
@@ -655,11 +589,10 @@ export default function DesignDetailsPage() {
         await navigator.share({
           title:
             product?.name ||
-            "تصميم من سوق AI",
+            "تصميم سوق AI",
           text:
-            "تصميم إعلاني من سوق AI",
-          url:
-            design.image_url,
+            "تصميم من سوق AI",
+          url: design.image_url,
         });
 
         return;
@@ -669,743 +602,799 @@ export default function DesignDetailsPage() {
         design.image_url
       );
 
-      setMessage(
-        "تم نسخ رابط التصميم"
+      setSuccess(
+        "تم نسخ رابط التصميم."
       );
-    } catch (shareError) {
-      console.error(
-        "Share error:",
-        shareError
-      );
+    } catch {
+      // User cancelled share.
     }
   }
 
-  // =====================================================
+  // =======================================================
   // Loading
-  // =====================================================
+  // =======================================================
 
   if (loading) {
     return (
-      <main
-        dir="rtl"
-        className="min-h-screen bg-slate-50 flex items-center justify-center"
-      >
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-600" />
+      <>
+        <style>{styles}</style>
 
-          <p className="text-sm font-medium text-slate-600">
-            جاري تحميل التصميم...
-          </p>
-        </div>
-      </main>
+        <main className="page">
+          <div className="loadingCard">
+            <div className="spinner" />
+            <div>
+              <strong>
+                جاري تحميل التصميم
+              </strong>
+              <span>
+                لحظات ونجهز لك التفاصيل...
+              </span>
+            </div>
+          </div>
+        </main>
+      </>
     );
   }
 
-  // =====================================================
+  // =======================================================
   // Error
-  // =====================================================
+  // =======================================================
 
   if (error && !design) {
     return (
-      <main
-        dir="rtl"
-        className="min-h-screen bg-slate-50 p-6"
-      >
-        <div className="mx-auto max-w-2xl">
-          <div className="rounded-3xl border border-red-200 bg-white p-8 shadow-sm">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl">
+      <>
+        <style>{styles}</style>
+
+        <main className="page">
+          <div className="errorCard">
+            <div className="errorIcon">
               !
             </div>
 
-            <h1 className="text-xl font-bold text-slate-900">
-              تعذر تحميل التصميم
-            </h1>
+            <h2>
+              تعذر فتح التصميم
+            </h2>
 
-            <p className="mt-3 text-sm leading-7 text-slate-500">
-              {error}
-            </p>
+            <p>{error}</p>
 
             <button
+              className="primaryButton"
               onClick={() =>
-                router.push(
-                  "/designs"
-                )
+                router.push("/designs")
               }
-              className="mt-6 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700"
             >
-              العودة للتصاميم
+              العودة إلى مركز التصاميم
             </button>
           </div>
-        </div>
-      </main>
+        </main>
+      </>
     );
   }
 
-  // =====================================================
-  // Main
-  // =====================================================
+  const status = getStatus(
+    design?.status
+  );
+
+  const isGenerating =
+    String(design?.status || "")
+      .toLowerCase() ===
+      "generating";
+
+  const productNeedsConfirmation =
+    String(
+      product?.safety_status || ""
+    ).toLowerCase() === "review" ||
+    String(
+      product?.verification_status || ""
+    ).toLowerCase() === "unverified" ||
+    String(
+      product?.verification_status || ""
+    ).toLowerCase() === "review";
 
   return (
-    <main
-      dir="rtl"
-      className="min-h-screen bg-slate-50"
-    >
-      {/* =================================================
-          Header
-      ================================================= */}
+    <>
+      <style>{styles}</style>
 
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <main className="page">
+        {/* =================================================
+            Header
+        ================================================= */}
+
+        <header className="topbar">
+          <button
+            className="backButton"
+            onClick={() =>
+              router.push("/designs")
+            }
+          >
+            ←
+            <span>
+              مركز التصاميم
+            </span>
+          </button>
+
+          <div className="brand">
+            <div className="brandMark">
+              AI
+            </div>
+
             <div>
-              <button
-                onClick={() =>
-                  router.push(
-                    "/designs"
-                  )
-                }
-                className="mb-2 text-sm font-medium text-slate-500 hover:text-emerald-600"
-              >
-                ← مركز التصميم
-              </button>
+              <strong>
+                مركز التصاميم
+              </strong>
 
-              <h1 className="text-2xl font-black tracking-tight text-slate-900">
-                تفاصيل التصميم
-              </h1>
-
-              <p className="mt-1 text-sm text-slate-500">
-                عرض وتعديل التصميم الإعلاني
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={openEditor}
-                disabled={
-                  design?.status ===
-                  "generating"
-                }
-                className="rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                ✎ تعديل التصميم
-              </button>
-
-              <button
-                onClick={() =>
-                  setShowDeleteConfirm(
-                    true
-                  )
-                }
-                className="rounded-xl border border-red-200 bg-white px-5 py-3 text-sm font-bold text-red-600 hover:bg-red-50"
-              >
-                حذف
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* =================================================
-          Messages
-      ================================================= */}
-
-      <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
-        {message && (
-          <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
-            ✓ {message}
-          </div>
-        )}
-
-        {error && design && (
-          <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* =================================================
-          Content
-      ================================================= */}
-
-      <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* =================================================
-              Preview
-          ================================================= */}
-
-          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="font-bold text-slate-900">
-                  معاينة التصميم
-                </h2>
-
-                <p className="mt-1 text-xs text-slate-500">
-                  الصورة الحالية
-                </p>
-              </div>
-
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-bold ${
-                  design?.status ===
-                  "completed"
-                    ? "bg-emerald-50 text-emerald-700"
-                    : design?.status ===
-                      "generating"
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-slate-100 text-slate-600"
-                }`}
-              >
-                {design?.status ===
-                "completed"
-                  ? "مكتمل"
-                  : design?.status ===
-                    "generating"
-                  ? "جاري الإنشاء"
-                  : design?.status ||
-                    "غير معروف"}
+              <span>
+                سوق AI
               </span>
             </div>
-
-            <div className="flex min-h-[420px] items-center justify-center overflow-hidden rounded-3xl bg-slate-100 p-4">
-              {design?.image_url ? (
-                <img
-                  src={
-                    design.image_url
-                  }
-                  alt={
-                    product?.name ||
-                    "التصميم"
-                  }
-                  className="max-h-[720px] w-auto max-w-full rounded-2xl object-contain shadow-lg"
-                />
-              ) : (
-                <div className="text-center text-slate-400">
-                  <div className="mb-3 text-4xl">
-                    🖼️
-                  </div>
-
-                  <p className="text-sm font-medium">
-                    لا توجد صورة للتصميم
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 grid gap-2 sm:grid-cols-3">
-              <button
-                onClick={openImage}
-                disabled={
-                  !design?.image_url
-                }
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                فتح الصورة
-              </button>
-
-              <button
-                onClick={
-                  downloadDesign
-                }
-                disabled={
-                  !design?.image_url
-                }
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                تحميل
-              </button>
-
-              <button
-                onClick={
-                  shareDesign
-                }
-                disabled={
-                  !design?.image_url
-                }
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                مشاركة
-              </button>
-            </div>
           </div>
+        </header>
 
-          {/* =================================================
-              Details
-          ================================================= */}
+        {/* =================================================
+            Messages
+        ================================================= */}
 
-          <div className="space-y-5">
-            {/* Product */}
+        {error && (
+          <div className="message errorMessage">
+            <span>⚠️</span>
+            <span>{error}</span>
+            <button
+              onClick={() =>
+                setError("")
+              }
+            >
+              ×
+            </button>
+          </div>
+        )}
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-bold text-slate-900">
-                  المنتج
-                </h2>
+        {success && (
+          <div className="message successMessage">
+            <span>✓</span>
+            <span>{success}</span>
+            <button
+              onClick={() =>
+                setSuccess("")
+              }
+            >
+              ×
+            </button>
+          </div>
+        )}
 
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                  {product?.category ||
-                    "منتج"}
+        {/* =================================================
+            Main
+        ================================================= */}
+
+        <section className="layout">
+          {/* Preview */}
+          <div className="previewColumn">
+            <div className="previewCard">
+              <div className="previewHeader">
+                <div>
+                  <span className="eyebrow">
+                    تصميم المنتج
+                  </span>
+
+                  <h1>
+                    {product?.name ||
+                      "تصميم"}
+                  </h1>
+                </div>
+
+                <span
+                  className={
+                    status.className
+                  }
+                >
+                  {status.label}
                 </span>
               </div>
 
-              <div className="flex gap-4">
-                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-slate-100">
+              <div className="imageFrame">
+                {design?.image_url ? (
+                  <img
+                    src={
+                      design.image_url
+                    }
+                    alt={
+                      product?.name ||
+                      "تصميم المنتج"
+                    }
+                  />
+                ) : (
+                  <div className="emptyImage">
+                    <span>
+                      🎨
+                    </span>
+                    <p>
+                      لا توجد صورة للتصميم
+                    </p>
+                  </div>
+                )}
+
+                {isGenerating && (
+                  <div className="imageOverlay">
+                    <div className="spinner light" />
+                    <strong>
+                      جاري إنشاء التصميم
+                    </strong>
+                  </div>
+                )}
+              </div>
+
+              <div className="previewActions">
+                <button
+                  className="primaryButton"
+                  onClick={() =>
+                    setEditOpen(true)
+                  }
+                  disabled={
+                    saving ||
+                    isGenerating
+                  }
+                >
+                  ✏️ تعديل التصميم
+                </button>
+
+                <button
+                  className="secondaryButton"
+                  onClick={
+                    downloadDesign
+                  }
+                  disabled={
+                    !design?.image_url
+                  }
+                >
+                  ⬇️ تحميل
+                </button>
+
+                <button
+                  className="secondaryButton"
+                  onClick={shareDesign}
+                  disabled={
+                    !design?.image_url
+                  }
+                >
+                  ↗️ مشاركة
+                </button>
+              </div>
+            </div>
+
+            {/* Product */}
+            <div className="card">
+              <div className="sectionTitle">
+                <div>
+                  <span className="sectionIcon">
+                    📦
+                  </span>
+                  <div>
+                    <h2>
+                      المنتج
+                    </h2>
+                    <p>
+                      المنتج المستخدم في التصميم
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="productRow">
+                <div className="productImage">
                   {product?.image_url ? (
                     <img
                       src={
                         product.image_url
                       }
                       alt={
-                        product.name
+                        product.name ||
+                        "المنتج"
                       }
-                      className="h-full w-full object-contain"
                     />
-                  ) : null}
+                  ) : (
+                    "📦"
+                  )}
                 </div>
 
-                <div className="min-w-0">
-                  <h3 className="truncate font-bold text-slate-900">
+                <div className="productInfo">
+                  <strong>
                     {product?.name ||
-                      "منتج غير معروف"}
-                  </h3>
+                      "—"}
+                  </strong>
 
-                  {product?.brand && (
-                    <p className="mt-1 text-sm text-slate-500">
-                      {product.brand}
-                    </p>
-                  )}
+                  <span>
+                    {product?.brand ||
+                      "بدون علامة تجارية"}
+                  </span>
 
-                  {product?.price !=
-                    null && (
-                    <p className="mt-2 text-sm font-bold text-emerald-600">
-                      {product.price}{" "}
-                      {product.currency ||
-                        "AED"}
+                  <span>
+                    {product?.category ||
+                      "بدون تصنيف"}
+                  </span>
+                </div>
+
+                {productNeedsConfirmation && (
+                  <span className="warningBadge">
+                    🟡 يحتاج تأكيد
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Details */}
+          <aside className="detailsColumn">
+            {/* Design info */}
+            <div className="card">
+              <div className="sectionTitle">
+                <div>
+                  <span className="sectionIcon">
+                    🎨
+                  </span>
+
+                  <div>
+                    <h2>
+                      تفاصيل التصميم
+                    </h2>
+
+                    <p>
+                      معلومات التصميم الحالي
                     </p>
-                  )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="infoGrid">
+                <div className="infoItem">
+                  <span>
+                    الحالة
+                  </span>
+                  <strong>
+                    {status.label}
+                  </strong>
+                </div>
+
+                <div className="infoItem">
+                  <span>
+                    المقاس
+                  </span>
+                  <strong>
+                    {
+                      editor.format
+                    }
+                  </strong>
+                </div>
+
+                <div className="infoItem">
+                  <span>
+                    التاريخ
+                  </span>
+                  <strong>
+                    {formatDate(
+                      design?.created_at
+                    )}
+                  </strong>
+                </div>
+
+                <div className="infoItem">
+                  <span>
+                    التعديل
+                  </span>
+                  <strong>
+                    1 نقطة
+                  </strong>
                 </div>
               </div>
             </div>
 
-            {/* Design information */}
+            {/* Settings */}
+            <div className="card">
+              <div className="sectionTitle">
+                <div>
+                  <span className="sectionIcon">
+                    ⚙️
+                  </span>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 font-bold text-slate-900">
-                إعدادات التصميم
-              </h2>
+                  <div>
+                    <h2>
+                      إعدادات التصميم
+                    </h2>
 
-              <div className="grid grid-cols-2 gap-3">
-                <InfoBox
-                  label="المقاس"
-                  value={
-                    design?.format ||
-                    editor.format ||
-                    "1:1"
-                  }
-                />
+                    <p>
+                      الإعدادات المحفوظة
+                    </p>
+                  </div>
+                </div>
+              </div>
 
-                <InfoBox
-                  label="النمط"
-                  value={
-                    design?.style ||
-                    editor.style ||
-                    "احترافي"
-                  }
-                />
+              <div className="settingsList">
+                <div>
+                  <span>
+                    القالب
+                  </span>
 
-                <InfoBox
-                  label="الخلفية"
-                  value={
-                    design?.background ||
-                    editor.background ||
-                    "نظيف"
-                  }
-                />
+                  <strong>
+                    {
+                      TEMPLATES.find(
+                        (item) =>
+                          item.id ===
+                          editor.template
+                      )?.title ||
+                      editor.template
+                    }
+                  </strong>
+                </div>
 
-                <InfoBox
-                  label="الوضع"
-                  value={
-                    design?.mode ||
-                    editor.mode ||
-                    "بسيط"
-                  }
-                />
+                <div>
+                  <span>
+                    النوع
+                  </span>
+
+                  <strong>
+                    {
+                      MODES.find(
+                        (item) =>
+                          item.id ===
+                          editor.mode
+                      )?.title ||
+                      editor.mode
+                    }
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    الأسلوب
+                  </span>
+
+                  <strong>
+                    {editor.style}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    الخلفية
+                  </span>
+
+                  <strong>
+                    {
+                      editor.background
+                    }
+                  </strong>
+                </div>
               </div>
             </div>
 
             {/* Shop */}
-
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 font-bold text-slate-900">
-                المتجر
-              </h2>
-
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-slate-500">
-                    اسم المتجر
+            <div className="card">
+              <div className="sectionTitle">
+                <div>
+                  <span className="sectionIcon">
+                    🏪
                   </span>
 
-                  <span className="font-bold text-slate-800">
-                    {shop?.name ||
-                      "—"}
-                  </span>
+                  <div>
+                    <h2>
+                      هوية المحل
+                    </h2>
+
+                    <p>
+                      بيانات المحل المستخدمة
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="shopIdentity">
+                <div className="shopLogo">
+                  {shop?.logo_url ? (
+                    <img
+                      src={
+                        shop.logo_url
+                      }
+                      alt={
+                        shop.name ||
+                        "المحل"
+                      }
+                    />
+                  ) : (
+                    "🏪"
+                  )}
                 </div>
 
-                {shop?.phone && (
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-500">
-                      الهاتف
-                    </span>
+                <div>
+                  <strong>
+                    {shop?.name ||
+                      "—"}
+                  </strong>
 
-                    <span className="font-medium text-slate-800">
-                      {shop.phone}
+                  {shop?.phone && (
+                    <span>
+                      ☎️ {shop.phone}
                     </span>
-                  </div>
-                )}
+                  )}
 
-                {shop?.whatsapp && (
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-slate-500">
-                      واتساب
+                  {shop?.whatsapp && (
+                    <span>
+                      💬 {shop.whatsapp}
                     </span>
-
-                    <span className="font-medium text-slate-800">
-                      {shop.whatsapp}
-                    </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Created */}
+            {/* Rules */}
+            <div className="card rulesCard">
+              <div className="sectionTitle">
+                <div>
+                  <span className="sectionIcon">
+                    🛡️
+                  </span>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 font-bold text-slate-900">
-                معلومات إضافية
-              </h2>
+                  <div>
+                    <h2>
+                      قواعد التصميم
+                    </h2>
 
-              <div className="space-y-3 text-sm">
-                <InfoRow
-                  label="تاريخ الإنشاء"
-                  value={
-                    design?.created_at
-                      ? new Date(
-                          design.created_at
-                        ).toLocaleString(
-                          "ar-AE"
-                        )
-                      : "—"
-                  }
-                />
-
-                <InfoRow
-                  label="آخر تحديث"
-                  value={
-                    design?.completed_at
-                      ? new Date(
-                          design.completed_at
-                        ).toLocaleString(
-                          "ar-AE"
-                        )
-                      : "—"
-                  }
-                />
-
-                <InfoRow
-                  label="المعرّف"
-                  value={
-                    design?.id ||
-                    "—"
-                  }
-                />
+                    <p>
+                      الحماية الأساسية للمحتوى
+                    </p>
+                  </div>
+                </div>
               </div>
+
+              <ul>
+                <li>
+                  <span>✓</span>
+                  المنتج هو محور الإعلان
+                </li>
+
+                <li>
+                  <span>✓</span>
+                  الحفاظ على هوية المنتج الأصلية
+                </li>
+
+                <li>
+                  <span>✓</span>
+                  عدم اختراع معلومات عن المنتج
+                </li>
+
+                <li>
+                  <span>✓</span>
+                  استخدام هوية المحل
+                </li>
+
+                <li>
+                  <span>✓</span>
+                  التصميم موجه للإعلان والنشر
+                </li>
+              </ul>
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* =================================================
-          EDITOR DRAWER
-      ================================================= */}
+            {/* Danger */}
+            <div className="card dangerCard">
+              <div>
+                <strong>
+                  حذف التصميم
+                </strong>
 
-      {showEditor && (
-        <div className="fixed inset-0 z-50">
+                <span>
+                  حذف التصميم من مركز التصاميم.
+                </span>
+              </div>
+
+              <button
+                className="dangerButton"
+                onClick={
+                  deleteDesign
+                }
+                disabled={
+                  deleting ||
+                  isGenerating
+                }
+              >
+                {deleting
+                  ? "جاري الحذف..."
+                  : "حذف"}
+              </button>
+            </div>
+          </aside>
+        </section>
+
+        {/* =================================================
+            Edit Drawer
+        ================================================= */}
+
+        {editOpen && (
           <div
-            className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"
-            onClick={() => {
-              if (!saving) {
-                closeEditor();
+            className="drawerBackdrop"
+            onClick={(event) => {
+              if (
+                event.target ===
+                event.currentTarget
+              ) {
+                setEditOpen(false);
               }
             }}
-          />
-
-          <aside className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-white shadow-2xl">
-            {/* Header */}
-
-            <div className="border-b border-slate-200 px-5 py-5 sm:px-7">
-              <div className="flex items-start justify-between gap-4">
+          >
+            <aside className="drawer">
+              <div className="drawerHeader">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-600">
-                    DESIGN EDITOR
-                  </p>
-
-                  <h2 className="mt-1 text-xl font-black text-slate-900">
+                  <span className="eyebrow">
                     تعديل التصميم
+                  </span>
+
+                  <h2>
+                    عدّل التصميم كما تريد
                   </h2>
 
-                  <p className="mt-1 text-sm text-slate-500">
-                    تعديل الإعدادات ثم إعادة إنشاء التصميم
+                  <p>
+                    سيتم إعادة إنشاء التصميم
+                    باستخدام المنتج نفسه.
                   </p>
                 </div>
 
                 <button
-                  onClick={
-                    closeEditor
+                  className="closeButton"
+                  onClick={() =>
+                    setEditOpen(false)
                   }
                   disabled={saving}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"
                 >
                   ×
                 </button>
               </div>
-            </div>
 
-            {/* Body */}
+              <div className="drawerBody">
+                {/* Product reminder */}
+                <div className="editProduct">
+                  <div className="editProductImage">
+                    {product?.image_url ? (
+                      <img
+                        src={
+                          product.image_url
+                        }
+                        alt={
+                          product.name ||
+                          "المنتج"
+                        }
+                      />
+                    ) : (
+                      "📦"
+                    )}
+                  </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-6 sm:px-7">
-              <div className="space-y-7">
-                {/* Cost notice */}
+                  <div>
+                    <strong>
+                      {product?.name ||
+                        "المنتج"}
+                    </strong>
 
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-600 shadow-sm">
-                      ✦
-                    </div>
-
-                    <div>
-                      <p className="font-bold text-emerald-900">
-                        تكلفة التعديل: 1 نقطة
-                      </p>
-
-                      <p className="mt-1 text-xs leading-6 text-emerald-700">
-                        يتم خصم النقطة عند بدء العملية، وإذا فشل التعديل يتم إرجاع النقطة تلقائياً.
-                      </p>
-                    </div>
+                    <span>
+                      المنتج الأصلي محفوظ
+                    </span>
                   </div>
                 </div>
 
-                {/* Product */}
-
-                <section>
-                  <SectionTitle
-                    number="01"
-                    title="المنتج"
-                  />
-
-                  <div className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="h-14 w-14 overflow-hidden rounded-xl bg-white">
-                      {product?.image_url && (
-                        <img
-                          src={
-                            product.image_url
-                          }
-                          alt={
-                            product.name
-                          }
-                          className="h-full w-full object-contain"
-                        />
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="truncate font-bold text-slate-900">
-                        {product?.name}
-                      </p>
-
-                      <p className="text-xs text-slate-500">
-                        المنتج ثابت أثناء التعديل
-                      </p>
-                    </div>
-                  </div>
-                </section>
-
-                {/* Template */}
-
-                <section>
-                  <SectionTitle
-                    number="02"
-                    title="القالب"
-                  />
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {templates.map(
-                      (item) => {
-                        const selected =
-                          editor.template ===
-                          item.id;
-
-                        return (
-                          <button
-                            key={
-                              item.id
-                            }
-                            type="button"
-                            onClick={() =>
-                              updateEditor(
-                                "template",
-                                item.id
-                              )
-                            }
-                            className={`rounded-2xl border p-3 text-right transition ${
-                              selected
-                                ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100"
-                                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                            }`}
-                          >
-                            <div className="text-xl">
-                              {
-                                item.icon
-                              }
-                            </div>
-
-                            <p className="mt-2 text-sm font-bold text-slate-900">
-                              {
-                                item.name
-                              }
-                            </p>
-
-                            <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                              {
-                                item.description
-                              }
-                            </p>
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
-                </section>
-
                 {/* Mode */}
+                <section className="editorSection">
+                  <div className="editorHeading">
+                    <span>
+                      1
+                    </span>
 
-                <section>
-                  <SectionTitle
-                    number="03"
-                    title="طريقة التصميم"
-                  />
+                    <div>
+                      <strong>
+                        نوع التصميم
+                      </strong>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <ChoiceButton
-                      selected={
-                        editor.mode ===
-                        "simple"
-                      }
-                      title="بسيط"
-                      description="تكوين سريع ونظيف"
-                      onClick={() =>
-                        updateEditor(
-                          "mode",
-                          "simple"
-                        )
-                      }
-                    />
-
-                    <ChoiceButton
-                      selected={
-                        editor.mode ===
-                        "professional"
-                      }
-                      title="احترافي"
-                      description="تكوين إعلاني متقدم"
-                      onClick={() =>
-                        updateEditor(
-                          "mode",
-                          "professional"
-                        )
-                      }
-                    />
+                      <small>
+                        اختر طريقة التصميم
+                      </small>
+                    </div>
                   </div>
-                </section>
 
-                {/* Style */}
-
-                <section>
-                  <SectionTitle
-                    number="04"
-                    title="الأسلوب"
-                  />
-
-                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {styles.map(
-                      (item) => (
+                  <div className="modeGrid">
+                    {MODES.map(
+                      (mode) => (
                         <button
                           key={
-                            item.id
+                            mode.id
                           }
-                          type="button"
+                          className={
+                            editor.mode ===
+                            mode.id
+                              ? "modeOption selected"
+                              : "modeOption"
+                          }
                           onClick={() =>
-                            updateEditor(
-                              "style",
-                              item.id
+                            selectMode(
+                              mode.id
                             )
                           }
-                          className={`rounded-xl border px-3 py-3 text-sm font-bold transition ${
-                            editor.style ===
-                            item.id
-                              ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                          }`}
+                          type="button"
                         >
-                          {
-                            item.name
-                          }
+                          <span>
+                            {
+                              mode.icon
+                            }
+                          </span>
+
+                          <strong>
+                            {
+                              mode.title
+                            }
+                          </strong>
+
+                          <small>
+                            {
+                              mode.description
+                            }
+                          </small>
                         </button>
                       )
                     )}
                   </div>
                 </section>
 
-                {/* Background */}
+                {/* Template */}
+                <section className="editorSection">
+                  <div className="editorHeading">
+                    <span>
+                      2
+                    </span>
 
-                <section>
-                  <SectionTitle
-                    number="05"
-                    title="الخلفية"
-                  />
+                    <div>
+                      <strong>
+                        القالب
+                      </strong>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    {backgrounds.map(
-                      (item) => (
+                      <small>
+                        اختر الشكل المناسب للإعلان
+                      </small>
+                    </div>
+                  </div>
+
+                  <div className="templateGrid">
+                    {TEMPLATES.map(
+                      (template) => (
                         <button
                           key={
-                            item.id
+                            template.id
                           }
                           type="button"
+                          className={
+                            editor.template ===
+                            template.id
+                              ? "templateOption selected"
+                              : "templateOption"
+                          }
                           onClick={() =>
-                            updateEditor(
-                              "background",
-                              item.id
+                            selectTemplate(
+                              template.id
                             )
                           }
-                          className={`overflow-hidden rounded-2xl border transition ${
-                            editor.background ===
-                            item.id
-                              ? "border-emerald-500 ring-2 ring-emerald-100"
-                              : "border-slate-200"
-                          }`}
                         >
-                          <div
-                            className={`h-16 ${item.preview}`}
-                          />
+                          <span className="templateIcon">
+                            {
+                              template.icon
+                            }
+                          </span>
 
-                          <div className="bg-white px-3 py-2 text-right">
-                            <span className="text-xs font-bold text-slate-700">
+                          <span>
+                            <strong>
                               {
-                                item.name
+                                template.title
                               }
-                            </span>
-                          </div>
+                            </strong>
+
+                            <small>
+                              {
+                                template.description
+                              }
+                            </small>
+                          </span>
                         </button>
                       )
                     )}
@@ -1413,363 +1402,1476 @@ export default function DesignDetailsPage() {
                 </section>
 
                 {/* Format */}
+                <section className="editorSection">
+                  <div className="editorHeading">
+                    <span>
+                      3
+                    </span>
 
-                <section>
-                  <SectionTitle
-                    number="06"
-                    title="المقاس"
-                  />
+                    <div>
+                      <strong>
+                        مقاس الإعلان
+                      </strong>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    {formats.map(
-                      (item) => (
+                      <small>
+                        اختر المقاس المناسب
+                      </small>
+                    </div>
+                  </div>
+
+                  <div className="formatGrid">
+                    {FORMATS.map(
+                      (format) => (
                         <button
                           key={
-                            item.id
+                            format.id
                           }
                           type="button"
+                          className={
+                            editor.format ===
+                            format.id
+                              ? "formatOption selected"
+                              : "formatOption"
+                          }
                           onClick={() =>
-                            updateEditor(
-                              "format",
-                              item.id
+                            selectFormat(
+                              format.id
                             )
                           }
-                          className={`rounded-2xl border p-4 text-right transition ${
-                            editor.format ===
-                            item.id
-                              ? "border-emerald-500 bg-emerald-50"
-                              : "border-slate-200 bg-white hover:bg-slate-50"
-                          }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-bold text-slate-900">
-                              {
-                                item.name
-                              }
-                            </span>
-
-                            <span className="text-xs font-bold text-emerald-600">
-                              {
-                                item.id
-                              }
-                            </span>
-                          </div>
-
-                          <p className="mt-2 text-xs text-slate-500">
+                          <span>
                             {
-                              item.size
+                              format.icon
                             }
-                          </p>
+                          </span>
+
+                          <strong>
+                            {
+                              format.title
+                            }
+                          </strong>
+
+                          <small>
+                            {
+                              format.description
+                            }
+                          </small>
+
+                          <b>
+                            {
+                              format.id
+                            }
+                          </b>
                         </button>
                       )
                     )}
                   </div>
                 </section>
 
+                {/* Style */}
+                <section className="editorSection">
+                  <div className="editorHeading">
+                    <span>
+                      4
+                    </span>
+
+                    <div>
+                      <strong>
+                        الأسلوب والخلفية
+                      </strong>
+
+                      <small>
+                        تحكم في شكل الإعلان
+                      </small>
+                    </div>
+                  </div>
+
+                  <label className="field">
+                    <span>
+                      الأسلوب
+                    </span>
+
+                    <select
+                      value={
+                        editor.style
+                      }
+                      onChange={(event) =>
+                        updateEditor(
+                          "style",
+                          event.target.value
+                        )
+                      }
+                    >
+                      {STYLES.map(
+                        (item) => (
+                          <option
+                            key={item}
+                            value={item}
+                          >
+                            {item}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>
+                      الخلفية
+                    </span>
+
+                    <select
+                      value={
+                        editor.background
+                      }
+                      onChange={(event) =>
+                        updateEditor(
+                          "background",
+                          event.target.value
+                        )
+                      }
+                    >
+                      {BACKGROUNDS.map(
+                        (item) => (
+                          <option
+                            key={item}
+                            value={item}
+                          >
+                            {item}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+                </section>
+
                 {/* Content */}
+                <section className="editorSection">
+                  <div className="editorHeading">
+                    <span>
+                      5
+                    </span>
 
-                <section>
-                  <SectionTitle
-                    number="07"
-                    title="المحتوى"
-                  />
+                    <div>
+                      <strong>
+                        محتوى الإعلان
+                      </strong>
 
-                  <div className="mt-4 space-y-4">
-                    <Field
-                      label="العنوان"
+                      <small>
+                        النصوص الاختيارية
+                      </small>
+                    </div>
+                  </div>
+
+                  <label className="field">
+                    <span>
+                      العنوان
+                    </span>
+
+                    <input
+                      type="text"
                       value={
                         editor.title
                       }
-                      onChange={(
-                        value
-                      ) =>
+                      onChange={(event) =>
                         updateEditor(
                           "title",
-                          value
+                          event.target.value
                         )
                       }
                       placeholder={
                         product?.name ||
-                        "عنوان المنتج"
+                        "اسم المنتج"
                       }
                     />
+                  </label>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field
-                        label="السعر"
+                  <div className="twoFields">
+                    <label className="field">
+                      <span>
+                        السعر
+                      </span>
+
+                      <input
                         type="number"
+                        inputMode="decimal"
                         value={
                           editor.price
                         }
-                        onChange={(
-                          value
-                        ) =>
+                        onChange={(event) =>
                           updateEditor(
                             "price",
-                            value
+                            event.target.value
                           )
                         }
-                        placeholder="0"
+                        placeholder="مثال: 99"
                       />
+                    </label>
 
-                      <Field
-                        label="الخصم"
+                    <label className="field">
+                      <span>
+                        الخصم
+                      </span>
+
+                      <input
+                        type="text"
                         value={
                           editor.discount
                         }
-                        onChange={(
-                          value
-                        ) =>
+                        onChange={(event) =>
                           updateEditor(
                             "discount",
-                            value
+                            event.target.value
                           )
                         }
                         placeholder="مثال: 20%"
                       />
-                    </div>
+                    </label>
+                  </div>
 
-                    <Field
-                      label="زر الإجراء"
+                  <label className="field">
+                    <span>
+                      زر الإجراء CTA
+                    </span>
+
+                    <input
+                      type="text"
                       value={
                         editor.cta
                       }
-                      onChange={(
-                        value
-                      ) =>
+                      onChange={(event) =>
                         updateEditor(
                           "cta",
-                          value
+                          event.target.value
                         )
                       }
                       placeholder="اطلب الآن"
                     />
+                  </label>
 
+                  <label className="field">
+                    <span>
+                      نص إضافي
+                    </span>
+
+                    <textarea
+                      value={
+                        editor.custom_text
+                      }
+                      onChange={(event) =>
+                        updateEditor(
+                          "custom_text",
+                          event.target.value
+                        )
+                      }
+                      placeholder="اكتب أي رسالة إضافية للإعلان..."
+                      rows={4}
+                    />
+                  </label>
+                </section>
+
+                {/* Responsibility */}
+                {productNeedsConfirmation && (
+                  <div className="responsibilityBox">
                     <div>
-                      <label className="mb-2 block text-sm font-bold text-slate-800">
-                        نص إضافي
-                      </label>
+                      <strong>
+                        🟡 المنتج يحتاج تأكيد
+                      </strong>
 
-                      <textarea
-                        value={
-                          editor.custom_text
-                        }
-                        onChange={(
-                          event
-                        ) =>
-                          updateEditor(
-                            "custom_text",
-                            event
-                              .target
-                              .value
-                          )
-                        }
-                        rows={4}
-                        placeholder="أي ملاحظة أو نص إضافي تريد ظهوره في الإعلان..."
-                        className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-                      />
+                      <p>
+                        بعض معلومات المنتج غير مكتملة
+                        أو لم يتم التحقق منها بشكل كافٍ.
+                        يمكنك المتابعة فقط بعد تأكيد
+                        مسؤوليتك عن صحة معلومات المنتج
+                        ومشروعيته.
+                      </p>
                     </div>
                   </div>
-                </section>
+                )}
+
+                {/* Cost */}
+                <div className="costBox">
+                  <div>
+                    <span>
+                      تكلفة التعديل
+                    </span>
+
+                    <strong>
+                      1 نقطة
+                    </strong>
+                  </div>
+
+                  <small>
+                    إذا فشل التعديل بعد الخصم،
+                    يتم استرجاع النقطة تلقائيًا.
+                  </small>
+                </div>
               </div>
-            </div>
 
-            {/* Footer */}
-
-            <div className="border-t border-slate-200 bg-white px-5 py-4 sm:px-7">
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="drawerFooter">
                 <button
-                  onClick={
-                    saveEdit
+                  className="secondaryButton large"
+                  onClick={() =>
+                    setEditOpen(false)
                   }
-                  disabled={
-                    saving
-                  }
-                  className="flex-1 rounded-2xl bg-emerald-600 px-5 py-4 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving
-                    ? "جاري تعديل التصميم..."
-                    : "حفظ التعديل — 1 نقطة"}
-                </button>
-
-                <button
-                  onClick={
-                    closeEditor
-                  }
-                  disabled={
-                    saving
-                  }
-                  className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  disabled={saving}
                 >
                   إلغاء
                 </button>
+
+                <button
+                  className="primaryButton large"
+                  onClick={saveEdit}
+                  disabled={
+                    saving ||
+                    isGenerating
+                  }
+                >
+                  {saving ? (
+                    <>
+                      <span className="buttonSpinner" />
+                      جاري التعديل...
+                    </>
+                  ) : (
+                    <>
+                      🎨 حفظ وتعديل
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
-          </aside>
-        </div>
-      )}
-
-      {/* =================================================
-          DELETE MODAL
-      ================================================= */}
-
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-xl text-red-600">
-              !
-            </div>
-
-            <h2 className="text-xl font-black text-slate-900">
-              حذف التصميم؟
-            </h2>
-
-            <p className="mt-3 text-sm leading-7 text-slate-500">
-              سيتم حذف سجل التصميم من المتجر. هذا الإجراء لا يمكن التراجع عنه.
-            </p>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={
-                  deleteDesign
-                }
-                className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white hover:bg-red-700"
-              >
-                نعم، حذف
-              </button>
-
-              <button
-                onClick={() =>
-                  setShowDeleteConfirm(
-                    false
-                  )
-                }
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
-              >
-                إلغاء
-              </button>
-            </div>
+            </aside>
           </div>
-        </div>
-      )}
-    </main>
-  );
-}
-
-// =========================================================
-// Components
-// =========================================================
-
-function SectionTitle({
-  number,
-  title,
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-[11px] font-black text-emerald-700">
-        {number}
-      </div>
-
-      <h3 className="font-black text-slate-900">
-        {title}
-      </h3>
-    </div>
-  );
-}
-
-function ChoiceButton({
-  selected,
-  title,
-  description,
-  onClick,
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-2xl border p-4 text-right transition ${
-        selected
-          ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-100"
-          : "border-slate-200 bg-white hover:bg-slate-50"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <span className="font-bold text-slate-900">
-          {title}
-        </span>
-
-        {selected && (
-          <span className="text-emerald-600">
-            ✓
-          </span>
         )}
-      </div>
-
-      <p className="mt-2 text-xs leading-5 text-slate-500">
-        {description}
-      </p>
-    </button>
+      </main>
+    </>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}) {
+// =========================================================
+// Suspense wrapper
+// =========================================================
+
+export default function Page() {
   return (
-    <div>
-      <label className="mb-2 block text-sm font-bold text-slate-800">
-        {label}
-      </label>
-
-      <input
-        type={type}
-        value={value ?? ""}
-        onChange={(event) =>
-          onChange(
-            event.target.value
-          )
-        }
-        placeholder={placeholder}
-        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
-      />
-    </div>
+    <Suspense
+      fallback={
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "grid",
+            placeItems: "center",
+            fontFamily:
+              "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+          }}
+        >
+          جاري التحميل...
+        </div>
+      }
+    >
+      <DesignDetailsPage />
+    </Suspense>
   );
 }
 
-function InfoBox({
-  label,
-  value,
-}) {
-  return (
-    <div className="rounded-2xl bg-slate-50 p-4">
-      <p className="text-xs text-slate-500">
-        {label}
-      </p>
+// =========================================================
+// Styles
+// =========================================================
 
-      <p className="mt-1 text-sm font-bold text-slate-900">
-        {value}
-      </p>
-    </div>
-  );
-}
+const styles = `
+  * {
+    box-sizing: border-box;
+  }
 
-function InfoRow({
-  label,
-  value,
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-      <span className="text-slate-500">
-        {label}
-      </span>
+  body {
+    margin: 0;
+    background: #f5f7f6;
+  }
 
-      <span className="max-w-[65%] break-all text-left font-medium text-slate-800">
-        {value}
-      </span>
-    </div>
-  );
-}
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: .55;
+  }
+
+  .page {
+    min-height: 100vh;
+    background:
+      radial-gradient(
+        circle at top right,
+        rgba(22, 163, 74, .06),
+        transparent 28%
+      ),
+      #f5f7f6;
+    color: #17221b;
+    padding: 0 18px 60px;
+    direction: rtl;
+  }
+
+  .topbar {
+    max-width: 1320px;
+    margin: 0 auto;
+    min-height: 76px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid #e4e9e5;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .brandMark {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    display: grid;
+    place-items: center;
+    background: #16803b;
+    color: #fff;
+    font-weight: 900;
+    font-size: 13px;
+    box-shadow: 0 8px 20px rgba(22, 128, 59, .18);
+  }
+
+  .brand div:last-child {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .brand strong {
+    font-size: 15px;
+  }
+
+  .brand span {
+    color: #7a867f;
+    font-size: 12px;
+  }
+
+  .backButton {
+    border: 0;
+    background: transparent;
+    color: #26352c;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 800;
+    padding: 10px 0;
+  }
+
+  .message {
+    max-width: 1320px;
+    margin: 18px auto 0;
+    border-radius: 14px;
+    padding: 13px 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .message button {
+    margin-right: auto;
+    border: 0;
+    background: transparent;
+    font-size: 20px;
+  }
+
+  .errorMessage {
+    background: #fff1f1;
+    border: 1px solid #ffd4d4;
+    color: #9d2222;
+  }
+
+  .successMessage {
+    background: #effaf2;
+    border: 1px solid #cdebd5;
+    color: #176b35;
+  }
+
+  .layout {
+    max-width: 1320px;
+    margin: 24px auto 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr);
+    gap: 22px;
+    align-items: start;
+  }
+
+  .previewColumn,
+  .detailsColumn {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .previewCard,
+  .card,
+  .loadingCard,
+  .errorCard {
+    background: #fff;
+    border: 1px solid #e3e8e4;
+    border-radius: 20px;
+    box-shadow: 0 8px 30px rgba(22, 35, 27, .045);
+  }
+
+  .previewCard {
+    padding: 18px;
+  }
+
+  .previewHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 15px;
+    margin-bottom: 16px;
+  }
+
+  .eyebrow {
+    color: #16803b;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .02em;
+  }
+
+  h1,
+  h2,
+  p {
+    margin: 0;
+  }
+
+  .previewHeader h1 {
+    margin-top: 4px;
+    font-size: 22px;
+  }
+
+  .status {
+    padding: 7px 11px;
+    border-radius: 999px;
+    background: #f0f2f1;
+    color: #5e6862;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .status.completed {
+    background: #eaf8ee;
+    color: #18743a;
+  }
+
+  .status.processing {
+    background: #fff7df;
+    color: #8a6613;
+  }
+
+  .status.failed {
+    background: #fff0f0;
+    color: #a12828;
+  }
+
+  .imageFrame {
+    position: relative;
+    width: 100%;
+    min-height: 420px;
+    max-height: 720px;
+    border-radius: 17px;
+    background: #f0f3f1;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+  }
+
+  .imageFrame img {
+    width: 100%;
+    height: 100%;
+    max-height: 720px;
+    object-fit: contain;
+    display: block;
+  }
+
+  .emptyImage {
+    text-align: center;
+    color: #7b867f;
+  }
+
+  .emptyImage span {
+    font-size: 42px;
+  }
+
+  .emptyImage p {
+    margin-top: 8px;
+  }
+
+  .imageOverlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(13, 27, 19, .72);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 12px;
+  }
+
+  .previewActions {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton {
+    min-height: 45px;
+    border-radius: 12px;
+    padding: 0 15px;
+    border: 1px solid transparent;
+    font-weight: 900;
+    transition: .15s ease;
+  }
+
+  .primaryButton {
+    background: #16803b;
+    color: #fff;
+    box-shadow: 0 8px 18px rgba(22, 128, 59, .15);
+  }
+
+  .primaryButton:hover {
+    background: #126b31;
+  }
+
+  .secondaryButton {
+    background: #fff;
+    color: #27332c;
+    border-color: #dfe5e1;
+  }
+
+  .secondaryButton:hover {
+    border-color: #b9c9be;
+    background: #fafcfb;
+  }
+
+  .dangerButton {
+    background: #fff4f4;
+    border-color: #ffd3d3;
+    color: #a52c2c;
+  }
+
+  .large {
+    min-height: 48px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .sectionTitle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .sectionTitle > div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sectionIcon {
+    width: 37px;
+    height: 37px;
+    border-radius: 11px;
+    background: #eff8f1;
+    display: grid;
+    place-items: center;
+  }
+
+  .sectionTitle h2 {
+    font-size: 15px;
+  }
+
+  .sectionTitle p {
+    color: #7b857f;
+    font-size: 11px;
+    margin-top: 3px;
+  }
+
+  .productRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .productImage {
+    width: 64px;
+    height: 64px;
+    border-radius: 13px;
+    background: #f2f4f3;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    font-size: 24px;
+  }
+
+  .productImage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .productInfo {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .productInfo strong {
+    font-size: 14px;
+  }
+
+  .productInfo span {
+    font-size: 11px;
+    color: #7c867f;
+  }
+
+  .warningBadge {
+    margin-right: auto;
+    padding: 6px 9px;
+    border-radius: 999px;
+    background: #fff7df;
+    color: #806014;
+    font-size: 10px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  .infoGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .infoItem {
+    padding: 12px;
+    border: 1px solid #edf0ee;
+    border-radius: 12px;
+    background: #fafcfb;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .infoItem span {
+    color: #7c867f;
+    font-size: 10px;
+  }
+
+  .infoItem strong {
+    font-size: 12px;
+  }
+
+  .settingsList {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .settingsList > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 11px 0;
+    border-bottom: 1px solid #edf0ee;
+  }
+
+  .settingsList > div:last-child {
+    border-bottom: 0;
+  }
+
+  .settingsList span {
+    color: #7b857f;
+    font-size: 11px;
+  }
+
+  .settingsList strong {
+    font-size: 12px;
+  }
+
+  .shopIdentity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .shopLogo {
+    width: 55px;
+    height: 55px;
+    border-radius: 14px;
+    background: #eff8f1;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+  }
+
+  .shopLogo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .shopIdentity > div:last-child {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .shopIdentity strong {
+    font-size: 14px;
+  }
+
+  .shopIdentity span {
+    color: #78837c;
+    font-size: 11px;
+  }
+
+  .rulesCard ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .rulesCard li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #536059;
+    font-size: 11px;
+  }
+
+  .rulesCard li span {
+    color: #16803b;
+    font-weight: 900;
+  }
+
+  .dangerCard {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    border-color: #f0dddd;
+  }
+
+  .dangerCard > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .dangerCard strong {
+    font-size: 13px;
+  }
+
+  .dangerCard span {
+    color: #8b7777;
+    font-size: 10px;
+  }
+
+  .loadingCard,
+  .errorCard {
+    max-width: 600px;
+    margin: 80px auto;
+    padding: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    text-align: center;
+  }
+
+  .loadingCard {
+    min-height: 130px;
+  }
+
+  .loadingCard > div:last-child {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .loadingCard span {
+    color: #7b857f;
+    font-size: 12px;
+  }
+
+  .errorCard {
+    flex-direction: column;
+  }
+
+  .errorCard h2 {
+    font-size: 18px;
+  }
+
+  .errorCard p {
+    color: #7a837e;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .errorIcon {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: #fff0f0;
+    color: #a52c2c;
+    font-weight: 900;
+    font-size: 20px;
+  }
+
+  .spinner {
+    width: 23px;
+    height: 23px;
+    border: 3px solid #dce7df;
+    border-top-color: #16803b;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+
+  .spinner.light {
+    border-color: rgba(255,255,255,.25);
+    border-top-color: #fff;
+  }
+
+  .buttonSpinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+    vertical-align: -3px;
+    margin-left: 7px;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* ======================================================
+     Drawer
+  ====================================================== */
+
+  .drawerBackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(12, 20, 15, .45);
+    backdrop-filter: blur(3px);
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .drawer {
+    width: min(620px, 100%);
+    height: 100%;
+    background: #fff;
+    box-shadow: 0 0 50px rgba(0,0,0,.16);
+    display: flex;
+    flex-direction: column;
+    direction: rtl;
+  }
+
+  .drawerHeader {
+    padding: 22px;
+    border-bottom: 1px solid #e8ece9;
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+  }
+
+  .drawerHeader h2 {
+    font-size: 20px;
+    margin-top: 5px;
+  }
+
+  .drawerHeader p {
+    color: #7a857e;
+    font-size: 11px;
+    line-height: 1.7;
+    margin-top: 6px;
+  }
+
+  .closeButton {
+    width: 38px;
+    height: 38px;
+    border: 1px solid #e2e7e4;
+    background: #fff;
+    border-radius: 11px;
+    font-size: 23px;
+    color: #58645d;
+    flex: 0 0 auto;
+  }
+
+  .drawerBody {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .editProduct {
+    padding: 12px;
+    background: #f7faf8;
+    border: 1px solid #e3ebe5;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+
+  .editProductImage {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+  }
+
+  .editProductImage img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .editProduct > div:last-child {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .editProduct strong {
+    font-size: 13px;
+  }
+
+  .editProduct span {
+    color: #6f7b74;
+    font-size: 10px;
+  }
+
+  .editorSection {
+    padding-bottom: 22px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid #edf0ee;
+  }
+
+  .editorHeading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 13px;
+  }
+
+  .editorHeading > span {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    background: #16803b;
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .editorHeading div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .editorHeading strong {
+    font-size: 13px;
+  }
+
+  .editorHeading small {
+    color: #7c867f;
+    font-size: 10px;
+  }
+
+  .modeGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+  }
+
+  .modeOption {
+    border: 1px solid #e1e7e3;
+    background: #fff;
+    border-radius: 13px;
+    padding: 13px;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .modeOption > span {
+    font-size: 20px;
+  }
+
+  .modeOption strong {
+    font-size: 12px;
+  }
+
+  .modeOption small {
+    color: #7c867f;
+    font-size: 9px;
+    line-height: 1.5;
+  }
+
+  .modeOption.selected,
+  .templateOption.selected,
+  .formatOption.selected {
+    border-color: #16803b;
+    background: #f1faf3;
+    box-shadow: 0 0 0 2px rgba(22,128,59,.06);
+  }
+
+  .templateGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .templateOption {
+    border: 1px solid #e1e7e3;
+    background: #fff;
+    border-radius: 12px;
+    padding: 11px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    text-align: right;
+  }
+
+  .templateIcon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: #f4f6f5;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+  }
+
+  .templateOption > span:last-child {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .templateOption strong {
+    font-size: 11px;
+  }
+
+  .templateOption small {
+    color: #7c867f;
+    font-size: 8px;
+    line-height: 1.4;
+  }
+
+  .formatGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .formatOption {
+    border: 1px solid #e1e7e3;
+    background: #fff;
+    border-radius: 12px;
+    padding: 11px;
+    text-align: right;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    gap: 4px 8px;
+  }
+
+  .formatOption > span {
+    grid-row: 1 / 3;
+    font-size: 22px;
+  }
+
+  .formatOption strong {
+    font-size: 11px;
+  }
+
+  .formatOption small {
+    color: #7c867f;
+    font-size: 8px;
+  }
+
+  .formatOption b {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    font-size: 10px;
+    color: #16803b;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 11px;
+  }
+
+  .field > span {
+    font-size: 10px;
+    color: #66736b;
+    font-weight: 800;
+  }
+
+  .field input,
+  .field select,
+  .field textarea {
+    width: 100%;
+    border: 1px solid #dfe6e1;
+    background: #fff;
+    border-radius: 11px;
+    padding: 11px 12px;
+    outline: none;
+    color: #18231d;
+    font-size: 12px;
+  }
+
+  .field textarea {
+    resize: vertical;
+    line-height: 1.7;
+  }
+
+  .field input:focus,
+  .field select:focus,
+  .field textarea:focus {
+    border-color: #16803b;
+    box-shadow: 0 0 0 3px rgba(22,128,59,.08);
+  }
+
+  .twoFields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px;
+  }
+
+  .responsibilityBox {
+    padding: 14px;
+    border: 1px solid #f1dfaa;
+    background: #fffaf0;
+    border-radius: 13px;
+    margin-bottom: 14px;
+  }
+
+  .responsibilityBox strong {
+    font-size: 12px;
+    color: #785a13;
+  }
+
+  .responsibilityBox p {
+    margin-top: 6px;
+    color: #796f58;
+    font-size: 10px;
+    line-height: 1.7;
+  }
+
+  .costBox {
+    border: 1px solid #cfe7d5;
+    background: #f0faf2;
+    border-radius: 14px;
+    padding: 14px;
+  }
+
+  .costBox > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .costBox span {
+    color: #4d6555;
+    font-size: 11px;
+  }
+
+  .costBox strong {
+    color: #147438;
+    font-size: 15px;
+  }
+
+  .costBox small {
+    display: block;
+    color: #708077;
+    font-size: 9px;
+    margin-top: 6px;
+  }
+
+  .drawerFooter {
+    padding: 14px 20px;
+    border-top: 1px solid #e8ece9;
+    display: grid;
+    grid-template-columns: 1fr 1.5fr;
+    gap: 9px;
+    background: #fff;
+  }
+
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+
+    .detailsColumn {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: start;
+    }
+
+    .dangerCard {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .page {
+      padding: 0 10px 40px;
+    }
+
+    .topbar {
+      min-height: 64px;
+    }
+
+    .brandMark {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+    }
+
+    .brand strong {
+      font-size: 13px;
+    }
+
+    .backButton span {
+      display: none;
+    }
+
+    .layout {
+      margin-top: 14px;
+      gap: 12px;
+    }
+
+    .previewCard,
+    .card {
+      border-radius: 16px;
+      padding: 13px;
+    }
+
+    .previewHeader h1 {
+      font-size: 18px;
+    }
+
+    .imageFrame {
+      min-height: 320px;
+    }
+
+    .previewActions {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .previewActions .primaryButton {
+      grid-column: 1 / -1;
+    }
+
+    .detailsColumn {
+      display: flex;
+    }
+
+    .productRow {
+      align-items: flex-start;
+    }
+
+    .warningBadge {
+      margin-top: 2px;
+    }
+
+    .drawer {
+      width: 100%;
+    }
+
+    .drawerHeader {
+      padding: 17px;
+    }
+
+    .drawerHeader h2 {
+      font-size: 17px;
+    }
+
+    .drawerBody {
+      padding: 15px;
+    }
+
+    .modeGrid,
+    .templateGrid,
+    .formatGrid {
+      grid-template-columns: 1fr;
+    }
+
+    .twoFields {
+      grid-template-columns: 1fr;
+    }
+
+    .drawerFooter {
+      padding: 11px 15px;
+      grid-template-columns: 1fr 1.4fr;
+    }
+
+    .infoGrid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .dangerCard {
+      align-items: flex-start;
+    }
+  }
+`;
