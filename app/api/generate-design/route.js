@@ -29,6 +29,9 @@ const ALLOWED_FORMATS = [
   "16:9",
 ];
 
+const DESIGN_OPERATION_KEY = "create_design";
+const DESIGN_POINTS_COST = 3;
+
 function getErrorMessage(error) {
   if (!error) {
     return "خطأ غير معروف.";
@@ -76,6 +79,8 @@ async function markDesignFailed(
 
 export async function POST(request) {
   let designId = null;
+  let pointsCharged = false;
+  let pointsTransactionId = null;
 
   try {
     /*
@@ -247,9 +252,7 @@ export async function POST(request) {
     }
 
     /*
-     * 6. محاولة جلب المحل بالـ ID فقط
-     *
-     * هذه الخطوة مهمة للتشخيص.
+     * 6. جلب المحل
      */
 
     const {
@@ -260,10 +263,6 @@ export async function POST(request) {
       .select("*")
       .eq("id", product.shop_id)
       .maybeSingle();
-
-    /*
-     * إذا كان المحل غير موجود أصلاً
-     */
 
     if (shopByIdError) {
       console.error(
@@ -361,10 +360,6 @@ export async function POST(request) {
         { status: 403 }
       );
     }
-
-    /*
-     * المحل موجود والمالك صحيح
-     */
 
     const shop = shopById;
 
@@ -527,7 +522,102 @@ export async function POST(request) {
     designId = design.id;
 
     /*
-     * 13. حالة التوليد
+     * 13. خصم نقاط إنشاء التصميم
+     *
+     * الخصم يتم من الخادم فقط.
+     * العملية الحالية = create_design
+     * التكلفة الحالية = 3 نقاط.
+     *
+     * لا يتم تشغيل OpenAI قبل نجاح الخصم.
+     */
+
+    const {
+      data: pointsResult,
+      error: pointsError,
+    } = await supabase.rpc(
+      "charge_operation_points",
+      {
+        p_operation_key:
+          DESIGN_OPERATION_KEY,
+        p_user_id: user.id,
+        p_shop_id: shop.id,
+        p_reference_type:
+          "ad_image",
+        p_reference_id:
+          designId,
+        p_description:
+          `إنشاء تصميم للمنتج: ${
+            product.name || "منتج"
+          }`,
+        p_metadata: {
+          design_id: designId,
+          product_id: product.id,
+          operation:
+            DESIGN_OPERATION_KEY,
+          points_cost:
+            DESIGN_POINTS_COST,
+          mode,
+          format,
+          template:
+            template || null,
+          style:
+            style || null,
+          background:
+            background || null,
+        },
+      }
+    );
+
+    if (
+      pointsError ||
+      !pointsResult?.success
+    ) {
+      console.error(
+        "POINTS CHARGE ERROR:",
+        pointsError ||
+          pointsResult
+      );
+
+      const errorMessage =
+        pointsError?.message ||
+        "تعذر خصم نقاط العملية.";
+
+      await markDesignFailed(
+        designId,
+        errorMessage,
+        "POINTS_CHARGE_FAILED"
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          designId,
+          status: "failed",
+          error: errorMessage,
+          code: "POINTS_CHARGE_FAILED",
+          pointsRequired:
+            DESIGN_POINTS_COST,
+        },
+        {
+          status:
+            pointsError?.message?.includes(
+              "غير كاف"
+            )
+              ? 402
+              : 400,
+        }
+      );
+    }
+
+    pointsCharged =
+      pointsResult.charged === true;
+
+    pointsTransactionId =
+      pointsResult.transaction_id ||
+      null;
+
+    /*
+     * 14. حالة التوليد
      */
 
     const {
@@ -563,16 +653,18 @@ export async function POST(request) {
             "تعذر تجهيز طلب التصميم.",
           details:
             generatingError.message,
+          pointsCharged,
+          pointsTransactionId,
         },
         { status: 500 }
       );
     }
 
     /*
-     * 14. توليد الصورة
+     * 15. توليد الصورة
      *
-     * OpenAI يتم استدعاؤه فقط بعد
-     * نجاح كل فحوصات المحل والمنتج.
+     * لا يتم الوصول لهذه النقطة
+     * إلا بعد نجاح خصم النقاط.
      */
 
     try {
@@ -591,7 +683,7 @@ export async function POST(request) {
       }
 
       /*
-       * 15. تحويل Base64
+       * 16. تحويل Base64
        */
 
       const imageBuffer = Buffer.from(
@@ -606,7 +698,7 @@ export async function POST(request) {
       }
 
       /*
-       * 16. حفظ الصورة
+       * 17. حفظ الصورة
        */
 
       const storagePath =
@@ -632,7 +724,7 @@ export async function POST(request) {
       }
 
       /*
-       * 17. رابط الصورة
+       * 18. رابط الصورة
        */
 
       const {
@@ -651,7 +743,7 @@ export async function POST(request) {
       }
 
       /*
-       * 18. إكمال التصميم
+       * 19. إكمال التصميم
        */
 
       const completedAt =
@@ -678,7 +770,10 @@ export async function POST(request) {
       }
 
       /*
-       * 19. تسجيل استخدام AI
+       * 20. تسجيل استخدام AI
+       *
+       * النقاط مسجلة بشكل مستقل
+       * داخل point_transactions.
        */
 
       try {
@@ -703,6 +798,14 @@ export async function POST(request) {
               style || null,
             background:
               background || null,
+            points_charged:
+              pointsCharged
+                ? DESIGN_POINTS_COST
+                : 0,
+            points_transaction_id:
+              pointsTransactionId,
+            points_operation:
+              DESIGN_OPERATION_KEY,
           },
         });
       } catch (usageError) {
@@ -713,7 +816,7 @@ export async function POST(request) {
       }
 
       /*
-       * 20. النجاح
+       * 21. النجاح
        */
 
       return NextResponse.json({
@@ -721,6 +824,11 @@ export async function POST(request) {
         designId,
         status: "completed",
         imageUrl,
+        pointsCharged:
+          pointsCharged
+            ? DESIGN_POINTS_COST
+            : 0,
+        pointsTransactionId,
       });
     } catch (generationError) {
       console.error(
@@ -754,6 +862,14 @@ export async function POST(request) {
             error: errorMessage,
             format,
             mode,
+            points_charged:
+              pointsCharged
+                ? DESIGN_POINTS_COST
+                : 0,
+            points_transaction_id:
+              pointsTransactionId,
+            points_operation:
+              DESIGN_OPERATION_KEY,
           },
         });
       } catch (usageError) {
@@ -769,6 +885,11 @@ export async function POST(request) {
           designId,
           status: "failed",
           error: errorMessage,
+          pointsCharged:
+            pointsCharged
+              ? DESIGN_POINTS_COST
+              : 0,
+          pointsTransactionId,
         },
         { status: 500 }
       );
@@ -795,6 +916,11 @@ export async function POST(request) {
         success: false,
         designId,
         error: errorMessage,
+        pointsCharged:
+          pointsCharged
+            ? DESIGN_POINTS_COST
+            : 0,
+        pointsTransactionId,
       },
       { status: 500 }
     );
