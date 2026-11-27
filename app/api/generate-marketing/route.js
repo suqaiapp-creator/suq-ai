@@ -21,6 +21,10 @@ const supabaseAdmin = createClient(
 
 const MARKETING_OPERATION_KEY = "create_marketing";
 
+// =========================================================
+// Product clarity
+// =========================================================
+
 function isProductUnclear(product) {
   if (!product) {
     return true;
@@ -56,10 +60,113 @@ function isProductUnclear(product) {
   return false;
 }
 
+// =========================================================
+// Refund helper
+// =========================================================
+
+async function refundMarketingPoints({
+  supabaseAuth,
+  transactionId,
+  userId,
+  shopId,
+  productId,
+  reason,
+  stage,
+  errorMessage,
+}) {
+  if (!transactionId) {
+    return {
+      success: false,
+      refunded: false,
+      error: "لا توجد عملية نقاط لاسترجاعها.",
+    };
+  }
+
+  try {
+    const {
+      data: refundResult,
+      error: refundError,
+    } = await supabaseAuth.rpc(
+      "refund_operation_points",
+      {
+        p_transaction_id: transactionId,
+
+        p_reason:
+          reason ||
+          "استرجاع نقاط بسبب فشل عملية التسويق.",
+
+        p_metadata: {
+          source:
+            "generate-marketing",
+
+          user_id:
+            userId,
+
+          shop_id:
+            shopId,
+
+          product_id:
+            productId,
+
+          stage:
+            stage || "unknown",
+
+          error:
+            errorMessage || null,
+        },
+      }
+    );
+
+    if (refundError) {
+      console.error(
+        "MARKETING POINTS REFUND ERROR:",
+        refundError
+      );
+
+      return {
+        success: false,
+        refunded: false,
+        error: refundError.message,
+      };
+    }
+
+    return {
+      success: true,
+      ...(refundResult || {}),
+    };
+  } catch (error) {
+    console.error(
+      "MARKETING REFUND UNEXPECTED ERROR:",
+      error
+    );
+
+    return {
+      success: false,
+      refunded: false,
+      error:
+        error?.message ||
+        "تعذر استرجاع النقاط.",
+    };
+  }
+}
+
+// =========================================================
+// POST
+// =========================================================
+
 export async function POST(request) {
   let userId = null;
   let shopId = null;
   let productId = null;
+
+  let supabaseAuth = null;
+
+  let pointsTransactionId = null;
+  let pointsCharged = 0;
+  let balanceAfter = null;
+
+  let product = null;
+  let unclear = false;
 
   try {
     // =====================================================
@@ -68,7 +175,7 @@ export async function POST(request) {
 
     const cookieStore = await cookies();
 
-    const supabaseAuth = createServerClient(
+    supabaseAuth = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
       {
@@ -97,12 +204,14 @@ export async function POST(request) {
     const {
       data: { user },
       error: userError,
-    } = await supabaseAuth.auth.getUser();
+    } =
+      await supabaseAuth.auth.getUser();
 
     if (userError || !user) {
       return Response.json(
         {
-          error: "يجب تسجيل الدخول أولاً.",
+          error:
+            "يجب تسجيل الدخول أولاً.",
         },
         {
           status: 401,
@@ -116,7 +225,8 @@ export async function POST(request) {
     // 2. قراءة الطلب
     // =====================================================
 
-    const body = await request.json();
+    const body =
+      await request.json();
 
     const incomingProduct =
       body?.product || null;
@@ -129,7 +239,8 @@ export async function POST(request) {
     if (!productId) {
       return Response.json(
         {
-          error: "معرف المنتج غير موجود.",
+          error:
+            "معرف المنتج غير موجود.",
         },
         {
           status: 400,
@@ -142,41 +253,42 @@ export async function POST(request) {
     // =====================================================
 
     const {
-      data: product,
+      data: productData,
       error: productError,
-    } = await supabaseAdmin
-      .from("products")
-      .select(
-        `
-        id,
-        shop_id,
-        name,
-        brand,
-        category,
-        price,
-        currency,
-        description,
-        specifications,
-        features,
-        uses,
-        target_audience,
-        manufacturer,
-        country_of_origin,
-        size_or_volume,
-        ingredients,
-        warnings,
-        storage,
-        warranty,
-        verification_notes,
-        confidence,
-        verification_status,
-        safety_status,
-        ai_status,
-        model_number
-        `
-      )
-      .eq("id", productId)
-      .maybeSingle();
+    } =
+      await supabaseAdmin
+        .from("products")
+        .select(
+          `
+          id,
+          shop_id,
+          name,
+          brand,
+          category,
+          price,
+          currency,
+          description,
+          specifications,
+          features,
+          uses,
+          target_audience,
+          manufacturer,
+          country_of_origin,
+          size_or_volume,
+          ingredients,
+          warnings,
+          storage,
+          warranty,
+          verification_notes,
+          confidence,
+          verification_status,
+          safety_status,
+          ai_status,
+          model_number
+          `
+        )
+        .eq("id", productId)
+        .maybeSingle();
 
     if (productError) {
       console.error(
@@ -195,10 +307,11 @@ export async function POST(request) {
       );
     }
 
-    if (!product) {
+    if (!productData) {
       return Response.json(
         {
-          error: "المنتج غير موجود.",
+          error:
+            "المنتج غير موجود.",
         },
         {
           status: 404,
@@ -206,7 +319,14 @@ export async function POST(request) {
       );
     }
 
-    shopId = product.shop_id || null;
+    product = productData;
+
+    // =====================================================
+    // 4. التحقق من المتجر
+    // =====================================================
+
+    shopId =
+      product.shop_id || null;
 
     if (!shopId) {
       return Response.json(
@@ -220,23 +340,20 @@ export async function POST(request) {
       );
     }
 
-    // =====================================================
-    // 4. قراءة المحل والتحقق من الملكية
-    // =====================================================
-
     const {
       data: shop,
       error: shopError,
-    } = await supabaseAdmin
-      .from("shops")
-      .select(
-        `
-        id,
-        owner_id
-        `
-      )
-      .eq("id", shopId)
-      .maybeSingle();
+    } =
+      await supabaseAdmin
+        .from("shops")
+        .select(
+          `
+          id,
+          owner_id
+          `
+        )
+        .eq("id", shopId)
+        .maybeSingle();
 
     if (shopError) {
       console.error(
@@ -258,13 +375,18 @@ export async function POST(request) {
     if (!shop) {
       return Response.json(
         {
-          error: "المحل غير موجود.",
+          error:
+            "المحل غير موجود.",
         },
         {
           status: 404,
         }
       );
     }
+
+    // =====================================================
+    // 5. ملكية المتجر
+    // =====================================================
 
     if (shop.owner_id !== user.id) {
       return Response.json(
@@ -279,7 +401,7 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 5. منع المنتجات المقفلة أو المخالفة
+    // 6. حماية المنتج
     // =====================================================
 
     if (
@@ -299,38 +421,48 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 6. التحقق من وضوح المنتج
+    // 7. وضوح المنتج
     // =====================================================
 
-    const unclear =
+    unclear =
       isProductUnclear(product);
 
     // =====================================================
-    // 7. تأكيد مسؤولية التاجر للمنتجات غير الواضحة
+    // 8. مسؤولية التاجر
     // =====================================================
 
     if (unclear) {
       const {
         data: responsibilityAcceptance,
         error: responsibilityError,
-      } = await supabaseAdmin
-        .from(
-          "product_responsibility_acceptances"
-        )
-        .select(
-          `
-          id,
-          user_id,
-          shop_id,
-          product_id,
-          policy_version,
-          accepted_at
-          `
-        )
-        .eq("user_id", user.id)
-        .eq("shop_id", shopId)
-        .eq("product_id", product.id)
-        .maybeSingle();
+      } =
+        await supabaseAdmin
+          .from(
+            "product_responsibility_acceptances"
+          )
+          .select(
+            `
+            id,
+            user_id,
+            shop_id,
+            product_id,
+            policy_version,
+            accepted_at
+            `
+          )
+          .eq(
+            "user_id",
+            user.id
+          )
+          .eq(
+            "shop_id",
+            shopId
+          )
+          .eq(
+            "product_id",
+            product.id
+          )
+          .maybeSingle();
 
       if (responsibilityError) {
         console.error(
@@ -354,6 +486,7 @@ export async function POST(request) {
           {
             error:
               "هذا المنتج يحتاج إلى تأكيد مسؤولية التاجر قبل إنشاء المحتوى التسويقي.",
+
             code:
               "RESPONSIBILITY_REQUIRED",
           },
@@ -365,54 +498,67 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 8. خصم نقاط العملية
+    // 9. إنشاء معرف مستقل لهذه العملية
     //
-    // مهم جدًا:
-    // هنا نستخدم supabaseAuth وليس supabaseAdmin
-    // لأن charge_operation_points تعتمد على auth.uid()
-    //
-    // الخصم يحدث قبل OpenAI.
-    // إذا الرصيد غير كافٍ فلن يتم استدعاء OpenAI.
+    // مهم:
+    // لا نستخدم product.id كـ reference_id
+    // حتى يستطيع المستخدم إنشاء محتوى جديد لنفس المنتج
+    // لاحقاً بدون اعتبار العملية مكررة.
+    // =====================================================
+
+    const operationReferenceId =
+      crypto.randomUUID();
+
+    // =====================================================
+    // 10. خصم النقاط
     // =====================================================
 
     const {
       data: pointsResult,
       error: pointsError,
-    } = await supabaseAuth.rpc(
-      "charge_operation_points",
-      {
-        p_operation_key:
-          MARKETING_OPERATION_KEY,
-
-        p_user_id:
-          user.id,
-
-        p_shop_id:
-          shopId,
-
-        p_reference_type:
-          "marketing_content",
-
-        p_reference_id:
-          product.id,
-
-        p_description:
-          `إنشاء محتوى تسويقي للمنتج: ${
-            product.name || "منتج"
-          }`,
-
-        p_metadata: {
-          source:
-            "generate-marketing",
-
-          operation:
+    } =
+      await supabaseAuth.rpc(
+        "charge_operation_points",
+        {
+          p_operation_key:
             MARKETING_OPERATION_KEY,
 
-          product_name:
-            product.name || null,
-        },
-      }
-    );
+          p_user_id:
+            user.id,
+
+          p_shop_id:
+            shopId,
+
+          p_reference_type:
+            "marketing_generation",
+
+          p_reference_id:
+            operationReferenceId,
+
+          p_description:
+            `إنشاء محتوى تسويقي للمنتج: ${
+              product.name ||
+              "منتج"
+            }`,
+
+          p_metadata: {
+            source:
+              "generate-marketing",
+
+            operation:
+              MARKETING_OPERATION_KEY,
+
+            product_id:
+              product.id,
+
+            product_name:
+              product.name || null,
+
+            responsibility_required:
+              unclear,
+          },
+        }
+      );
 
     if (pointsError) {
       console.error(
@@ -425,9 +571,15 @@ export async function POST(request) {
         "تعذر خصم نقاط العملية.";
 
       const insufficient =
-        pointsMessage.includes("غير كاف") ||
-        pointsMessage.includes("رصيد النقاط") ||
-        pointsMessage.includes("تحتاج");
+        pointsMessage.includes(
+          "غير كاف"
+        ) ||
+        pointsMessage.includes(
+          "رصيد النقاط"
+        ) ||
+        pointsMessage.includes(
+          "تحتاج"
+        );
 
       return Response.json(
         {
@@ -440,9 +592,10 @@ export async function POST(request) {
             : "POINTS_CHARGE_FAILED",
         },
         {
-          status: insufficient
-            ? 402
-            : 500,
+          status:
+            insufficient
+              ? 402
+              : 500,
         }
       );
     }
@@ -470,18 +623,24 @@ export async function POST(request) {
       );
     }
 
-    const pointsCharged =
+    pointsTransactionId =
+      pointsResult.transaction_id ||
+      null;
+
+    pointsCharged =
       Number(
-        pointsResult.points_charged || 0
+        pointsResult.points_charged ||
+          0
       );
 
-    const balanceAfter =
+    balanceAfter =
       Number(
-        pointsResult.balance_after ?? 0
+        pointsResult.balance_after ??
+          0
       );
 
     // =====================================================
-    // 9. Prompt التسويق
+    // 11. Prompt
     // =====================================================
 
     const prompt = `
@@ -581,21 +740,101 @@ ${product.model_number || ""}
 `;
 
     // =====================================================
-    // 10. استدعاء OpenAI
+    // 12. OpenAI
     // =====================================================
 
-    const response =
-      await openai.responses.create({
-        model: "gpt-5-mini",
-        input: prompt,
-      });
+    let response;
+
+    try {
+      response =
+        await openai.responses.create({
+          model: "gpt-5-mini",
+          input: prompt,
+        });
+    } catch (openaiError) {
+      console.error(
+        "OPENAI API ERROR:",
+        openaiError
+      );
+
+      const refundResult =
+        await refundMarketingPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          reason:
+            "استرجاع نقاط بسبب فشل الاتصال بخدمة الذكاء الاصطناعي.",
+          stage:
+            "openai_request",
+          errorMessage:
+            openaiError?.message ||
+            "OpenAI request failed",
+        });
+
+      try {
+        await logAIUsage({
+          userId,
+          shopId,
+          productId,
+          operation:
+            "marketing_generation",
+          model:
+            "gpt-5-mini",
+          status:
+            "failed",
+          metadata: {
+            source:
+              "generate-marketing",
+            stage:
+              "openai_request",
+            error:
+              openaiError?.message ||
+              "OpenAI request failed",
+            points_transaction_id:
+              pointsTransactionId,
+            points_charged:
+              pointsCharged,
+            points_refunded:
+              !!refundResult?.refunded,
+            refund_transaction_id:
+              refundResult?.refund_transaction_id ||
+              null,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI USAGE LOG ERROR:",
+          usageError
+        );
+      }
+
+      return Response.json(
+        {
+          error:
+            "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
 
     // =====================================================
-    // 11. قراءة استخدام OpenAI
+    // 13. Usage
     // =====================================================
 
     const usage =
-      response.usage || {};
+      response?.usage || {};
 
     const inputTokens =
       Number(
@@ -615,22 +854,251 @@ ${product.model_number || ""}
         outputTokens;
 
     const text =
-      response.output_text || "";
+      response?.output_text ||
+      "";
 
     // =====================================================
-    // 12. تحويل نتيجة OpenAI إلى JSON
+    // 14. التأكد من وجود نتيجة
+    // =====================================================
+
+    if (!text.trim()) {
+      const refundResult =
+        await refundMarketingPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          reason:
+            "استرجاع نقاط بسبب عدم الحصول على نتيجة من الذكاء الاصطناعي.",
+          stage:
+            "empty_openai_response",
+          errorMessage:
+            "OpenAI returned empty response",
+        });
+
+      try {
+        await logAIUsage({
+          userId,
+          shopId,
+          productId,
+          operation:
+            "marketing_generation",
+          model:
+            "gpt-5-mini",
+          status:
+            "failed",
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          metadata: {
+            source:
+              "generate-marketing",
+            stage:
+              "empty_openai_response",
+            points_transaction_id:
+              pointsTransactionId,
+            points_charged:
+              pointsCharged,
+            points_refunded:
+              !!refundResult?.refunded,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI USAGE LOG ERROR:",
+          usageError
+        );
+      }
+
+      return Response.json(
+        {
+          error:
+            "لم يتم الحصول على محتوى من الذكاء الاصطناعي.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 15. Parse JSON
     // =====================================================
 
     let content;
 
     try {
-      content = JSON.parse(text);
+      content =
+        JSON.parse(text);
     } catch (parseError) {
       console.error(
         "OPENAI JSON PARSE ERROR:",
         parseError
       );
 
+      const refundResult =
+        await refundMarketingPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          reason:
+            "استرجاع نقاط بسبب فشل قراءة نتيجة المحتوى التسويقي.",
+          stage:
+            "json_parse",
+          errorMessage:
+            parseError?.message ||
+            "Invalid JSON response",
+        });
+
+      try {
+        await logAIUsage({
+          userId,
+          shopId,
+          productId,
+          operation:
+            "marketing_generation",
+          model:
+            "gpt-5-mini",
+          status:
+            "failed",
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          metadata: {
+            source:
+              "generate-marketing",
+            stage:
+              "json_parse",
+            points_transaction_id:
+              pointsTransactionId,
+            points_charged:
+              pointsCharged,
+            points_refunded:
+              !!refundResult?.refunded,
+            refund_transaction_id:
+              refundResult?.refund_transaction_id ||
+              null,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI USAGE LOG ERROR:",
+          usageError
+        );
+      }
+
+      return Response.json(
+        {
+          error:
+            "تعذر قراءة نتيجة الذكاء الاصطناعي.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 16. التأكد من أن النتيجة Object
+    // =====================================================
+
+    if (
+      !content ||
+      typeof content !== "object" ||
+      Array.isArray(content)
+    ) {
+      const refundResult =
+        await refundMarketingPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          reason:
+            "استرجاع نقاط بسبب نتيجة تسويقية غير صالحة.",
+          stage:
+            "invalid_content",
+          errorMessage:
+            "Marketing result is not a valid object",
+        });
+
+      try {
+        await logAIUsage({
+          userId,
+          shopId,
+          productId,
+          operation:
+            "marketing_generation",
+          model:
+            "gpt-5-mini",
+          status:
+            "failed",
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          metadata: {
+            source:
+              "generate-marketing",
+            stage:
+              "invalid_content",
+            points_transaction_id:
+              pointsTransactionId,
+            points_charged:
+              pointsCharged,
+            points_refunded:
+              !!refundResult?.refunded,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI USAGE LOG ERROR:",
+          usageError
+        );
+      }
+
+      return Response.json(
+        {
+          error:
+            "نتيجة المحتوى التسويقي غير صالحة.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 17. تسجيل الاستخدام الناجح
+    // =====================================================
+
+    try {
       await logAIUsage({
         userId,
         shopId,
@@ -643,7 +1111,7 @@ ${product.model_number || ""}
           "gpt-5-mini",
 
         status:
-          "failed",
+          "success",
 
         inputTokens,
         outputTokens,
@@ -652,9 +1120,6 @@ ${product.model_number || ""}
         metadata: {
           source:
             "generate-marketing",
-
-          reason:
-            "invalid_json",
 
           responsibility_required:
             unclear,
@@ -667,62 +1132,24 @@ ${product.model_number || ""}
 
           points_balance_after:
             balanceAfter,
+
+          points_transaction_id:
+            pointsTransactionId,
+
+          operation_reference_id:
+            operationReferenceId,
         },
       });
-
-      return Response.json(
-        {
-          error:
-            "تعذر قراءة نتيجة الذكاء الاصطناعي.",
-        },
-        {
-          status: 500,
-        }
+    } catch (usageError) {
+      // لا نفشل عملية التسويق إذا فشل سجل الاستخدام.
+      console.error(
+        "AI USAGE LOG ERROR:",
+        usageError
       );
     }
 
     // =====================================================
-    // 13. تسجيل استخدام OpenAI
-    // =====================================================
-
-    await logAIUsage({
-      userId,
-      shopId,
-      productId,
-
-      operation:
-        "marketing_generation",
-
-      model:
-        "gpt-5-mini",
-
-      status:
-        "success",
-
-      inputTokens,
-      outputTokens,
-      totalTokens,
-
-      metadata: {
-        source:
-          "generate-marketing",
-
-        responsibility_required:
-          unclear,
-
-        points_operation:
-          MARKETING_OPERATION_KEY,
-
-        points_charged:
-          pointsCharged,
-
-        points_balance_after:
-          balanceAfter,
-      },
-    });
-
-    // =====================================================
-    // 14. إعادة المحتوى
+    // 18. النتيجة
     // =====================================================
 
     return Response.json({
@@ -737,17 +1164,48 @@ ${product.model_number || ""}
 
         operation:
           MARKETING_OPERATION_KEY,
+
+        transaction_id:
+          pointsTransactionId,
       },
     });
 
   } catch (error) {
     console.error(
-      "OPENAI MARKETING ERROR:",
+      "MARKETING UNEXPECTED ERROR:",
       error
     );
 
     // =====================================================
-    // تسجيل فشل العملية
+    // استرجاع النقاط في أي خطأ غير متوقع
+    // =====================================================
+
+    let refundResult = null;
+
+    if (
+      supabaseAuth &&
+      pointsTransactionId
+    ) {
+      refundResult =
+        await refundMarketingPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          reason:
+            "استرجاع نقاط بسبب خطأ غير متوقع أثناء إنشاء المحتوى التسويقي.",
+          stage:
+            "unexpected_error",
+          errorMessage:
+            error?.message ||
+            "Unexpected marketing error",
+        });
+    }
+
+    // =====================================================
+    // تسجيل فشل الاستخدام
     // =====================================================
 
     try {
@@ -769,12 +1227,28 @@ ${product.model_number || ""}
           source:
             "generate-marketing",
 
+          stage:
+            "unexpected_error",
+
           error:
             error?.message ||
             "unknown_error",
 
           points_operation:
             MARKETING_OPERATION_KEY,
+
+          points_transaction_id:
+            pointsTransactionId,
+
+          points_charged:
+            pointsCharged,
+
+          points_refunded:
+            !!refundResult?.refunded,
+
+          refund_transaction_id:
+            refundResult?.refund_transaction_id ||
+            null,
         },
       });
     } catch (usageError) {
@@ -787,7 +1261,14 @@ ${product.model_number || ""}
     return Response.json(
       {
         error:
-          "حدث خطأ أثناء إنشاء المحتوى بالذكاء الاصطناعي.",
+          "حدث خطأ أثناء إنشاء المحتوى التسويقي.",
+
+        pointsRefunded:
+          !!refundResult?.refunded,
+
+        refundTransactionId:
+          refundResult?.refund_transaction_id ||
+          null,
       },
       {
         status: 500,
