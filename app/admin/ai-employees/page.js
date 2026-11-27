@@ -83,6 +83,11 @@ export default function AIEmployeesPage() {
 
   const [selectedId, setSelectedId] = useState(null);
 
+  // في الجوال:
+  // list = قائمة الموظفين
+  // profile = ملف الموظف
+  const [mobileView, setMobileView] = useState("list");
+
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
 
@@ -198,20 +203,25 @@ export default function AIEmployeesPage() {
   const stats = useMemo(() => {
     return {
       total: employees.length,
+
       active: employees.filter(
         (item) => item.status === "active"
       ).length,
+
       inactive: employees.filter(
         (item) => item.status === "inactive"
       ).length,
+
       suspended: employees.filter(
         (item) => item.status === "suspended"
       ).length,
+
       tasks: employees.reduce(
         (sum, item) =>
           sum + Number(item.tasks_completed || 0),
         0
       ),
+
       cost: employees.reduce(
         (sum, item) =>
           sum + Number(item.total_cost || 0),
@@ -281,12 +291,14 @@ export default function AIEmployeesPage() {
 
   function openCreate() {
     setEditingId(null);
+
     setForm({
       ...EMPTY_FORM,
       permissions: {
         ...EMPTY_FORM.permissions,
       },
     });
+
     setError("");
     setNotice("");
     setEditorOpen(true);
@@ -297,16 +309,37 @@ export default function AIEmployeesPage() {
 
     setForm({
       name: employee.name || "",
-      specialization: employee.specialization || "",
-      department_id: employee.department_id || "",
-      admin_id: employee.admin_id || "",
-      personality: employee.personality || "",
-      tone: employee.tone || "",
-      level: employee.level || "senior",
-      status: employee.status || "active",
-      avatar_url: employee.avatar_url || "",
-      description: employee.description || "",
-      instructions: employee.instructions || "",
+
+      specialization:
+        employee.specialization || "",
+
+      department_id:
+        employee.department_id || "",
+
+      admin_id:
+        employee.admin_id || "",
+
+      personality:
+        employee.personality || "",
+
+      tone:
+        employee.tone || "",
+
+      level:
+        employee.level || "senior",
+
+      status:
+        employee.status || "active",
+
+      avatar_url:
+        employee.avatar_url || "",
+
+      description:
+        employee.description || "",
+
+      instructions:
+        employee.instructions || "",
+
       permissions: {
         ...EMPTY_FORM.permissions,
         ...(employee.permissions || {}),
@@ -328,6 +361,7 @@ export default function AIEmployeesPage() {
   function togglePermission(key) {
     setForm((current) => ({
       ...current,
+
       permissions: {
         ...current.permissions,
         [key]: !current.permissions[key],
@@ -350,25 +384,37 @@ export default function AIEmployeesPage() {
     try {
       const payload = {
         name: form.name.trim(),
+
         specialization:
           form.specialization.trim() || null,
+
         department_id:
           form.department_id || null,
+
         admin_id:
           form.admin_id || null,
+
         personality:
           form.personality.trim() || null,
+
         tone:
           form.tone.trim() || null,
+
         level: form.level,
+
         status: form.status,
+
         avatar_url:
           form.avatar_url.trim() || null,
+
         description:
           form.description.trim() || null,
+
         instructions:
           form.instructions.trim() || null,
+
         permissions: form.permissions,
+
         updated_at: new Date().toISOString(),
       };
 
@@ -380,6 +426,8 @@ export default function AIEmployeesPage() {
             .eq("id", editingId);
 
         if (updateError) throw updateError;
+
+        setSelectedId(editingId);
 
         setNotice("تم تحديث موظف AI");
       } else {
@@ -397,16 +445,23 @@ export default function AIEmployeesPage() {
 
         if (data?.id) {
           setSelectedId(data.id);
+
+          // بعد الإنشاء، في الجوال نعرض ملف الموظف
+          setMobileView("profile");
         }
 
         setNotice("تم إنشاء موظف AI");
       }
 
       setEditorOpen(false);
+
       await loadData();
     } catch (err) {
       console.error(err);
-      setError(err.message || "تعذر حفظ الموظف");
+
+      setError(
+        err.message || "تعذر حفظ الموظف"
+      );
     } finally {
       setSaving(false);
     }
@@ -441,10 +496,19 @@ export default function AIEmployeesPage() {
       await loadData();
     } catch (err) {
       console.error(err);
+
       setError(
-        err.message || "تعذر تغيير حالة الموظف"
+        err.message ||
+          "تعذر تغيير حالة الموظف"
       );
     }
+  }
+
+  function selectEmployee(id) {
+    setSelectedId(id);
+
+    // على الجوال ننتقل من القائمة إلى الملف
+    setMobileView("profile");
   }
 
   if (loading) {
@@ -452,7 +516,9 @@ export default function AIEmployeesPage() {
       <main className="ai-page" dir="rtl">
         <div className="loading-box">
           <div className="loading-spinner" />
-          <div>جاري تحميل موظفي AI...</div>
+          <div>
+            جاري تحميل موظفي AI...
+          </div>
         </div>
 
         <Styles />
@@ -470,9 +536,9 @@ export default function AIEmployeesPage() {
         <header className="page-header">
           <div>
             <div className="breadcrumb">
-              الإدارة الداخلية
+              <span>الإدارة الداخلية</span>
               <span>/</span>
-              موظفو AI
+              <span>موظفو AI</span>
             </div>
 
             <div className="title-row">
@@ -481,7 +547,9 @@ export default function AIEmployeesPage() {
               </div>
 
               <div>
-                <h1>موظفو الذكاء الاصطناعي</h1>
+                <h1>
+                  موظفو الذكاء الاصطناعي
+                </h1>
 
                 <p>
                   إدارة موظفي AI وربطهم بالأقسام
@@ -517,6 +585,7 @@ export default function AIEmployeesPage() {
 
         {/* STATS */}
         <section className="stats-grid">
+
           <Stat
             label="إجمالي الموظفين"
             value={stats.total}
@@ -548,6 +617,7 @@ export default function AIEmployeesPage() {
             label="التكلفة"
             value={`${money(stats.cost)} $`}
           />
+
         </section>
 
         {/* MAIN WORKSPACE */}
@@ -555,12 +625,17 @@ export default function AIEmployeesPage() {
 
           {/* TOOLBAR */}
           <div className="toolbar">
+
             <div className="toolbar-title">
               <strong>فريق AI</strong>
-              <span>{filteredEmployees.length}</span>
+
+              <span>
+                {filteredEmployees.length}
+              </span>
             </div>
 
             <div className="toolbar-actions">
+
               <div className="search">
                 <span>⌕</span>
 
@@ -595,6 +670,7 @@ export default function AIEmployeesPage() {
                   موقوف
                 </option>
               </select>
+
             </div>
           </div>
 
@@ -606,12 +682,18 @@ export default function AIEmployeesPage() {
               onCreate={openCreate}
             />
           ) : (
-            <div className="employee-layout">
+            <div
+              className={`employee-layout mobile-${mobileView}`}
+            >
 
               {/* EMPLOYEE LIST */}
               <aside className="employee-list">
+
                 <div className="list-heading">
-                  <span>الموظفون</span>
+                  <span>
+                    الموظفون
+                  </span>
+
                   <b>
                     {filteredEmployees.length}
                   </b>
@@ -620,21 +702,26 @@ export default function AIEmployeesPage() {
                 {filteredEmployees.map(
                   (employee) => {
                     const active =
-                      employee.id === selectedId;
+                      employee.id ===
+                      selectedId;
 
                     return (
                       <button
                         key={employee.id}
                         className={`employee-item ${
-                          active ? "selected" : ""
+                          active
+                            ? "selected"
+                            : ""
                         }`}
                         onClick={() =>
-                          setSelectedId(
+                          selectEmployee(
                             employee.id
                           )
                         }
                       >
+
                         <div className="avatar">
+
                           {employee.avatar_url ? (
                             <img
                               src={
@@ -643,7 +730,9 @@ export default function AIEmployeesPage() {
                               alt=""
                             />
                           ) : (
-                            <span>AI</span>
+                            <span>
+                              AI
+                            </span>
                           )}
 
                           <i
@@ -654,9 +743,11 @@ export default function AIEmployeesPage() {
                                 : ""
                             }
                           />
+
                         </div>
 
                         <div className="employee-summary">
+
                           <strong>
                             {employee.name}
                           </strong>
@@ -671,25 +762,45 @@ export default function AIEmployeesPage() {
                               employee.department_id
                             )}
                           </em>
+
                         </div>
 
                         {active && (
                           <div className="selected-line" />
                         )}
+
                       </button>
                     );
                   }
                 )}
+
               </aside>
 
               {/* PROFILE */}
               <div className="profile">
 
+                {/* زر الرجوع يظهر فقط على الجوال */}
+                <button
+                  type="button"
+                  className="mobile-back"
+                  onClick={() =>
+                    setMobileView("list")
+                  }
+                >
+                  <span>→</span>
+
+                  العودة إلى فريق AI
+                </button>
+
                 {selectedEmployee && (
                   <>
+                    {/* PROFILE HEADER */}
                     <div className="profile-header">
+
                       <div className="profile-identity">
+
                         <div className="big-avatar">
+
                           {selectedEmployee.avatar_url ? (
                             <img
                               src={
@@ -698,14 +809,21 @@ export default function AIEmployeesPage() {
                               alt=""
                             />
                           ) : (
-                            <span>AI</span>
+                            <span>
+                              AI
+                            </span>
                           )}
+
                         </div>
 
                         <div>
+
                           <div className="profile-name">
+
                             <h2>
-                              {selectedEmployee.name}
+                              {
+                                selectedEmployee.name
+                              }
                             </h2>
 
                             <span
@@ -714,10 +832,12 @@ export default function AIEmployeesPage() {
                               }`}
                             >
                               <i />
+
                               {statusText(
                                 selectedEmployee.status
                               )}
                             </span>
+
                           </div>
 
                           <p>
@@ -726,24 +846,31 @@ export default function AIEmployeesPage() {
                           </p>
 
                           <div className="meta">
+
                             <span>
                               {departmentName(
                                 selectedEmployee.department_id
                               )}
                             </span>
 
-                            <span>•</span>
+                            <span>
+                              •
+                            </span>
 
                             <span>
                               {levelText(
                                 selectedEmployee.level
                               )}
                             </span>
+
                           </div>
+
                         </div>
+
                       </div>
 
                       <div className="profile-actions">
+
                         <button
                           className="secondary-button"
                           onClick={() =>
@@ -768,11 +895,14 @@ export default function AIEmployeesPage() {
                             ? "إيقاف الموظف"
                             : "تفعيل الموظف"}
                         </button>
+
                       </div>
+
                     </div>
 
                     {/* PERFORMANCE */}
                     <div className="performance">
+
                       <Metric
                         label="المهام المكتملة"
                         value={number(
@@ -802,12 +932,17 @@ export default function AIEmployeesPage() {
                           selectedEmployee.total_cost
                         )} $`}
                       />
+
                     </div>
 
-                    {/* INFO GRID */}
+                    {/* CONTENT */}
                     <div className="content-grid">
 
-                      <InfoBox title="الهيكل الإداري">
+                      {/* الهيكل */}
+                      <InfoBox
+                        title="الهيكل الإداري"
+                      >
+
                         <InfoRow
                           label="القسم"
                           value={departmentName(
@@ -835,9 +970,14 @@ export default function AIEmployeesPage() {
                             selectedEmployee.status
                           )}
                         />
+
                       </InfoBox>
 
-                      <InfoBox title="الشخصية والأسلوب">
+                      {/* الشخصية */}
+                      <InfoBox
+                        title="الشخصية والأسلوب"
+                      >
+
                         <InfoRow
                           label="الشخصية"
                           value={
@@ -853,19 +993,24 @@ export default function AIEmployeesPage() {
                             "غير محدد"
                           }
                         />
+
                       </InfoBox>
 
+                      {/* الصلاحيات */}
                       <InfoBox
                         title="الصلاحيات"
                         wide
                       >
+
                         <div className="permissions">
+
                           {PERMISSIONS.map(
                             ([key, label]) => {
                               const enabled =
                                 !!(
                                   selectedEmployee
-                                    .permissions || {}
+                                    .permissions ||
+                                  {}
                                 )[key];
 
                               return (
@@ -888,34 +1033,45 @@ export default function AIEmployeesPage() {
                               );
                             }
                           )}
+
                         </div>
+
                       </InfoBox>
 
+                      {/* الوصف */}
                       <InfoBox
                         title="وصف الموظف"
                         wide
                       >
+
                         <p className="description">
                           {selectedEmployee.description ||
                             "لم تتم إضافة وصف لهذا الموظف."}
                         </p>
+
                       </InfoBox>
 
+                      {/* التعليمات */}
                       <InfoBox
                         title="تعليمات التشغيل"
                         wide
                       >
+
                         <p className="description">
                           {selectedEmployee.instructions ||
                             "لم تتم إضافة تعليمات تشغيل لهذا الموظف."}
                         </p>
+
                       </InfoBox>
 
+                      {/* الأداء */}
                       <InfoBox
                         title="الأداء التشغيلي"
                         wide
                       >
+
                         <div className="operation-grid">
+
                           <Operation
                             label="المهام المكتملة"
                             value={number(
@@ -937,11 +1093,15 @@ export default function AIEmployeesPage() {
                                 0
                             ).toFixed(0)} ثانية`}
                           />
+
                         </div>
+
                       </InfoBox>
+
                     </div>
                   </>
                 )}
+
               </div>
             </div>
           )}
@@ -971,6 +1131,10 @@ export default function AIEmployeesPage() {
   );
 }
 
+/* =========================
+   COMPONENTS
+========================= */
+
 function Stat({
   label,
   value,
@@ -983,10 +1147,14 @@ function Stat({
         main ? "main" : ""
       }`}
     >
-      <span>{label}</span>
+      <span>
+        {label}
+      </span>
 
       <strong
-        className={green ? "green" : ""}
+        className={
+          green ? "green" : ""
+        }
       >
         {value}
       </strong>
@@ -994,11 +1162,19 @@ function Stat({
   );
 }
 
-function Metric({ label, value }) {
+function Metric({
+  label,
+  value,
+}) {
   return (
     <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
     </div>
   );
 }
@@ -1014,26 +1190,45 @@ function InfoBox({
         wide ? "wide" : ""
       }`}
     >
-      <h3>{title}</h3>
+      <h3>
+        {title}
+      </h3>
+
       {children}
     </div>
   );
 }
 
-function InfoRow({ label, value }) {
+function InfoRow({
+  label,
+  value,
+}) {
   return (
     <div className="info-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
     </div>
   );
 }
 
-function Operation({ label, value }) {
+function Operation({
+  label,
+  value,
+}) {
   return (
     <div className="operation">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
     </div>
   );
 }
@@ -1044,6 +1239,7 @@ function Empty({
 }) {
   return (
     <div className="empty">
+
       <div className="empty-icon">
         AI
       </div>
@@ -1068,9 +1264,14 @@ function Empty({
           ＋ إضافة أول موظف
         </button>
       )}
+
     </div>
   );
 }
+
+/* =========================
+   EDITOR
+========================= */
 
 function Editor({
   form,
@@ -1086,11 +1287,16 @@ function Editor({
 }) {
   return (
     <div className="editor-overlay">
+
       <div className="editor">
 
         <div className="editor-header">
+
           <div>
-            <span>AI EMPLOYEE</span>
+            <span>
+              AI EMPLOYEE
+            </span>
+
             <h2>
               {editingId
                 ? "تعديل موظف AI"
@@ -1105,13 +1311,21 @@ function Editor({
           >
             ×
           </button>
+
         </div>
 
-        <form onSubmit={onSave}>
+        <form
+          onSubmit={onSave}
+        >
+
           <div className="form-content">
 
-            <FormSection title="البيانات الأساسية">
+            <FormSection
+              title="البيانات الأساسية"
+            >
+
               <div className="form-grid">
+
                 <Field
                   label="اسم الموظف"
                   required
@@ -1175,11 +1389,17 @@ function Editor({
                     },
                   ]}
                 />
+
               </div>
+
             </FormSection>
 
-            <FormSection title="الهيكل الإداري">
+            <FormSection
+              title="الهيكل الإداري"
+            >
+
               <div className="form-grid">
+
                 <SelectField
                   label="القسم"
                   value={
@@ -1196,6 +1416,7 @@ function Editor({
                       value: "",
                       label: "بدون قسم",
                     },
+
                     ...departments.map(
                       (item) => ({
                         value: item.id,
@@ -1219,6 +1440,7 @@ function Editor({
                       value: "",
                       label: "بدون Admin",
                     },
+
                     ...admins.map(
                       (admin) => {
                         const profile =
@@ -1230,6 +1452,7 @@ function Editor({
 
                         return {
                           value: admin.id,
+
                           label:
                             admin.full_name ||
                             profile?.full_name ||
@@ -1239,11 +1462,17 @@ function Editor({
                     ),
                   ]}
                 />
+
               </div>
+
             </FormSection>
 
-            <FormSection title="الشخصية">
+            <FormSection
+              title="الشخصية والأسلوب"
+            >
+
               <div className="form-grid">
+
                 <Field
                   label="الشخصية"
                   value={
@@ -1269,13 +1498,20 @@ function Editor({
                   }
                   placeholder="إماراتية احترافية وودية"
                 />
+
               </div>
+
             </FormSection>
 
-            <FormSection title="التعريف والتعليمات">
+            <FormSection
+              title="التعريف والتعليمات"
+            >
+
               <TextArea
                 label="وصف الموظف"
-                value={form.description}
+                value={
+                  form.description
+                }
                 onChange={(value) =>
                   updateForm(
                     "description",
@@ -1287,7 +1523,9 @@ function Editor({
 
               <TextArea
                 label="تعليمات التشغيل"
-                value={form.instructions}
+                value={
+                  form.instructions
+                }
                 onChange={(value) =>
                   updateForm(
                     "instructions",
@@ -1296,10 +1534,15 @@ function Editor({
                 }
                 placeholder="ما الذي يجب على الموظف فعله وما الذي يجب عليه تجنبه؟"
               />
+
             </FormSection>
 
-            <FormSection title="الصلاحيات">
+            <FormSection
+              title="الصلاحيات"
+            >
+
               <div className="permission-editor">
+
                 {PERMISSIONS.map(
                   ([key, label]) => {
                     const enabled =
@@ -1322,6 +1565,7 @@ function Editor({
                             : ""
                         }`}
                       >
+
                         <span>
                           {enabled
                             ? "✓"
@@ -1329,15 +1573,20 @@ function Editor({
                         </span>
 
                         {label}
+
                       </button>
                     );
                   }
                 )}
+
               </div>
+
             </FormSection>
+
           </div>
 
           <div className="editor-footer">
+
             <button
               type="button"
               className="secondary-button"
@@ -1358,7 +1607,9 @@ function Editor({
                 ? "حفظ التعديلات"
                 : "إنشاء الموظف"}
             </button>
+
           </div>
+
         </form>
       </div>
     </div>
@@ -1371,8 +1622,13 @@ function FormSection({
 }) {
   return (
     <section className="form-section">
-      <h3>{title}</h3>
+
+      <h3>
+        {title}
+      </h3>
+
       {children}
+
     </section>
   );
 }
@@ -1386,8 +1642,10 @@ function Field({
 }) {
   return (
     <label className="field">
+
       <span>
         {label}
+
         {required && (
           <b>*</b>
         )}
@@ -1396,10 +1654,13 @@ function Field({
       <input
         value={value}
         onChange={(e) =>
-          onChange(e.target.value)
+          onChange(
+            e.target.value
+          )
         }
         placeholder={placeholder}
       />
+
     </label>
   );
 }
@@ -1412,16 +1673,22 @@ function TextArea({
 }) {
   return (
     <label className="field full">
-      <span>{label}</span>
+
+      <span>
+        {label}
+      </span>
 
       <textarea
         value={value}
         onChange={(e) =>
-          onChange(e.target.value)
+          onChange(
+            e.target.value
+          )
         }
         placeholder={placeholder}
         rows={4}
       />
+
     </label>
   );
 }
@@ -1434,26 +1701,38 @@ function SelectField({
 }) {
   return (
     <label className="field">
-      <span>{label}</span>
+
+      <span>
+        {label}
+      </span>
 
       <select
         value={value}
         onChange={(e) =>
-          onChange(e.target.value)
+          onChange(
+            e.target.value
+          )
         }
       >
-        {options.map((option) => (
-          <option
-            key={option.value}
-            value={option.value}
-          >
-            {option.label}
-          </option>
-        ))}
+        {options.map(
+          (option) => (
+            <option
+              key={option.value}
+              value={option.value}
+            >
+              {option.label}
+            </option>
+          )
+        )}
       </select>
+
     </label>
   );
 }
+
+/* =========================
+   STYLES
+========================= */
 
 function Styles() {
   return (
@@ -1492,88 +1771,147 @@ function Styles() {
       }
 
       .ai-shell {
-        width: min(1480px, calc(100% - 28px));
+        width: min(
+          1480px,
+          calc(100% - 28px)
+        );
+
         margin: 0 auto;
-        padding: 28px 0 50px;
+
+        padding:
+          28px 0
+          50px;
       }
+
+      /* HEADER */
 
       .page-header {
         display: flex;
         align-items: flex-end;
         justify-content: space-between;
+
         gap: 24px;
+
         margin-bottom: 24px;
       }
 
       .breadcrumb {
         display: flex;
-        gap: 8px;
         align-items: center;
+
+        gap: 8px;
+
         color: #8b9490;
+
         font-size: 12px;
+
         margin-bottom: 12px;
       }
 
       .title-row {
         display: flex;
         align-items: center;
+
         gap: 14px;
       }
 
       .title-mark {
         width: 48px;
         height: 48px;
+
         display: flex;
         align-items: center;
         justify-content: center;
+
         border-radius: 14px;
+
         background: #e7f6ee;
+
         color: #08783f;
+
         font-size: 12px;
         font-weight: 900;
-        letter-spacing: -0.5px;
       }
 
       h1 {
         margin: 0;
-        font-size: clamp(24px, 3vw, 34px);
+
+        font-size:
+          clamp(24px, 3vw, 34px);
+
         line-height: 1.2;
+
         letter-spacing: -1px;
       }
 
       .title-row p {
-        margin: 7px 0 0;
+        margin:
+          7px 0 0;
+
         color: #69736f;
+
         font-size: 13px;
       }
+
+      /* BUTTONS */
 
       .primary-button,
       .secondary-button,
       .dark-button {
         border: 0;
+
         border-radius: 11px;
+
         min-height: 42px;
-        padding: 0 17px;
+
+        padding:
+          0 17px;
+
         font-size: 13px;
+
         font-weight: 800;
-        transition: 0.18s ease;
+
+        transition:
+          0.18s ease;
       }
 
       .primary-button {
         background: #079447;
+
         color: white;
-        box-shadow: 0 5px 15px rgba(7, 148, 71, 0.14);
+
+        box-shadow:
+          0 5px 15px
+          rgba(
+            7,
+            148,
+            71,
+            0.14
+          );
       }
 
       .primary-button:hover {
         background: #067d3c;
-        transform: translateY(-1px);
+
+        transform:
+          translateY(-1px);
+      }
+
+      .primary-button:disabled {
+        opacity: 0.55;
+
+        cursor: not-allowed;
+
+        transform: none;
       }
 
       .secondary-button {
         background: white;
+
         color: #26302c;
-        border: 1px solid #dfe5e2;
+
+        border:
+          1px solid #dfe5e2;
       }
 
       .secondary-button:hover {
@@ -1582,6 +1920,7 @@ function Styles() {
 
       .dark-button {
         background: #17201c;
+
         color: white;
       }
 
@@ -1589,55 +1928,88 @@ function Styles() {
         background: #0e1512;
       }
 
+      /* NOTICES */
+
       .notice {
         display: flex;
         align-items: center;
+
         gap: 9px;
-        padding: 12px 15px;
+
+        padding:
+          12px 15px;
+
         border-radius: 11px;
+
         margin-bottom: 16px;
+
         font-size: 13px;
+
         font-weight: 700;
       }
 
       .notice.success {
         color: #08783f;
+
         background: #e9f8f0;
-        border: 1px solid #c8ecd9;
+
+        border:
+          1px solid #c8ecd9;
       }
 
       .notice.danger {
         color: #b42318;
+
         background: #fff0ee;
-        border: 1px solid #ffd4cf;
+
+        border:
+          1px solid #ffd4cf;
       }
+
+      /* STATS */
 
       .stats-grid {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
+
+        grid-template-columns:
+          repeat(6, 1fr);
+
         gap: 10px;
+
         margin-bottom: 16px;
       }
 
       .stat {
         background: white;
-        border: 1px solid #e2e7e4;
+
+        border:
+          1px solid #e2e7e4;
+
         border-radius: 14px;
-        padding: 15px 16px;
+
+        padding:
+          15px 16px;
+
         min-height: 84px;
       }
 
       .stat span {
         display: block;
+
         color: #8b9490;
+
         font-size: 11px;
+
         margin-bottom: 9px;
       }
 
       .stat strong {
         display: block;
+
         font-size: 22px;
+
         line-height: 1;
+
         letter-spacing: -0.5px;
       }
 
@@ -1649,27 +2021,51 @@ function Styles() {
         border-color: #cfe9db;
       }
 
+      /* WORKSPACE */
+
       .workspace {
         overflow: hidden;
+
         background: white;
-        border: 1px solid #dfe5e2;
+
+        border:
+          1px solid #dfe5e2;
+
         border-radius: 16px;
-        box-shadow: 0 5px 25px rgba(20, 35, 28, 0.035);
+
+        box-shadow:
+          0 5px 25px
+          rgba(
+            20,
+            35,
+            28,
+            0.035
+          );
       }
 
       .toolbar {
         display: flex;
+
         align-items: center;
+
         justify-content: space-between;
+
         gap: 15px;
-        padding: 14px 16px;
-        border-bottom: 1px solid #edf0ee;
+
+        padding:
+          14px 16px;
+
+        border-bottom:
+          1px solid #edf0ee;
       }
 
       .toolbar-title {
         display: flex;
+
         align-items: center;
+
         gap: 9px;
+
         white-space: nowrap;
       }
 
@@ -1679,107 +2075,182 @@ function Styles() {
 
       .toolbar-title span {
         display: flex;
+
         align-items: center;
+
         justify-content: center;
+
         min-width: 25px;
+
         height: 22px;
-        padding: 0 7px;
+
+        padding:
+          0 7px;
+
         border-radius: 20px;
+
         background: #edf1ef;
+
         color: #68716d;
+
         font-size: 10px;
+
         font-weight: 800;
       }
 
       .toolbar-actions {
         display: flex;
+
         gap: 8px;
+
         flex: 1;
+
         justify-content: flex-end;
       }
 
       .search {
-        width: min(340px, 100%);
+        width:
+          min(340px, 100%);
+
         height: 39px;
+
         display: flex;
+
         align-items: center;
+
         gap: 8px;
-        padding: 0 11px;
-        border: 1px solid #dfe5e2;
+
+        padding:
+          0 11px;
+
+        border:
+          1px solid #dfe5e2;
+
         border-radius: 10px;
+
         background: #fafbfa;
       }
 
       .search span {
         color: #89938e;
+
         font-size: 18px;
       }
 
       .search input {
         width: 100%;
+
         border: 0;
+
         outline: 0;
+
         background: transparent;
+
         font-size: 12px;
+
         color: #17201c;
       }
 
       .toolbar-actions select {
         min-width: 125px;
+
         height: 39px;
-        border: 1px solid #dfe5e2;
+
+        border:
+          1px solid #dfe5e2;
+
         border-radius: 10px;
+
         background: white;
-        padding: 0 10px;
+
+        padding:
+          0 10px;
+
         color: #39423e;
+
         outline: 0;
+
         font-size: 12px;
       }
 
+      /* EMPLOYEE LAYOUT */
+
       .employee-layout {
         display: grid;
-        grid-template-columns: 300px minmax(0, 1fr);
+
+        grid-template-columns:
+          300px
+          minmax(0, 1fr);
+
         min-height: 650px;
       }
 
       .employee-list {
         background: #fafbfa;
-        border-left: 1px solid #edf0ee;
+
+        border-left:
+          1px solid #edf0ee;
+
         padding: 10px;
       }
 
       .list-heading {
         display: flex;
+
         justify-content: space-between;
+
         align-items: center;
-        padding: 10px 8px 13px;
+
+        padding:
+          10px 8px 13px;
+
         color: #69736f;
+
         font-size: 11px;
+
         font-weight: 800;
       }
 
       .list-heading b {
         display: flex;
+
         align-items: center;
+
         justify-content: center;
+
         min-width: 23px;
+
         height: 21px;
+
         border-radius: 20px;
+
         background: #e9efec;
+
         font-size: 10px;
       }
 
       .employee-item {
         position: relative;
+
         width: 100%;
+
         display: flex;
+
         align-items: center;
+
         gap: 10px;
-        padding: 11px 9px;
+
+        padding:
+          11px 9px;
+
         border: 0;
+
         border-radius: 11px;
+
         background: transparent;
+
         text-align: right;
+
         margin-bottom: 3px;
       }
 
@@ -1793,27 +2264,44 @@ function Styles() {
 
       .selected-line {
         position: absolute;
+
         right: 0;
+
         top: 8px;
+
         bottom: 8px;
+
         width: 3px;
+
         border-radius: 4px;
+
         background: #079447;
       }
 
       .avatar {
         position: relative;
+
         width: 43px;
         height: 43px;
-        flex: 0 0 43px;
+
+        flex:
+          0 0 43px;
+
         display: flex;
+
         align-items: center;
         justify-content: center;
+
         overflow: visible;
+
         border-radius: 12px;
+
         background: #e8f6ef;
+
         color: #08783f;
+
         font-size: 11px;
+
         font-weight: 900;
       }
 
@@ -1821,18 +2309,25 @@ function Styles() {
       .big-avatar img {
         width: 100%;
         height: 100%;
+
         object-fit: cover;
       }
 
       .avatar i {
         position: absolute;
+
         left: -2px;
         bottom: -2px;
+
         width: 11px;
         height: 11px;
+
         border-radius: 50%;
+
         background: #b8c1bd;
-        border: 2px solid white;
+
+        border:
+          2px solid white;
       }
 
       .avatar i.online {
@@ -1841,26 +2336,38 @@ function Styles() {
 
       .employee-summary {
         min-width: 0;
+
         display: flex;
+
         flex-direction: column;
+
         gap: 2px;
       }
 
       .employee-summary strong {
         overflow: hidden;
+
         color: #1b2420;
+
         font-size: 12px;
+
         white-space: nowrap;
+
         text-overflow: ellipsis;
       }
 
       .employee-summary small,
       .employee-summary em {
         overflow: hidden;
+
         color: #8a948f;
+
         font-size: 10px;
+
         font-style: normal;
+
         white-space: nowrap;
+
         text-overflow: ellipsis;
       }
 
@@ -1868,114 +2375,174 @@ function Styles() {
         color: #079447;
       }
 
+      /* PROFILE */
+
       .profile {
         min-width: 0;
       }
 
+      .mobile-back {
+        display: none;
+      }
+
       .profile-header {
         display: flex;
+
         align-items: center;
+
         justify-content: space-between;
+
         gap: 20px;
-        padding: 28px 30px;
-        border-bottom: 1px solid #edf0ee;
+
+        padding:
+          28px 30px;
+
+        border-bottom:
+          1px solid #edf0ee;
       }
 
       .profile-identity {
         display: flex;
+
         align-items: center;
+
         gap: 15px;
+
         min-width: 0;
       }
 
       .big-avatar {
         width: 74px;
         height: 74px;
-        flex: 0 0 74px;
+
+        flex:
+          0 0 74px;
+
         display: flex;
+
         align-items: center;
         justify-content: center;
+
         overflow: hidden;
+
         border-radius: 19px;
+
         background: #e8f6ef;
+
         color: #08783f;
+
         font-size: 17px;
+
         font-weight: 900;
       }
 
       .profile-name {
         display: flex;
+
         align-items: center;
+
         flex-wrap: wrap;
+
         gap: 9px;
       }
 
       .profile-name h2 {
         margin: 0;
+
         color: #111916;
+
         font-size: 24px;
       }
 
       .profile-identity p {
-        margin: 5px 0 7px;
+        margin:
+          5px 0 7px;
+
         color: #66716c;
+
         font-size: 12px;
       }
 
       .meta {
         display: flex;
+
         gap: 7px;
+
         color: #87918c;
+
         font-size: 10px;
       }
 
       .status {
         display: inline-flex;
+
         align-items: center;
+
         gap: 5px;
-        padding: 4px 8px;
+
+        padding:
+          4px 8px;
+
         border-radius: 20px;
+
         font-size: 9px;
+
         font-weight: 800;
       }
 
       .status i {
         width: 5px;
         height: 5px;
+
         border-radius: 50%;
+
         background: currentColor;
       }
 
       .status.active {
         background: #e8f7ef;
+
         color: #08783f;
       }
 
       .status.inactive {
         background: #f0f2f1;
+
         color: #747d79;
       }
 
       .status.suspended {
         background: #fff0ee;
+
         color: #b42318;
       }
 
       .profile-actions {
         display: flex;
+
         gap: 7px;
+
         flex-shrink: 0;
       }
 
+      /* PERFORMANCE */
+
       .performance {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        border-bottom: 1px solid #edf0ee;
+
+        grid-template-columns:
+          repeat(4, 1fr);
+
+        border-bottom:
+          1px solid #edf0ee;
       }
 
       .metric {
-        padding: 19px 22px;
-        border-left: 1px solid #edf0ee;
+        padding:
+          19px 22px;
+
+        border-left:
+          1px solid #edf0ee;
       }
 
       .metric:last-child {
@@ -1984,79 +2551,123 @@ function Styles() {
 
       .metric span {
         display: block;
+
         color: #8a948f;
+
         font-size: 10px;
+
         margin-bottom: 7px;
       }
 
       .metric strong {
         font-size: 19px;
+
         color: #18201d;
       }
 
+      /* CONTENT */
+
       .content-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+
+        grid-template-columns:
+          1fr 1fr;
+
         gap: 12px;
-        padding: 20px 22px 25px;
+
+        padding:
+          20px 22px
+          25px;
       }
 
       .info-box {
         min-width: 0;
+
         padding: 17px;
-        border: 1px solid #e6ebe8;
+
+        border:
+          1px solid #e6ebe8;
+
         border-radius: 13px;
+
         background: #fff;
       }
 
       .info-box.wide {
-        grid-column: 1 / -1;
+        grid-column:
+          1 / -1;
       }
 
       .info-box h3 {
-        margin: 0 0 13px;
+        margin:
+          0 0 13px;
+
         color: #27312d;
+
         font-size: 12px;
       }
 
       .info-row {
         display: flex;
+
         justify-content: space-between;
+
         align-items: flex-start;
+
         gap: 15px;
-        padding: 9px 0;
-        border-bottom: 1px solid #f0f2f1;
+
+        padding:
+          9px 0;
+
+        border-bottom:
+          1px solid #f0f2f1;
       }
 
       .info-row:last-child {
         border-bottom: 0;
+
         padding-bottom: 0;
       }
 
       .info-row span {
         color: #8a948f;
+
         font-size: 10px;
       }
 
       .info-row strong {
         max-width: 60%;
+
         color: #35403b;
+
         font-size: 11px;
+
         text-align: left;
       }
 
+      /* PERMISSIONS */
+
       .permissions {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+
+        grid-template-columns:
+          repeat(4, 1fr);
+
         gap: 7px;
       }
 
       .permission {
-        padding: 9px 10px;
+        padding:
+          9px 10px;
+
         border-radius: 9px;
+
         background: #f5f7f6;
+
         color: #a0a8a4;
+
         font-size: 10px;
+
         font-weight: 700;
       }
 
@@ -2066,153 +2677,248 @@ function Styles() {
 
       .permission.enabled {
         background: #e8f6ef;
+
         color: #08783f;
       }
 
       .description {
         margin: 0;
+
         color: #68736e;
+
         font-size: 11px;
+
         line-height: 1.9;
+
         white-space: pre-wrap;
       }
 
       .operation-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+
+        grid-template-columns:
+          repeat(3, 1fr);
+
         gap: 8px;
       }
 
       .operation {
         padding: 12px;
+
         border-radius: 10px;
+
         background: #f7f9f8;
       }
 
       .operation span {
         display: block;
+
         margin-bottom: 5px;
+
         color: #89938e;
+
         font-size: 9px;
       }
 
       .operation strong {
         color: #1c2521;
+
         font-size: 14px;
       }
 
+      /* EMPTY */
+
       .empty {
         min-height: 500px;
+
         display: flex;
+
         flex-direction: column;
+
         align-items: center;
+
         justify-content: center;
+
         padding: 30px;
+
         text-align: center;
       }
 
       .empty-icon {
         width: 70px;
         height: 70px;
+
         display: flex;
+
         align-items: center;
         justify-content: center;
+
         margin-bottom: 16px;
+
         border-radius: 18px;
+
         background: #e8f6ef;
+
         color: #08783f;
+
         font-size: 16px;
+
         font-weight: 900;
       }
 
       .empty h2 {
         margin: 0;
+
         font-size: 18px;
       }
 
       .empty p {
         max-width: 380px;
-        margin: 8px 0 18px;
+
+        margin:
+          8px 0 18px;
+
         color: #7b8580;
+
         font-size: 12px;
       }
 
+      /* EDITOR */
+
       .editor-overlay {
         position: fixed;
+
         z-index: 1000;
+
         inset: 0;
+
         display: flex;
+
         justify-content: center;
+
         align-items: center;
+
         padding: 18px;
-        background: rgba(12, 18, 15, 0.52);
-        backdrop-filter: blur(4px);
+
+        background:
+          rgba(
+            12,
+            18,
+            15,
+            0.52
+          );
+
+        backdrop-filter:
+          blur(4px);
       }
 
       .editor {
-        width: min(760px, 100%);
-        max-height: calc(100vh - 36px);
+        width:
+          min(760px, 100%);
+
+        max-height:
+          calc(100vh - 36px);
+
         overflow: hidden;
+
         border-radius: 17px;
+
         background: white;
-        box-shadow: 0 25px 80px rgba(0, 0, 0, 0.2);
+
+        box-shadow:
+          0 25px 80px
+          rgba(
+            0,
+            0,
+            0,
+            0.2
+          );
       }
 
       .editor-header {
         display: flex;
+
         justify-content: space-between;
+
         align-items: center;
-        padding: 20px 22px;
-        border-bottom: 1px solid #edf0ee;
+
+        padding:
+          20px 22px;
+
+        border-bottom:
+          1px solid #edf0ee;
       }
 
       .editor-header span {
         color: #079447;
+
         font-size: 9px;
+
         font-weight: 900;
+
         letter-spacing: 1px;
       }
 
       .editor-header h2 {
-        margin: 4px 0 0;
+        margin:
+          4px 0 0;
+
         font-size: 19px;
       }
 
       .close-button {
         width: 35px;
         height: 35px;
+
         border: 0;
+
         border-radius: 9px;
+
         background: #f2f4f3;
+
         color: #68726e;
+
         font-size: 21px;
       }
 
       .form-content {
-        max-height: calc(100vh - 180px);
+        max-height:
+          calc(100vh - 180px);
+
         overflow-y: auto;
-        padding: 20px 22px;
+
+        padding:
+          20px 22px;
       }
 
       .form-section {
         padding-bottom: 20px;
+
         margin-bottom: 20px;
-        border-bottom: 1px solid #edf0ee;
+
+        border-bottom:
+          1px solid #edf0ee;
       }
 
       .form-section:last-child {
         margin-bottom: 0;
+
         border-bottom: 0;
       }
 
       .form-section h3 {
-        margin: 0 0 12px;
+        margin:
+          0 0 12px;
+
         font-size: 12px;
       }
 
       .form-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+
+        grid-template-columns:
+          1fr 1fr;
+
         gap: 12px;
       }
 
@@ -2226,14 +2932,19 @@ function Styles() {
 
       .field span {
         display: block;
+
         margin-bottom: 6px;
+
         color: #4e5954;
+
         font-size: 10px;
+
         font-weight: 800;
       }
 
       .field span b {
         margin-right: 4px;
+
         color: #d92d20;
       }
 
@@ -2241,24 +2952,37 @@ function Styles() {
       .field select,
       .field textarea {
         width: 100%;
-        border: 1px solid #dfe5e2;
+
+        border:
+          1px solid #dfe5e2;
+
         border-radius: 9px;
+
         background: #fafbfa;
+
         color: #1a231f;
+
         outline: none;
+
         font-size: 12px;
       }
 
       .field input,
       .field select {
         height: 40px;
-        padding: 0 11px;
+
+        padding:
+          0 11px;
       }
 
       .field textarea {
         resize: vertical;
+
         min-height: 90px;
-        padding: 10px 11px;
+
+        padding:
+          10px 11px;
+
         line-height: 1.7;
       }
 
@@ -2266,119 +2990,187 @@ function Styles() {
       .field select:focus,
       .field textarea:focus {
         border-color: #079447;
+
         background: white;
       }
 
       .permission-editor {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+
+        grid-template-columns:
+          repeat(4, 1fr);
+
         gap: 7px;
       }
 
       .permission-option {
         min-height: 42px;
-        border: 1px solid #e0e6e3;
+
+        border:
+          1px solid #e0e6e3;
+
         border-radius: 9px;
+
         background: #fafbfa;
+
         color: #68736e;
+
         font-size: 10px;
+
         font-weight: 700;
       }
 
       .permission-option span {
         display: inline-flex;
+
         align-items: center;
+
         justify-content: center;
+
         width: 17px;
         height: 17px;
+
         margin-left: 5px;
+
         border-radius: 50%;
+
         background: #e7ebe9;
+
         color: transparent;
       }
 
       .permission-option.active {
         border-color: #bfe7d0;
+
         background: #e9f7f0;
+
         color: #08783f;
       }
 
       .permission-option.active span {
         background: #079447;
+
         color: white;
       }
 
       .editor-footer {
         display: flex;
+
         justify-content: flex-end;
+
         gap: 8px;
-        padding: 14px 22px;
-        border-top: 1px solid #edf0ee;
+
+        padding:
+          14px 22px;
+
+        border-top:
+          1px solid #edf0ee;
+
         background: #fcfdfc;
       }
 
+      /* LOADING */
+
       .loading-box {
         min-height: 100vh;
+
         display: flex;
+
         flex-direction: column;
+
         align-items: center;
+
         justify-content: center;
+
         gap: 12px;
+
         color: #6f7975;
+
         font-size: 12px;
       }
 
       .loading-spinner {
         width: 32px;
         height: 32px;
-        border: 3px solid #dcefe4;
+
+        border:
+          3px solid #dcefe4;
+
         border-top-color: #079447;
+
         border-radius: 50%;
-        animation: spin 0.8s linear infinite;
+
+        animation:
+          spin 0.8s
+          linear infinite;
       }
 
       @keyframes spin {
         to {
-          transform: rotate(360deg);
+          transform:
+            rotate(360deg);
         }
       }
+
+      /* =========================
+         TABLET
+      ========================= */
 
       @media (max-width: 1100px) {
         .stats-grid {
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns:
+            repeat(3, 1fr);
         }
 
         .employee-layout {
-          grid-template-columns: 250px minmax(0, 1fr);
+          grid-template-columns:
+            250px
+            minmax(0, 1fr);
         }
 
         .permissions {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns:
+            repeat(2, 1fr);
         }
       }
 
+      /* =========================
+         MOBILE
+      ========================= */
+
       @media (max-width: 800px) {
+
         .ai-shell {
-          width: min(100% - 20px, 680px);
+          width:
+            min(
+              calc(100% - 20px),
+              680px
+            );
+
           padding-top: 16px;
         }
 
         .page-header {
           align-items: stretch;
+
           flex-direction: column;
+
           gap: 16px;
         }
 
-        .page-header .primary-button {
+        .page-header
+          .primary-button {
           width: 100%;
         }
 
         .stats-grid {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns:
+            repeat(2, 1fr);
         }
 
         .toolbar {
           align-items: stretch;
+
           flex-direction: column;
         }
 
@@ -2390,24 +3182,98 @@ function Styles() {
           flex: 1;
         }
 
+        /*
+          مهم:
+          في الجوال نعرض القائمة فقط
+          أو الملف فقط.
+        */
+
         .employee-layout {
           display: block;
+
+          min-height: auto;
         }
 
         .employee-list {
           border-left: 0;
-          border-bottom: 1px solid #edf0ee;
+
+          border-bottom:
+            1px solid #edf0ee;
+
+          padding: 12px;
         }
 
         .employee-item {
-          display: inline-flex;
-          width: calc(50% - 4px);
-          vertical-align: top;
+          width: 100%;
+        }
+
+        /*
+          حالة القائمة
+        */
+
+        .employee-layout.mobile-list
+          .profile {
+          display: none;
+        }
+
+        /*
+          حالة الملف
+        */
+
+        .employee-layout.mobile-profile
+          .employee-list {
+          display: none;
+        }
+
+        .employee-layout.mobile-profile
+          .profile {
+          display: block;
+        }
+
+        /*
+          زر الرجوع
+        */
+
+        .mobile-back {
+          display: flex;
+
+          align-items: center;
+
+          gap: 7px;
+
+          width: fit-content;
+
+          margin:
+            14px 18px 0;
+
+          padding:
+            8px 12px;
+
+          border:
+            1px solid #dfe5e2;
+
+          border-radius: 9px;
+
+          background: white;
+
+          color: #4e5954;
+
+          font-size: 11px;
+
+          font-weight: 800;
+        }
+
+        .mobile-back span {
+          font-size: 16px;
+
+          line-height: 1;
         }
 
         .profile-header {
           align-items: stretch;
+
           flex-direction: column;
+
           padding: 20px;
         }
 
@@ -2420,7 +3286,8 @@ function Styles() {
         }
 
         .performance {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns:
+            repeat(2, 1fr);
         }
 
         .metric:nth-child(2) {
@@ -2429,11 +3296,13 @@ function Styles() {
 
         .metric:nth-child(3),
         .metric:nth-child(4) {
-          border-top: 1px solid #edf0ee;
+          border-top:
+            1px solid #edf0ee;
         }
 
         .content-grid {
           grid-template-columns: 1fr;
+
           padding: 15px;
         }
 
@@ -2442,7 +3311,8 @@ function Styles() {
         }
 
         .permission-editor {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns:
+            repeat(2, 1fr);
         }
 
         .operation-grid {
@@ -2450,9 +3320,15 @@ function Styles() {
         }
       }
 
+      /* =========================
+         SMALL MOBILE
+      ========================= */
+
       @media (max-width: 520px) {
+
         .ai-shell {
-          width: calc(100% - 14px);
+          width:
+            calc(100% - 14px);
         }
 
         .title-row {
@@ -2462,7 +3338,9 @@ function Styles() {
         .title-mark {
           width: 42px;
           height: 42px;
-          flex: 0 0 42px;
+
+          flex:
+            0 0 42px;
         }
 
         h1 {
@@ -2479,6 +3357,7 @@ function Styles() {
 
         .stat {
           min-height: 75px;
+
           padding: 12px;
         }
 
@@ -2506,7 +3385,10 @@ function Styles() {
         .big-avatar {
           width: 60px;
           height: 60px;
-          flex-basis: 60px;
+
+          flex:
+            0 0 60px;
+
           border-radius: 15px;
         }
 
@@ -2519,7 +3401,8 @@ function Styles() {
         }
 
         .performance {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns:
+            1fr 1fr;
         }
 
         .metric {
@@ -2531,7 +3414,8 @@ function Styles() {
         }
 
         .permissions {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns:
+            1fr 1fr;
         }
 
         .form-grid {
@@ -2539,21 +3423,31 @@ function Styles() {
         }
 
         .permission-editor {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns:
+            1fr 1fr;
         }
+
+        /*
+          نموذج الموظف على الجوال
+          يتحول إلى لوحة من الأسفل
+        */
 
         .editor-overlay {
           padding: 0;
+
           align-items: flex-end;
         }
 
         .editor {
           max-height: 94vh;
-          border-radius: 17px 17px 0 0;
+
+          border-radius:
+            17px 17px 0 0;
         }
 
         .form-content {
-          max-height: calc(94vh - 145px);
+          max-height:
+            calc(94vh - 145px);
         }
 
         .editor-footer {
