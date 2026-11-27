@@ -12,12 +12,10 @@ const STATUS_LABELS = {
 };
 
 function formatNumber(value, digits = 0) {
-  const number = Number(value || 0);
-
   return new Intl.NumberFormat("ar-AE", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  }).format(number);
+  }).format(Number(value || 0));
 }
 
 function formatCost(value) {
@@ -36,9 +34,7 @@ function formatDuration(seconds) {
   const minutes = Math.floor(value / 60);
   const remaining = Math.round(value % 60);
 
-  if (remaining === 0) {
-    return `${minutes} دقيقة`;
-  }
+  if (!remaining) return `${minutes} دقيقة`;
 
   return `${minutes} د و ${remaining} ث`;
 }
@@ -53,7 +49,11 @@ function getScoreClass(score) {
   return "low";
 }
 
-function calculatePerformance(employee, tasks, storedPerformance) {
+function calculatePerformance(
+  employee,
+  tasks,
+  storedPerformance
+) {
   const employeeTasks = tasks.filter(
     (task) => task.ai_employee_id === employee.id
   );
@@ -91,17 +91,23 @@ function calculatePerformance(employee, tasks, storedPerformance) {
     durations.length > 0
       ? durations.reduce((sum, value) => sum + value, 0) /
         durations.length
-      : Number(storedPerformance?.average_speed_seconds || 0);
+      : Number(
+          storedPerformance?.average_speed_seconds || 0
+        );
 
   const fastest =
     durations.length > 0
       ? Math.min(...durations)
-      : Number(storedPerformance?.fastest_task_seconds || 0);
+      : Number(
+          storedPerformance?.fastest_task_seconds || 0
+        );
 
   const slowest =
     durations.length > 0
       ? Math.max(...durations)
-      : Number(storedPerformance?.slowest_task_seconds || 0);
+      : Number(
+          storedPerformance?.slowest_task_seconds || 0
+        );
 
   const totalCost = employeeTasks.reduce(
     (sum, task) => sum + Number(task.actual_cost || 0),
@@ -119,32 +125,78 @@ function calculatePerformance(employee, tasks, storedPerformance) {
   const failureRate =
     total > 0 ? (failed.length / total) * 100 : 0;
 
+  /*
+   * الجودة:
+   * نجاح المهام هو المؤشر الأساسي.
+   */
   const qualityScore =
     total > 0
-      ? Math.min(
-          100,
-          successRate * 0.7 +
-            (completed.length > 0 ? 30 : 0)
-        )
+      ? Math.min(100, successRate)
       : 0;
+
+  /*
+   * الكفاءة:
+   * النجاح + سرعة التنفيذ.
+   *
+   * المهمة التي تنتهي خلال دقيقة تعتبر ممتازة.
+   * وكلما زادت المدة تنخفض مساهمة السرعة تدريجيًا.
+   */
+  let speedScore = 0;
+
+  if (averageSpeed > 0) {
+    if (averageSpeed <= 60) {
+      speedScore = 100;
+    } else if (averageSpeed <= 300) {
+      speedScore = 90;
+    } else if (averageSpeed <= 600) {
+      speedScore = 80;
+    } else if (averageSpeed <= 1200) {
+      speedScore = 70;
+    } else {
+      speedScore = 60;
+    }
+  }
 
   const efficiencyScore =
     total > 0
-      ? Math.min(
-          100,
-          successRate * 0.8 +
-            (averageSpeed > 0 && averageSpeed <= 60 ? 20 : 10)
-        )
+      ? averageSpeed > 0
+        ? successRate * 0.7 + speedScore * 0.3
+        : successRate
       : 0;
 
-  const overallScore =
-    total > 0
-      ? Math.round(
-          qualityScore * 0.45 +
-            efficiencyScore * 0.35 +
-            Number(employee.average_rating || 0) * 20 * 0.2
-        )
-      : 0;
+  /*
+   * التقييم البشري:
+   * إذا لم يوجد تقييم فعلي، لا نعتبره صفرًا.
+   */
+  const humanRating = Number(
+    employee.average_rating || 0
+  );
+
+  const hasHumanRating = humanRating > 0;
+
+  let overallScore = 0;
+
+  if (total > 0) {
+    if (hasHumanRating) {
+      const humanScore = Math.min(
+        100,
+        humanRating * 20
+      );
+
+      overallScore =
+        qualityScore * 0.5 +
+        efficiencyScore * 0.25 +
+        humanScore * 0.25;
+    } else {
+      /*
+       * لا يوجد تقييم بشري:
+       * نستخدم الجودة والكفاءة فقط.
+       */
+      overallScore =
+        qualityScore * 0.65 +
+        efficiencyScore * 0.35;
+    }
+  }
 
   const lastTask =
     employeeTasks.length > 0
@@ -152,8 +204,18 @@ function calculatePerformance(employee, tasks, storedPerformance) {
           .slice()
           .sort(
             (a, b) =>
-              new Date(b.created_at || 0) -
-              new Date(a.created_at || 0)
+              new Date(
+                b.completed_at ||
+                  b.updated_at ||
+                  b.created_at ||
+                  0
+              ) -
+              new Date(
+                a.completed_at ||
+                  a.updated_at ||
+                  a.created_at ||
+                  0
+              )
           )[0]
       : null;
 
@@ -173,6 +235,8 @@ function calculatePerformance(employee, tasks, storedPerformance) {
     qualityScore,
     efficiencyScore,
     overallScore,
+    humanRating,
+    hasHumanRating,
     lastTask,
     storedPerformance,
   };
@@ -200,9 +264,7 @@ export default function AIEmployeePerformancePage() {
       setError("");
 
       const {
-        data: {
-          user,
-        },
+        data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
@@ -217,7 +279,10 @@ export default function AIEmployeePerformancePage() {
           .eq("id", user.id)
           .single();
 
-      if (profileError || !profile?.is_super_admin) {
+      if (
+        profileError ||
+        !profile?.is_super_admin
+      ) {
         window.location.href = "/dashboard";
         return;
       }
@@ -230,7 +295,9 @@ export default function AIEmployeePerformancePage() {
         supabase
           .from("ai_employees")
           .select("*")
-          .order("created_at", { ascending: true }),
+          .order("created_at", {
+            ascending: true,
+          }),
 
         supabase
           .from("ai_tasks")
@@ -252,49 +319,57 @@ export default function AIEmployeePerformancePage() {
               updated_at
             `
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("ai_employee_performance")
           .select("*")
-          .order("updated_at", { ascending: false }),
+          .order("updated_at", {
+            ascending: false,
+          }),
       ]);
 
-      if (employeesResult.error) {
+      if (employeesResult.error)
         throw employeesResult.error;
-      }
 
-      if (tasksResult.error) {
+      if (tasksResult.error)
         throw tasksResult.error;
-      }
 
-      if (performanceResult.error) {
+      if (performanceResult.error)
         throw performanceResult.error;
-      }
 
-      setEmployees(employeesResult.data || []);
+      const employeeData =
+        employeesResult.data || [];
+
+      setEmployees(employeeData);
       setTasks(tasksResult.data || []);
-      setPerformanceRows(performanceResult.data || []);
+      setPerformanceRows(
+        performanceResult.data || []
+      );
 
-      if (!selectedId && employeesResult.data?.length) {
-        setSelectedId(employeesResult.data[0].id);
+      if (!selectedId && employeeData.length) {
+        setSelectedId(employeeData[0].id);
       }
 
       if (
         selectedId &&
-        !employeesResult.data?.some(
-          (employee) => employee.id === selectedId
+        !employeeData.some(
+          (employee) =>
+            employee.id === selectedId
         )
       ) {
         setSelectedId(
-          employeesResult.data?.[0]?.id || null
+          employeeData[0]?.id || null
         );
       }
     } catch (err) {
       console.error(err);
+
       setError(
         err?.message ||
-          "تعذر تحميل بيانات أداء موظفي AI."
+          "تعذر تحميل بيانات الأداء."
       );
     } finally {
       setLoading(false);
@@ -319,10 +394,15 @@ export default function AIEmployeePerformancePage() {
         stored
       );
     });
-  }, [employees, tasks, performanceRows]);
+  }, [
+    employees,
+    tasks,
+    performanceRows,
+  ]);
 
   const filteredRows = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+    const keyword =
+      search.trim().toLowerCase();
 
     return rows.filter((row) => {
       const matchesSearch =
@@ -330,7 +410,9 @@ export default function AIEmployeePerformancePage() {
         String(row.employee.name || "")
           .toLowerCase()
           .includes(keyword) ||
-        String(row.employee.specialization || "")
+        String(
+          row.employee.specialization || ""
+        )
           .toLowerCase()
           .includes(keyword);
 
@@ -338,13 +420,20 @@ export default function AIEmployeePerformancePage() {
         statusFilter === "all" ||
         row.employee.status === statusFilter;
 
-      return matchesSearch && matchesStatus;
+      return (
+        matchesSearch && matchesStatus
+      );
     });
-  }, [rows, search, statusFilter]);
+  }, [
+    rows,
+    search,
+    statusFilter,
+  ]);
 
   const selected = useMemo(() => {
     return rows.find(
-      (row) => row.employee.id === selectedId
+      (row) =>
+        row.employee.id === selectedId
     );
   }, [rows, selectedId]);
 
@@ -352,7 +441,8 @@ export default function AIEmployeePerformancePage() {
     const totalEmployees = rows.length;
 
     const activeEmployees = rows.filter(
-      (row) => row.employee.status === "active"
+      (row) =>
+        row.employee.status === "active"
     ).length;
 
     const totalTasks = rows.reduce(
@@ -371,17 +461,10 @@ export default function AIEmployeePerformancePage() {
     );
 
     const totalCost = rows.reduce(
-      (sum, row) => sum + row.totalCost,
+      (sum, row) =>
+        sum + row.totalCost,
       0
     );
-
-    const overall =
-      rows.length > 0
-        ? rows.reduce(
-            (sum, row) => sum + row.overallScore,
-            0
-          ) / rows.length
-        : 0;
 
     return {
       totalEmployees,
@@ -390,7 +473,6 @@ export default function AIEmployeePerformancePage() {
       completedTasks,
       failedTasks,
       totalCost,
-      overall,
     };
   }, [rows]);
 
@@ -421,50 +503,66 @@ export default function AIEmployeePerformancePage() {
           row.failureRate.toFixed(2)
         ),
 
-        average_speed_seconds: Number(
-          row.averageSpeed.toFixed(2)
-        ),
+        average_speed_seconds:
+          Number(
+            row.averageSpeed.toFixed(2)
+          ),
 
-        fastest_task_seconds: Number(
-          row.fastest.toFixed(2)
-        ),
+        fastest_task_seconds:
+          Number(
+            row.fastest.toFixed(2)
+          ),
 
-        slowest_task_seconds: Number(
-          row.slowest.toFixed(2)
-        ),
+        slowest_task_seconds:
+          Number(
+            row.slowest.toFixed(2)
+          ),
 
-        average_rating: Number(
-          row.employee.average_rating || 0
-        ),
+        average_rating:
+          row.humanRating,
 
-        total_ratings: 0,
+        total_ratings:
+          row.hasHumanRating ? 1 : 0,
 
-        total_points: Number(row.totalPoints || 0),
+        total_points:
+          Number(row.totalPoints || 0),
 
-        total_cost: Number(
-          row.totalCost.toFixed(6)
-        ),
+        total_cost:
+          Number(
+            row.totalCost.toFixed(6)
+          ),
 
-        quality_score: Number(
-          row.qualityScore.toFixed(2)
-        ),
+        quality_score:
+          Number(
+            row.qualityScore.toFixed(2)
+          ),
 
-        efficiency_score: Number(
-          row.efficiencyScore.toFixed(2)
-        ),
+        efficiency_score:
+          Number(
+            row.efficiencyScore.toFixed(2)
+          ),
 
-        overall_score: Number(
-          row.overallScore.toFixed(2)
-        ),
+        overall_score:
+          Number(
+            row.overallScore.toFixed(2)
+          ),
 
         last_task_at:
-          row.lastTask?.created_at || null,
+          row.lastTask?.completed_at ||
+          row.lastTask?.updated_at ||
+          row.lastTask?.created_at ||
+          null,
 
-        updated_at: new Date().toISOString(),
+        updated_at:
+          new Date().toISOString(),
       };
 
-      const { error: saveError } = await supabase
-        .from("ai_employee_performance")
+      const {
+        error: saveError,
+      } = await supabase
+        .from(
+          "ai_employee_performance"
+        )
         .upsert(payload, {
           onConflict:
             "ai_employee_id,period_type",
@@ -474,33 +572,56 @@ export default function AIEmployeePerformancePage() {
         throw saveError;
       }
 
+      /*
+       * تحديث بيانات الأداء الأساسية
+       * داخل ai_employees أيضًا.
+       */
       await supabase
         .from("ai_employees")
         .update({
-          tasks_completed: row.completed,
-          tasks_failed: row.failed,
-          success_rate: Number(
-            row.successRate.toFixed(2)
-          ),
-          average_speed_seconds: Number(
-            row.averageSpeed.toFixed(2)
-          ),
-          total_cost: Number(
-            row.totalCost.toFixed(6)
-          ),
+          tasks_completed:
+            row.completed,
+
+          tasks_failed:
+            row.failed,
+
+          success_rate:
+            Number(
+              row.successRate.toFixed(2)
+            ),
+
+          average_speed_seconds:
+            Number(
+              row.averageSpeed.toFixed(2)
+            ),
+
+          total_cost:
+            Number(
+              row.totalCost.toFixed(6)
+            ),
+
           last_active_at:
-            row.lastTask?.created_at || null,
-          updated_at: new Date().toISOString(),
+            row.lastTask?.completed_at ||
+            row.lastTask?.updated_at ||
+            row.lastTask?.created_at ||
+            null,
+
+          updated_at:
+            new Date().toISOString(),
         })
-        .eq("id", row.employee.id);
+        .eq(
+          "id",
+          row.employee.id
+        );
 
       setMessage(
-        "تم حفظ أداء الموظف وتحديث بياناته."
+        "تم حفظ الأداء وتحديث بيانات الموظف."
       );
 
       await loadData();
     } catch (err) {
       console.error(err);
+
       setError(
         err?.message ||
           "تعذر حفظ بيانات الأداء."
@@ -564,7 +685,6 @@ export default function AIEmployeePerformancePage() {
         h1 {
           margin: 0;
           font-size: 32px;
-          letter-spacing: -0.6px;
         }
 
         .subtitle {
@@ -615,7 +735,6 @@ export default function AIEmployeePerformancePage() {
           border: 1px solid #e1e8e3;
           border-radius: 16px;
           padding: 18px;
-          box-shadow: 0 4px 16px rgba(20, 45, 30, 0.04);
         }
 
         .stat-label {
@@ -641,7 +760,9 @@ export default function AIEmployeePerformancePage() {
           background: white;
           border: 1px solid #e1e8e3;
           border-radius: 18px;
-          box-shadow: 0 4px 18px rgba(20, 45, 30, 0.04);
+          box-shadow:
+            0 4px 18px
+            rgba(20, 45, 30, 0.04);
           overflow: hidden;
         }
 
@@ -687,7 +808,6 @@ export default function AIEmployeePerformancePage() {
           padding: 16px 18px;
           border-bottom: 1px solid #edf1ee;
           cursor: pointer;
-          transition: 0.15s;
         }
 
         .employee-item:hover {
@@ -712,7 +832,6 @@ export default function AIEmployeePerformancePage() {
 
         .badge {
           display: inline-flex;
-          align-items: center;
           border-radius: 999px;
           padding: 5px 9px;
           font-size: 11px;
@@ -742,7 +861,6 @@ export default function AIEmployeePerformancePage() {
 
         .mini-score {
           display: flex;
-          align-items: center;
           justify-content: space-between;
           margin-top: 13px;
           color: #68756d;
@@ -926,10 +1044,14 @@ export default function AIEmployeePerformancePage() {
           border-radius: inherit;
         }
 
-        .empty {
-          padding: 50px 20px;
-          text-align: center;
-          color: #718078;
+        .description {
+          margin-top: 15px;
+          padding: 14px;
+          background: #f7faf8;
+          border-radius: 12px;
+          color: #617068;
+          line-height: 1.8;
+          font-size: 13px;
         }
 
         .alert {
@@ -952,18 +1074,9 @@ export default function AIEmployeePerformancePage() {
           border: 1px solid #cbead8;
         }
 
-        .description {
-          margin-top: 15px;
-          padding: 14px;
-          background: #f7faf8;
-          border-radius: 12px;
-          color: #617068;
-          line-height: 1.8;
-          font-size: 13px;
-        }
-
+        .empty,
         .loading {
-          padding: 80px 20px;
+          padding: 60px 20px;
           text-align: center;
           color: #718078;
         }
@@ -1038,8 +1151,9 @@ export default function AIEmployeePerformancePage() {
             <h1>أداء موظفي AI</h1>
 
             <p className="subtitle">
-              متابعة جودة وسرعة وكفاءة موظفي الذكاء الاصطناعي
-              وربط الأداء بالمهام الفعلية.
+              متابعة جودة وسرعة وكفاءة موظفي
+              الذكاء الاصطناعي وربط الأداء
+              بالمهام الفعلية.
             </p>
           </div>
 
@@ -1145,7 +1259,9 @@ export default function AIEmployeePerformancePage() {
                   التكلفة
                 </div>
                 <div className="stat-value">
-                  {formatCost(stats.totalCost)}
+                  {formatCost(
+                    stats.totalCost
+                  )}
                 </div>
               </div>
             </section>
@@ -1162,7 +1278,9 @@ export default function AIEmployeePerformancePage() {
                       className="input"
                       value={search}
                       onChange={(e) =>
-                        setSearch(e.target.value)
+                        setSearch(
+                          e.target.value
+                        )
                       }
                       placeholder="ابحث عن موظف..."
                     />
@@ -1171,18 +1289,23 @@ export default function AIEmployeePerformancePage() {
                       className="select"
                       value={statusFilter}
                       onChange={(e) =>
-                        setStatusFilter(e.target.value)
+                        setStatusFilter(
+                          e.target.value
+                        )
                       }
                     >
                       <option value="all">
                         الكل
                       </option>
+
                       <option value="active">
                         نشط
                       </option>
+
                       <option value="inactive">
                         غير نشط
                       </option>
+
                       <option value="suspended">
                         موقوف
                       </option>
@@ -1193,61 +1316,75 @@ export default function AIEmployeePerformancePage() {
                 <div className="employee-list">
                   {filteredRows.length === 0 ? (
                     <div className="empty">
-                      لا يوجد موظفون مطابقون للبحث.
+                      لا يوجد موظفون مطابقون.
                     </div>
                   ) : (
-                    filteredRows.map((row) => (
-                      <div
-                        key={row.employee.id}
-                        className={`employee-item ${
-                          selectedId === row.employee.id
-                            ? "selected"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          setSelectedId(
+                    filteredRows.map(
+                      (row) => (
+                        <div
+                          key={
                             row.employee.id
-                          )
-                        }
-                      >
-                        <div className="employee-top">
-                          <div className="employee-name">
-                            {row.employee.name}
+                          }
+                          className={`employee-item ${
+                            selectedId ===
+                            row.employee.id
+                              ? "selected"
+                              : ""
+                          }`}
+                          onClick={() =>
+                            setSelectedId(
+                              row.employee.id
+                            )
+                          }
+                        >
+                          <div className="employee-top">
+                            <div className="employee-name">
+                              {
+                                row
+                                  .employee
+                                  .name
+                              }
+                            </div>
+
+                            <span
+                              className={`badge badge-${row.employee.status}`}
+                            >
+                              {STATUS_LABELS[
+                                row
+                                  .employee
+                                  .status
+                              ] ||
+                                row
+                                  .employee
+                                  .status}
+                            </span>
                           </div>
 
-                          <span
-                            className={`badge badge-${row.employee.status}`}
-                          >
-                            {STATUS_LABELS[
-                              row.employee.status
-                            ] ||
-                              row.employee.status}
-                          </span>
-                        </div>
+                          <div className="employee-specialization">
+                            {row.employee
+                              .specialization ||
+                              "بدون تخصص محدد"}
+                          </div>
 
-                        <div className="employee-specialization">
-                          {row.employee.specialization ||
-                            "بدون تخصص محدد"}
-                        </div>
+                          <div className="mini-score">
+                            <span>
+                              {row.total} مهمة
+                            </span>
 
-                        <div className="mini-score">
-                          <span>
-                            {row.total} مهمة
-                          </span>
-
-                          <span
-                            className={`score ${getScoreClass(
-                              row.overallScore
-                            )}`}
-                          >
-                            {formatNumber(
-                              row.overallScore
-                            )}
-                            %
-                          </span>
+                            <span
+                              className={`score ${getScoreClass(
+                                row.overallScore
+                              )}`}
+                            >
+                              {formatNumber(
+                                row.overallScore
+                              )}
+                              %
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    )
                   )}
                 </div>
               </div>
@@ -1255,17 +1392,19 @@ export default function AIEmployeePerformancePage() {
               <div className="panel">
                 {!selected ? (
                   <div className="empty">
-                    اختر موظف AI لعرض تفاصيل الأداء.
+                    اختر موظف AI لعرض الأداء.
                   </div>
                 ) : (
                   <div className="detail">
                     <div className="profile-head">
                       <div className="profile-main">
                         <div className="avatar">
-                          {selected.employee.avatar_url ? (
+                          {selected.employee
+                            .avatar_url ? (
                             <img
                               src={
-                                selected.employee
+                                selected
+                                  .employee
                                   .avatar_url
                               }
                               alt=""
@@ -1277,11 +1416,16 @@ export default function AIEmployeePerformancePage() {
 
                         <div>
                           <div className="profile-name">
-                            {selected.employee.name}
+                            {
+                              selected
+                                .employee
+                                .name
+                            }
                           </div>
 
                           <div className="profile-meta">
-                            {selected.employee
+                            {selected
+                              .employee
                               .specialization ||
                               "مساعد AI"}
                           </div>
@@ -1369,6 +1513,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               مكتملة
                             </span>
+
                             <span className="row-value">
                               {formatNumber(
                                 selected.completed
@@ -1380,6 +1525,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               فاشلة
                             </span>
+
                             <span className="row-value">
                               {formatNumber(
                                 selected.failed
@@ -1391,6 +1537,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               ملغاة
                             </span>
+
                             <span className="row-value">
                               {formatNumber(
                                 selected.cancelled
@@ -1402,6 +1549,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               النقاط المستخدمة
                             </span>
+
                             <span className="row-value">
                               {formatNumber(
                                 selected.totalPoints
@@ -1415,6 +1563,7 @@ export default function AIEmployeePerformancePage() {
                             <span>
                               نسبة النجاح
                             </span>
+
                             <span>
                               {formatNumber(
                                 selected.successRate,
@@ -1451,6 +1600,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               متوسط السرعة
                             </span>
+
                             <span className="row-value">
                               {formatDuration(
                                 selected.averageSpeed
@@ -1462,6 +1612,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               أسرع مهمة
                             </span>
+
                             <span className="row-value">
                               {formatDuration(
                                 selected.fastest
@@ -1473,6 +1624,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               أبطأ مهمة
                             </span>
+
                             <span className="row-value">
                               {formatDuration(
                                 selected.slowest
@@ -1484,6 +1636,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               الكفاءة
                             </span>
+
                             <span
                               className={`row-value ${getScoreClass(
                                 selected.efficiencyScore
@@ -1503,6 +1656,7 @@ export default function AIEmployeePerformancePage() {
                             <span>
                               جودة الأداء
                             </span>
+
                             <span>
                               {formatNumber(
                                 selected.qualityScore,
@@ -1537,15 +1691,16 @@ export default function AIEmployeePerformancePage() {
                         <div className="rows">
                           <div className="row">
                             <span className="row-label">
-                              تقييم الموظف
+                              تقييم بشري
                             </span>
+
                             <span className="row-value">
-                              {formatNumber(
-                                selected.employee
-                                  .average_rating,
-                                1
-                              )}{" "}
-                              / 5
+                              {selected.hasHumanRating
+                                ? `${formatNumber(
+                                    selected.humanRating,
+                                    1
+                                  )} / 5`
+                                : "لم يتم التقييم بعد"}
                             </span>
                           </div>
 
@@ -1553,9 +1708,10 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               المستوى
                             </span>
+
                             <span className="row-value">
-                              {selected.employee.level ||
-                                "—"}
+                              {selected.employee
+                                .level || "—"}
                             </span>
                           </div>
 
@@ -1563,6 +1719,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               الحالة
                             </span>
+
                             <span className="row-value">
                               {STATUS_LABELS[
                                 selected.employee
@@ -1577,12 +1734,19 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               آخر نشاط
                             </span>
+
                             <span className="row-value">
-                              {selected.employee
-                                .last_active_at
+                              {selected.lastTask
+                                ?.completed_at ||
+                              selected.lastTask
+                                ?.updated_at
                                 ? new Date(
-                                    selected.employee
-                                      .last_active_at
+                                    selected
+                                      .lastTask
+                                      .completed_at ||
+                                      selected
+                                        .lastTask
+                                        .updated_at
                                   ).toLocaleString(
                                     "ar-AE"
                                   )
@@ -1590,6 +1754,14 @@ export default function AIEmployeePerformancePage() {
                             </span>
                           </div>
                         </div>
+
+                        {!selected.hasHumanRating && (
+                          <div className="description">
+                            لا يوجد تقييم بشري حتى
+                            الآن، لذلك لم يتم احتساب
+                            صفر على الموظف.
+                          </div>
+                        )}
                       </div>
 
                       <div className="section">
@@ -1602,6 +1774,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               التكلفة الفعلية
                             </span>
+
                             <span className="row-value">
                               {formatCost(
                                 selected.totalCost
@@ -1613,6 +1786,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               تكلفة المهمة
                             </span>
+
                             <span className="row-value">
                               {selected.total > 0
                                 ? formatCost(
@@ -1627,6 +1801,7 @@ export default function AIEmployeePerformancePage() {
                             <span className="row-label">
                               النقاط المستخدمة
                             </span>
+
                             <span className="row-value">
                               {formatNumber(
                                 selected.totalPoints
@@ -1636,10 +1811,11 @@ export default function AIEmployeePerformancePage() {
                         </div>
 
                         <div className="description">
-                          يتم تسجيل التكلفة من المهام
-                          الفعلية. هذه الصفحة لا تقوم
-                          بتشغيل أي نموذج AI ولا تستهلك
-                          رصيد OpenAI أو Runway.
+                          التكلفة هنا مأخوذة من
+                          المهام المسجلة فعليًا.
+                          الصفحة لا تشغل أي نموذج AI
+                          ولا تستهلك رصيد OpenAI أو
+                          Runway.
                         </div>
                       </div>
                     </div>
