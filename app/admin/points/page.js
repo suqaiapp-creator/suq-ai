@@ -3,72 +3,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 
-const supabase = createClient();
-
-const OPERATION_LABELS = {
-  create_design: "إنشاء تصميم",
-  edit_design: "تعديل تصميم",
-  publish: "النشر",
-  complete_ad: "إكمال إعلان",
-  welcome_bonus: "رصيد البداية",
-  points_purchase: "شراء نقاط",
-  admin_adjustment: "تعديل إداري",
-};
-
-function formatNumber(value) {
-  return new Intl.NumberFormat("ar-AE", {
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-
-  return new Intl.DateTimeFormat("ar-AE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function operationName(value) {
-  return OPERATION_LABELS[value] || value || "عملية";
-}
-
-function getStatusLabel(status) {
-  return status === "active" ? "مفعلة" : "متوقفة";
-}
-
 export default function AdminPointsPage() {
+  const supabase = useMemo(() => createClient(), []);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
   const [authorized, setAuthorized] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   const [users, setUsers] = useState([]);
-  const [points, setPoints] = useState([]);
-  const [operations, setOperations] = useState([]);
   const [transactions, setTransactions] = useState([]);
-  const [shops, setShops] = useState([]);
+  const [operations, setOperations] = useState([]);
 
   const [search, setSearch] = useState("");
-  const [userFilter, setUserFilter] = useState("all");
-
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [filter, setFilter] = useState("all");
 
   const [modal, setModal] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  const [adjustAmount, setAdjustAmount] = useState("");
-  const [adjustDescription, setAdjustDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
 
-  const [operationForm, setOperationForm] = useState({
-    id: null,
-    name: "",
-    description: "",
-    points_cost: 0,
-    status: "active",
-  });
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   async function loadData() {
     setLoading(true);
@@ -77,85 +33,103 @@ export default function AdminPointsPage() {
     try {
       const {
         data: { user },
-        error: authError,
       } = await supabase.auth.getUser();
 
-      if (authError) throw authError;
-
       if (!user) {
-        window.location.href = "/login";
+        setAuthorized(false);
+        setLoading(false);
         return;
       }
 
-      const { data: profile, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("id,is_super_admin")
-          .eq("id", user.id)
-          .maybeSingle();
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, full_name, role, is_super_admin")
+        .eq("id", user.id)
+        .maybeSingle();
 
       if (profileError) throw profileError;
 
       if (!profile?.is_super_admin) {
-        window.location.href = "/dashboard";
+        setAuthorized(false);
+        setLoading(false);
         return;
       }
 
       setAuthorized(true);
 
       const [
-        profilesResult,
-        pointsResult,
-        operationsResult,
+        usersResult,
         transactionsResult,
+        operationsResult,
         shopsResult,
       ] = await Promise.all([
         supabase
-          .from("profiles")
-          .select(
-            "id,full_name,phone,role,account_status,last_login_at,created_at"
-          )
-          .order("created_at", { ascending: false }),
-
-        supabase
           .from("user_points")
-          .select("*")
+          .select(
+            "id, user_id, balance, total_earned, total_spent, created_at, updated_at"
+          )
           .order("balance", { ascending: false }),
 
         supabase
+          .from("point_transactions")
+          .select(
+            "id, user_id, shop_id, type, amount, balance_before, balance_after, operation, description, reference_type, reference_id, provider, payment_status, metadata, created_at"
+          )
+          .order("created_at", { ascending: false })
+          .limit(100),
+
+        supabase
           .from("point_operations")
-          .select("*")
+          .select(
+            "id, operation_key, name, description, points_cost, status, created_at, updated_at"
+          )
           .order("created_at", { ascending: true }),
 
         supabase
-          .from("point_transactions")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .limit(300),
-
-        supabase
           .from("shops")
-          .select("id,owner_id,name,status")
-          .order("created_at", { ascending: false }),
+          .select("id, owner_id, name"),
       ]);
 
-      if (profilesResult.error) throw profilesResult.error;
-      if (pointsResult.error) throw pointsResult.error;
-      if (operationsResult.error) throw operationsResult.error;
+      if (usersResult.error) throw usersResult.error;
       if (transactionsResult.error) throw transactionsResult.error;
+      if (operationsResult.error) throw operationsResult.error;
       if (shopsResult.error) throw shopsResult.error;
 
-      setUsers(profilesResult.data || []);
-      setPoints(pointsResult.data || []);
-      setOperations(operationsResult.data || []);
+      const userIds = (usersResult.data || []).map((item) => item.user_id);
+
+      let profiles = [];
+
+      if (userIds.length) {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, full_name, role, account_status")
+          .in("id", userIds);
+
+        if (error) throw error;
+
+        profiles = data || [];
+      }
+
+      const profileMap = Object.fromEntries(
+        profiles.map((profile) => [profile.id, profile])
+      );
+
+      const shopMap = Object.fromEntries(
+        (shopsResult.data || []).map((shop) => [shop.owner_id, shop])
+      );
+
+      const enrichedUsers = (usersResult.data || []).map((item) => ({
+        ...item,
+        profile: profileMap[item.user_id] || null,
+        shop: shopMap[item.user_id] || null,
+      }));
+
+      setUsers(enrichedUsers);
       setTransactions(transactionsResult.data || []);
-      setShops(shopsResult.data || []);
+      setOperations(operationsResult.data || []);
     } catch (err) {
       console.error(err);
-      setError(
-        err?.message ||
-          "تعذر تحميل إدارة النقاط."
-      );
+      setError(err.message || "تعذر تحميل بيانات النقاط");
     } finally {
       setLoading(false);
     }
@@ -165,122 +139,13 @@ export default function AdminPointsPage() {
     loadData();
   }, []);
 
-  const pointsByUser = useMemo(() => {
-    const map = new Map();
-
-    points.forEach((item) => {
-      map.set(item.user_id, item);
-    });
-
-    return map;
-  }, [points]);
-
-  const shopsByOwner = useMemo(() => {
-    const map = new Map();
-
-    shops.forEach((shop) => {
-      if (!map.has(shop.owner_id)) {
-        map.set(shop.owner_id, []);
-      }
-
-      map.get(shop.owner_id).push(shop);
-    });
-
-    return map;
-  }, [shops]);
-
-  const usersWithPoints = useMemo(() => {
-    return users.map((user) => {
-      const point = pointsByUser.get(user.id);
-
-      return {
-        ...user,
-        points: point || {
-          balance: 0,
-          total_earned: 0,
-          total_spent: 0,
-        },
-        shops: shopsByOwner.get(user.id) || [],
-      };
-    });
-  }, [users, pointsByUser, shopsByOwner]);
-
-  const filteredUsers = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return usersWithPoints.filter((user) => {
-      const matchesSearch =
-        !query ||
-        String(user.full_name || "")
-          .toLowerCase()
-          .includes(query) ||
-        String(user.phone || "")
-          .toLowerCase()
-          .includes(query) ||
-        String(user.id || "")
-          .toLowerCase()
-          .includes(query);
-
-      const balance = Number(user.points.balance || 0);
-
-      const matchesFilter =
-        userFilter === "all" ||
-        (userFilter === "positive" && balance > 0) ||
-        (userFilter === "zero" && balance === 0);
-
-      return matchesSearch && matchesFilter;
-    });
-  }, [usersWithPoints, search, userFilter]);
-
-  const stats = useMemo(() => {
-    const totalBalance = points.reduce(
-      (sum, item) => sum + Number(item.balance || 0),
-      0
-    );
-
-    const totalEarned = points.reduce(
-      (sum, item) => sum + Number(item.total_earned || 0),
-      0
-    );
-
-    const totalSpent = points.reduce(
-      (sum, item) => sum + Number(item.total_spent || 0),
-      0
-    );
-
-    const activeOperations = operations.filter(
-      (item) => item.status === "active"
-    ).length;
-
-    return {
-      users: users.length,
-      usersWithBalance: points.filter(
-        (item) => Number(item.balance || 0) > 0
-      ).length,
-      totalBalance,
-      totalEarned,
-      totalSpent,
-      transactions: transactions.length,
-      activeOperations,
-    };
-  }, [users, points, operations, transactions]);
-
-  function openAddPoints(user) {
+  function openAdjustment(user, action) {
     setSelectedUser(user);
-    setAdjustAmount("");
-    setAdjustDescription("");
-    setModal("add");
-    setError("");
+    setModal(action);
+    setAmount("");
+    setDescription("");
     setMessage("");
-  }
-
-  function openSubtractPoints(user) {
-    setSelectedUser(user);
-    setAdjustAmount("");
-    setAdjustDescription("");
-    setModal("subtract");
     setError("");
-    setMessage("");
   }
 
   function closeModal() {
@@ -288,17 +153,26 @@ export default function AdminPointsPage() {
 
     setModal(null);
     setSelectedUser(null);
-    setAdjustAmount("");
-    setAdjustDescription("");
+    setAmount("");
+    setDescription("");
   }
 
-  async function addPoints() {
-    if (!selectedUser) return;
+  async function adjustPoints() {
+    if (!selectedUser || !modal) return;
 
-    const amount = Number(adjustAmount);
+    const numericAmount = Number(amount);
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       setError("أدخل عدد نقاط صحيح أكبر من صفر.");
+      return;
+    }
+
+    if (modal === "subtract" && numericAmount > Number(selectedUser.balance)) {
+      setError(
+        `الرصيد غير كافٍ. الرصيد الحالي ${formatNumber(
+          selectedUser.balance
+        )} نقطة.`
+      );
       return;
     }
 
@@ -307,229 +181,178 @@ export default function AdminPointsPage() {
     setMessage("");
 
     try {
-      const { data, error: rpcError } =
-        await supabase.rpc("add_points", {
-          p_amount: amount,
-          p_user_id: selectedUser.id,
-          p_shop_id:
-            selectedUser.shops?.[0]?.id || null,
-          p_operation: "admin_adjustment",
+      const shopId = selectedUser.shop?.id || null;
+
+      const { data, error: rpcError } = await supabase.rpc(
+        "admin_adjust_points",
+        {
+          p_user_id: selectedUser.user_id,
+          p_amount: numericAmount,
+          p_action: modal === "add" ? "add" : "subtract",
+          p_shop_id: shopId,
           p_description:
-            adjustDescription.trim() ||
-            "إضافة نقاط بواسطة Super Admin",
-          p_reference_type: "admin_adjustment",
-          p_reference_id: null,
-          p_payment_status: "completed",
+            description.trim() ||
+            (modal === "add"
+              ? "إضافة نقاط بواسطة Super Admin"
+              : "خصم نقاط بواسطة Super Admin"),
           p_metadata: {
-            source: "super_admin_points",
-            action: "add",
+            source: "super_admin_points_page",
+            ui_action: modal,
           },
-        });
+        }
+      );
 
       if (rpcError) throw rpcError;
 
       if (!data?.success) {
-        throw new Error("تعذر إضافة النقاط.");
+        throw new Error("لم يتم تنفيذ تعديل النقاط.");
       }
 
       setMessage(
-        `تمت إضافة ${formatNumber(amount)} نقطة إلى حساب ${selectedUser.full_name || "المستخدم"}.`
+        modal === "add"
+          ? `تمت إضافة ${formatNumber(numericAmount)} نقطة بنجاح.`
+          : `تم خصم ${formatNumber(numericAmount)} نقطة بنجاح.`
       );
 
-      closeModal();
-      await loadData();
-    } catch (err) {
-      console.error(err);
-      setError(
-        err?.message ||
-          "تعذر إضافة النقاط."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function subtractPoints() {
-    if (!selectedUser) return;
-
-    const amount = Number(adjustAmount);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError("أدخل عدد نقاط صحيح أكبر من صفر.");
-      return;
-    }
-
-    const currentBalance = Number(
-      selectedUser.points?.balance || 0
-    );
-
-    if (amount > currentBalance) {
-      setError(
-        `الرصيد الحالي ${formatNumber(
-          currentBalance
-        )} نقطة فقط.`
-      );
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { data, error: rpcError } =
-        await supabase.rpc("spend_points", {
-          p_operation: "admin_adjustment",
-          p_user_id: selectedUser.id,
-          p_shop_id:
-            selectedUser.shops?.[0]?.id || null,
-          p_reference_type: "admin_adjustment",
-          p_reference_id: null,
-          p_description:
-            adjustDescription.trim() ||
-            "خصم نقاط بواسطة Super Admin",
-          p_metadata: {
-            source: "super_admin_points",
-            action: "subtract",
-            requested_amount: amount,
-          },
-        });
-
-      /*
-       * ملاحظة:
-       * spend_points يستخدم تكلفة العملية من point_operations.
-       * لذلك الخصم الإداري يحتاج عملية مستقلة بتكلفة
-       * يتم تحديدها حسب العملية نفسها.
-       *
-       * لا نستخدمه لخصم مبلغ مخصص من هنا حتى لا نربط
-       * الخصم الإداري بتكلفة عملية ثابتة.
-       */
-      if (rpcError) {
-        throw rpcError;
-      }
-
-      if (!data?.success) {
-        throw new Error("تعذر خصم النقاط.");
-      }
-
-      setMessage(
-        "تم تنفيذ الخصم الإداري."
-      );
-
-      closeModal();
-      await loadData();
-    } catch (err) {
-      console.error(err);
-      setError(
-        err?.message ||
-          "تعذر خصم النقاط."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function openOperation(operation) {
-    setOperationForm({
-      id: operation.id,
-      name: operation.name || "",
-      description: operation.description || "",
-      points_cost: Number(operation.points_cost || 0),
-      status: operation.status || "active",
-    });
-
-    setModal("operation");
-    setError("");
-    setMessage("");
-  }
-
-  async function saveOperation() {
-    if (!operationForm.id) return;
-
-    const cost = Number(operationForm.points_cost);
-
-    if (!Number.isFinite(cost) || cost < 0) {
-      setError("تكلفة العملية يجب أن تكون صفرًا أو أكثر.");
-      return;
-    }
-
-    if (!operationForm.name.trim()) {
-      setError("اسم العملية مطلوب.");
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { error: updateError } =
-        await supabase
-          .from("point_operations")
-          .update({
-            name: operationForm.name.trim(),
-            description:
-              operationForm.description.trim() || null,
-            points_cost: cost,
-            status: operationForm.status,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", operationForm.id);
-
-      if (updateError) throw updateError;
-
-      setMessage("تم تحديث إعدادات العملية.");
       setModal(null);
+      setSelectedUser(null);
+      setAmount("");
+      setDescription("");
 
       await loadData();
     } catch (err) {
       console.error(err);
-      setError(
-        err?.message ||
-          "تعذر تحديث العملية."
-      );
+      setError(err.message || "تعذر تعديل النقاط");
     } finally {
       setSaving(false);
     }
   }
 
-  if (!authorized && loading) {
+  function formatNumber(value) {
+    return Number(value || 0).toLocaleString("en-US", {
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function formatDate(value) {
+    if (!value) return "—";
+
+    return new Date(value).toLocaleString("ar-AE", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  }
+
+  function getTransactionLabel(type) {
+    if (type === "credit") return "إضافة";
+    if (type === "debit") return "خصم";
+    return type || "حركة";
+  }
+
+  function getTransactionClass(type) {
+    return type === "credit" ? "credit" : "debit";
+  }
+
+  const filteredUsers = users.filter((user) => {
+    const query = search.trim().toLowerCase();
+
+    const matchesSearch =
+      !query ||
+      user.profile?.full_name?.toLowerCase().includes(query) ||
+      user.profile?.role?.toLowerCase().includes(query) ||
+      user.shop?.name?.toLowerCase().includes(query) ||
+      user.user_id?.toLowerCase().includes(query);
+
+    if (!matchesSearch) return false;
+
+    if (filter === "positive") return Number(user.balance) > 0;
+    if (filter === "zero") return Number(user.balance) === 0;
+
+    return true;
+  });
+
+  const totalBalance = users.reduce(
+    (sum, user) => sum + Number(user.balance || 0),
+    0
+  );
+
+  const totalEarned = users.reduce(
+    (sum, user) => sum + Number(user.total_earned || 0),
+    0
+  );
+
+  const totalSpent = users.reduce(
+    (sum, user) => sum + Number(user.total_spent || 0),
+    0
+  );
+
+  if (loading) {
     return (
-      <main dir="rtl" className="page">
-        <div className="loading">
-          <div className="spinner" />
-          <p>جاري التحقق من الصلاحيات...</p>
+      <main className="page">
+        <div className="loading">جاري تحميل إدارة النقاط...</div>
+
+        <style jsx>{`
+          .page {
+            min-height: 100vh;
+            background: #f6f8f7;
+            padding: 32px;
+            direction: rtl;
+            font-family: Arial, sans-serif;
+          }
+
+          .loading {
+            max-width: 1200px;
+            margin: 80px auto;
+            text-align: center;
+            color: #64748b;
+            font-size: 18px;
+          }
+        `}</style>
+      </main>
+    );
+  }
+
+  if (!authorized) {
+    return (
+      <main className="page">
+        <div className="denied">
+          <div className="deniedIcon">🔒</div>
+          <h1>غير مصرح</h1>
+          <p>هذه الصفحة متاحة للـ Super Admin فقط.</p>
         </div>
 
         <style jsx>{`
           .page {
             min-height: 100vh;
-            background: #f7faf8;
-            display: grid;
-            place-items: center;
-            color: #26352e;
+            background: #f6f8f7;
+            padding: 32px;
+            direction: rtl;
+            font-family: Arial, sans-serif;
           }
 
-          .loading {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
+          .denied {
+            max-width: 500px;
+            margin: 100px auto;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 24px;
+            padding: 40px;
+            text-align: center;
           }
 
-          .spinner {
-            width: 34px;
-            height: 34px;
-            border: 3px solid #dce9e2;
-            border-top-color: #198754;
-            border-radius: 50%;
-            animation: spin .8s linear infinite;
+          .deniedIcon {
+            font-size: 44px;
+            margin-bottom: 15px;
           }
 
-          @keyframes spin {
-            to {
-              transform: rotate(360deg);
-            }
+          h1 {
+            margin: 0 0 10px;
+            color: #0f172a;
+          }
+
+          p {
+            margin: 0;
+            color: #64748b;
           }
         `}</style>
       </main>
@@ -537,488 +360,276 @@ export default function AdminPointsPage() {
   }
 
   return (
-    <main dir="rtl" className="page">
+    <main className="page">
       <div className="container">
-
         <header className="header">
           <div>
-            <div className="eyebrow">
-              SUQ AI • POINTS ADMIN
-            </div>
-
+            <div className="eyebrow">SUQ AI • POINTS ADMIN</div>
             <h1>إدارة النقاط</h1>
-
             <p>
-              إدارة أرصدة المستخدمين وتكاليف العمليات
-              وسجل حركة النقاط.
+              إدارة أرصدة المستخدمين وتكاليف العمليات وسجل حركة النقاط.
             </p>
           </div>
 
-          <button
-            className="refresh"
-            onClick={loadData}
-            disabled={loading}
-          >
-            ↻ {loading ? "جاري التحديث..." : "تحديث"}
+          <button className="refresh" onClick={loadData} disabled={loading}>
+            ↻ تحديث
           </button>
         </header>
 
-        {error && (
-          <div className="alert error">
-            <b>حدث خطأ</b>
-            <span>{error}</span>
-          </div>
-        )}
+        {message && <div className="success">{message}</div>}
+        {error && <div className="error">{error}</div>}
 
-        {message && (
-          <div className="alert success">
-            {message}
-          </div>
-        )}
-
-        {/* Stats */}
         <section className="stats">
-
           <div className="stat">
-            <div className="icon users">👥</div>
+            <div className="statIcon">👥</div>
             <div>
               <span>المستخدمون</span>
-              <strong>{stats.users}</strong>
+              <strong>{formatNumber(users.length)}</strong>
             </div>
           </div>
 
           <div className="stat">
-            <div className="icon balance">✦</div>
+            <div className="statIcon">✦</div>
             <div>
               <span>إجمالي الرصيد</span>
-              <strong>
-                {formatNumber(stats.totalBalance)}
-              </strong>
-              <small>نقطة</small>
+              <strong>{formatNumber(totalBalance)} نقطة</strong>
             </div>
           </div>
 
           <div className="stat">
-            <div className="icon earned">↗</div>
+            <div className="statIcon">↗</div>
             <div>
               <span>إجمالي المكتسب</span>
-              <strong>
-                {formatNumber(stats.totalEarned)}
-              </strong>
-              <small>نقطة</small>
+              <strong>{formatNumber(totalEarned)} نقطة</strong>
             </div>
           </div>
 
           <div className="stat">
-            <div className="icon spent">↘</div>
+            <div className="statIcon">↘</div>
             <div>
               <span>إجمالي المستخدم</span>
-              <strong>
-                {formatNumber(stats.totalSpent)}
-              </strong>
-              <small>نقطة</small>
+              <strong>{formatNumber(totalSpent)} نقطة</strong>
             </div>
           </div>
 
           <div className="stat">
-            <div className="icon transactions">⌁</div>
+            <div className="statIcon">⌁</div>
             <div>
               <span>الحركات</span>
-              <strong>
-                {formatNumber(stats.transactions)}
-              </strong>
+              <strong>{formatNumber(transactions.length)}</strong>
             </div>
           </div>
-
-          <div className="stat">
-            <div className="icon operations">⚙</div>
-            <div>
-              <span>العمليات المفعلة</span>
-              <strong>
-                {stats.activeOperations}
-              </strong>
-            </div>
-          </div>
-
         </section>
 
-        {/* Users */}
         <section className="panel">
-
           <div className="panelHeader">
             <div>
-              <h2>أرصدة المستخدمين</h2>
-              <p>
-                يمكنك مشاهدة الرصيد واختيار المستخدم لإدارة
-                النقاط.
-              </p>
+              <h2>المستخدمون</h2>
+              <span>{filteredUsers.length} مستخدم</span>
             </div>
 
             <div className="filters">
-              <button
-                className={
-                  userFilter === "all"
-                    ? "filter active"
-                    : "filter"
-                }
-                onClick={() => setUserFilter("all")}
-              >
-                الكل
-              </button>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="بحث عن مستخدم أو متجر..."
+              />
 
-              <button
-                className={
-                  userFilter === "positive"
-                    ? "filter active"
-                    : "filter"
-                }
-                onClick={() => setUserFilter("positive")}
+              <select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
               >
-                لديهم رصيد
-              </button>
-
-              <button
-                className={
-                  userFilter === "zero"
-                    ? "filter active"
-                    : "filter"
-                }
-                onClick={() => setUserFilter("zero")}
-              >
-                صفر
-              </button>
+                <option value="all">الكل</option>
+                <option value="positive">لديه رصيد</option>
+                <option value="zero">رصيده صفر</option>
+              </select>
             </div>
-          </div>
-
-          <div className="search">
-            <span>⌕</span>
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث باسم المستخدم أو الهاتف أو المعرف..."
-            />
           </div>
 
           {filteredUsers.length === 0 ? (
             <div className="empty">
-              لا توجد حسابات مطابقة.
+              <div>✦</div>
+              <h3>لا توجد بيانات</h3>
+              <p>لم يتم العثور على مستخدمين مطابقين.</p>
             </div>
           ) : (
-            <div className="usersList">
-
+            <div className="users">
               {filteredUsers.map((user) => (
-                <div
-                  className="userRow"
-                  key={user.id}
-                >
+                <div className="userCard" key={user.id}>
+                  <div className="userMain">
+                    <div className="avatar">
+                      {(user.profile?.full_name || "م").slice(0, 1)}
+                    </div>
 
-                  <div className="avatar">
-                    {(user.full_name ||
-                      "م")
-                      .trim()
-                      .charAt(0)}
-                  </div>
+                    <div className="identity">
+                      <h3>{user.profile?.full_name || "مستخدم"}</h3>
 
-                  <div className="userInfo">
-                    <strong>
-                      {user.full_name ||
-                        "مستخدم بدون اسم"}
-                    </strong>
+                      <div className="meta">
+                        <span>
+                          {user.profile?.role || "owner"}
+                        </span>
 
-                    <span>
-                      {user.phone ||
-                        user.role ||
-                        "حساب مستخدم"}
-                    </span>
-
-                    <small>
-                      {user.shops?.length
-                        ? user.shops
-                            .map((shop) => shop.name)
-                            .join("، ")
-                        : "لا يوجد متجر"}
-                    </small>
-                  </div>
-
-                  <div className="userBalance">
-                    <strong>
-                      {formatNumber(
-                        user.points.balance
-                      )}
-                    </strong>
-
-                    <span>نقطة</span>
-                  </div>
-
-                  <div className="userTotals">
-                    <span>
-                      مكتسب{" "}
-                      <b>
-                        {formatNumber(
-                          user.points.total_earned
+                        {user.shop?.name && (
+                          <>
+                            <i>•</i>
+                            <span>{user.shop.name}</span>
+                          </>
                         )}
-                      </b>
-                    </span>
+                      </div>
 
-                    <span>
-                      مستخدم{" "}
-                      <b>
-                        {formatNumber(
-                          user.points.total_spent
-                        )}
-                      </b>
-                    </span>
+                      <small>{user.user_id}</small>
+                    </div>
+                  </div>
+
+                  <div className="balance">
+                    <span>الرصيد</span>
+                    <strong>{formatNumber(user.balance)}</strong>
+                    <em>نقطة</em>
+                  </div>
+
+                  <div className="totals">
+                    <div>
+                      <span>المكتسب</span>
+                      <b>{formatNumber(user.total_earned)}</b>
+                    </div>
+
+                    <div>
+                      <span>المستخدم</span>
+                      <b>{formatNumber(user.total_spent)}</b>
+                    </div>
                   </div>
 
                   <div className="actions">
-
                     <button
                       className="add"
-                      onClick={() =>
-                        openAddPoints(user)
-                      }
+                      onClick={() => openAdjustment(user, "add")}
                     >
                       + إضافة
                     </button>
 
                     <button
                       className="subtract"
-                      onClick={() =>
-                        openSubtractPoints(user)
-                      }
+                      onClick={() => openAdjustment(user, "subtract")}
                     >
                       − خصم
                     </button>
-
                   </div>
-
                 </div>
               ))}
-
             </div>
           )}
-
         </section>
 
-        {/* Operations */}
         <section className="panel">
-
           <div className="panelHeader">
             <div>
-              <h2>تكلفة العمليات</h2>
-              <p>
-                التحكم في عدد النقاط المطلوب لكل عملية.
-              </p>
+              <h2>تكاليف العمليات</h2>
+              <span>القيمة الحالية للعمليات</span>
             </div>
           </div>
 
           <div className="operations">
-
             {operations.map((operation) => (
-              <div
-                className="operation"
-                key={operation.id}
-              >
-
-                <div className="operationIcon">
-                  ⚡
-                </div>
-
-                <div className="operationInfo">
-                  <strong>
-                    {operation.name}
-                  </strong>
-
-                  <span>
-                    {operation.description ||
-                      "بدون وصف"}
-                  </span>
-
-                  <small>
-                    المفتاح:
-                    {" "}
-                    {operation.operation_key}
-                  </small>
+              <div className="operation" key={operation.id}>
+                <div>
+                  <h3>{operation.name}</h3>
+                  <p>{operation.description || "بدون وصف"}</p>
                 </div>
 
                 <div className="operationCost">
-                  <strong>
-                    {formatNumber(
-                      operation.points_cost
-                    )}
-                  </strong>
-
+                  <strong>{formatNumber(operation.points_cost)}</strong>
                   <span>نقطة</span>
                 </div>
-
-                <div
-                  className={
-                    operation.status === "active"
-                      ? "status active"
-                      : "status inactive"
-                  }
-                >
-                  {getStatusLabel(
-                    operation.status
-                  )}
-                </div>
-
-                <button
-                  className="edit"
-                  onClick={() =>
-                    openOperation(operation)
-                  }
-                >
-                  تعديل
-                </button>
-
               </div>
             ))}
-
           </div>
-
         </section>
 
-        {/* Recent transactions */}
         <section className="panel">
-
           <div className="panelHeader">
             <div>
-              <h2>آخر حركات النقاط</h2>
-              <p>
-                أحدث العمليات المسجلة في النظام.
-              </p>
+              <h2>آخر الحركات</h2>
+              <span>سجل النقاط</span>
             </div>
           </div>
 
           {transactions.length === 0 ? (
-            <div className="empty">
-              لا توجد حركات حتى الآن.
+            <div className="empty small">
+              <div>⌁</div>
+              <p>لا توجد حركات حتى الآن.</p>
             </div>
           ) : (
             <div className="transactions">
+              {transactions.slice(0, 30).map((transaction) => (
+                <div className="transaction" key={transaction.id}>
+                  <div
+                    className={`transactionIcon ${getTransactionClass(
+                      transaction.type
+                    )}`}
+                  >
+                    {transaction.type === "credit" ? "↗" : "↘"}
+                  </div>
 
-              {transactions
-                .slice(0, 30)
-                .map((transaction) => {
+                  <div className="transactionInfo">
+                    <strong>
+                      {transaction.description || "حركة نقاط"}
+                    </strong>
 
-                  const user =
-                    usersWithPoints.find(
-                      (item) =>
-                        item.id ===
-                        transaction.user_id
-                    );
+                    <span>
+                      {transaction.operation || "—"} •{" "}
+                      {formatDate(transaction.created_at)}
+                    </span>
+                  </div>
 
-                  const credit =
-                    transaction.type === "credit";
+                  <div
+                    className={`transactionAmount ${getTransactionClass(
+                      transaction.type
+                    )}`}
+                  >
+                    {transaction.type === "credit" ? "+" : "-"}
+                    {formatNumber(transaction.amount)}
+                  </div>
 
-                  return (
-                    <div
-                      className="transaction"
-                      key={transaction.id}
-                    >
-
-                      <div
-                        className={
-                          credit
-                            ? "transactionIcon credit"
-                            : "transactionIcon debit"
-                        }
-                      >
-                        {credit ? "+" : "−"}
-                      </div>
-
-                      <div className="transactionInfo">
-                        <strong>
-                          {operationName(
-                            transaction.operation
-                          )}
-                        </strong>
-
-                        <span>
-                          {user?.full_name ||
-                            "مستخدم"}
-                        </span>
-
-                        <small>
-                          {transaction.description ||
-                            "—"}
-                        </small>
-                      </div>
-
-                      <div className="transactionDate">
-                        {formatDate(
-                          transaction.created_at
-                        )}
-                      </div>
-
-                      <div className="transactionAmount">
-                        <strong
-                          className={
-                            credit
-                              ? "credit"
-                              : "debit"
-                          }
-                        >
-                          {credit ? "+" : "−"}
-                          {formatNumber(
-                            transaction.amount
-                          )}
-                        </strong>
-
-                        <span>
-                          الرصيد بعد:
-                          {" "}
-                          {formatNumber(
-                            transaction.balance_after
-                          )}
-                        </span>
-                      </div>
-
-                    </div>
-                  );
-                })}
-
+                  <div className="transactionBalance">
+                    <span>الرصيد بعد الحركة</span>
+                    <strong>
+                      {formatNumber(transaction.balance_after)}
+                    </strong>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-
         </section>
 
+        <section className="security">
+          <div className="securityIcon">🛡️</div>
+          <div>
+            <h3>حماية إدارة النقاط</h3>
+            <p>
+              جميع الإضافة والخصم الإداري تتم من خلال دالة آمنة على الخادم.
+              لا يمكن تجاوز الرصيد إلى قيمة سالبة، ويتم تسجيل المسؤول والرصيد
+              قبل وبعد كل تعديل.
+            </p>
+          </div>
+        </section>
       </div>
 
-      {/* Adjustment Modal */}
-      {(modal === "add" ||
-        modal === "subtract") && (
-        <div
-          className="overlay"
-          onMouseDown={closeModal}
-        >
-          <div
-            className="modal"
-            onMouseDown={(e) =>
-              e.stopPropagation()
-            }
-          >
-
+      {modal && selectedUser && (
+        <div className="overlay" onMouseDown={closeModal}>
+          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
             <div className="modalHeader">
-
               <div>
                 <span className="modalEyebrow">
-                  {modal === "add"
-                    ? "POINTS CREDIT"
-                    : "POINTS DEBIT"}
+                  {modal === "add" ? "POINT CREDIT" : "POINT DEBIT"}
                 </span>
 
                 <h2>
-                  {modal === "add"
-                    ? "إضافة نقاط"
-                    : "خصم نقاط"}
+                  {modal === "add" ? "إضافة نقاط" : "خصم نقاط"}
                 </h2>
 
                 <p>
-                  {selectedUser?.full_name ||
-                    "المستخدم"}
+                  {selectedUser.profile?.full_name || "المستخدم"}
                 </p>
               </div>
 
@@ -1029,61 +640,52 @@ export default function AdminPointsPage() {
               >
                 ×
               </button>
-
             </div>
 
             <div className="currentBalance">
               <span>الرصيد الحالي</span>
-
               <strong>
-                {formatNumber(
-                  selectedUser?.points?.balance
-                )}
-                <small> نقطة</small>
+                {formatNumber(selectedUser.balance)} نقطة
               </strong>
             </div>
 
             <label>
               عدد النقاط
-
               <input
                 type="number"
-                min="1"
-                step="1"
-                value={adjustAmount}
-                onChange={(e) =>
-                  setAdjustAmount(e.target.value)
-                }
-                placeholder="مثال: 50"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="مثال: 10"
+                disabled={saving}
+                autoFocus
               />
             </label>
 
             <label>
-              السبب / الملاحظة
-
+              سبب العملية
               <textarea
-                value={adjustDescription}
-                onChange={(e) =>
-                  setAdjustDescription(
-                    e.target.value
-                  )
-                }
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
                 placeholder={
                   modal === "add"
-                    ? "سبب إضافة النقاط..."
-                    : "سبب خصم النقاط..."
+                    ? "مثال: تعويض للعميل"
+                    : "مثال: تصحيح رصيد"
                 }
-                rows={3}
+                disabled={saving}
               />
             </label>
 
-            <div className="modalWarning">
-              🔒 سيتم تسجيل العملية في سجل النقاط
-              وتظهر في تقارير النظام.
-            </div>
+            {modal === "subtract" && (
+              <div className="warning">
+                ⚠️ لا يمكن خصم نقاط أكثر من الرصيد الحالي.
+              </div>
+            )}
+
+            {error && <div className="modalError">{error}</div>}
 
             <div className="modalActions">
-
               <button
                 className="cancel"
                 onClick={closeModal}
@@ -1093,189 +695,40 @@ export default function AdminPointsPage() {
               </button>
 
               <button
-                className={
-                  modal === "add"
-                    ? "confirmAdd"
-                    : "confirmSubtract"
-                }
-                onClick={
-                  modal === "add"
-                    ? addPoints
-                    : subtractPoints
-                }
+                className={modal === "add" ? "confirmAdd" : "confirmSubtract"}
+                onClick={adjustPoints}
                 disabled={saving}
               >
                 {saving
                   ? "جاري التنفيذ..."
                   : modal === "add"
-                  ? "إضافة النقاط"
-                  : "خصم النقاط"}
+                  ? "تأكيد الإضافة"
+                  : "تأكيد الخصم"}
               </button>
-
             </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* Operation Modal */}
-      {modal === "operation" && (
-        <div
-          className="overlay"
-          onMouseDown={() => {
-            if (!saving) setModal(null);
-          }}
-        >
-          <div
-            className="modal"
-            onMouseDown={(e) =>
-              e.stopPropagation()
-            }
-          >
-
-            <div className="modalHeader">
-
-              <div>
-                <span className="modalEyebrow">
-                  POINT OPERATION
-                </span>
-
-                <h2>
-                  تعديل تكلفة العملية
-                </h2>
-
-                <p>
-                  تحكم في إعدادات العملية.
-                </p>
-              </div>
-
-              <button
-                className="close"
-                onClick={() => setModal(null)}
-                disabled={saving}
-              >
-                ×
-              </button>
-
-            </div>
-
-            <label>
-              اسم العملية
-
-              <input
-                value={operationForm.name}
-                onChange={(e) =>
-                  setOperationForm({
-                    ...operationForm,
-                    name: e.target.value,
-                  })
-                }
-              />
-            </label>
-
-            <label>
-              الوصف
-
-              <textarea
-                rows={3}
-                value={operationForm.description}
-                onChange={(e) =>
-                  setOperationForm({
-                    ...operationForm,
-                    description:
-                      e.target.value,
-                  })
-                }
-              />
-            </label>
-
-            <label>
-              تكلفة النقاط
-
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={operationForm.points_cost}
-                onChange={(e) =>
-                  setOperationForm({
-                    ...operationForm,
-                    points_cost:
-                      e.target.value,
-                  })
-                }
-              />
-            </label>
-
-            <label>
-              الحالة
-
-              <select
-                value={operationForm.status}
-                onChange={(e) =>
-                  setOperationForm({
-                    ...operationForm,
-                    status: e.target.value,
-                  })
-                }
-              >
-                <option value="active">
-                  مفعلة
-                </option>
-
-                <option value="inactive">
-                  متوقفة
-                </option>
-              </select>
-            </label>
-
-            <div className="modalActions">
-
-              <button
-                className="cancel"
-                onClick={() => setModal(null)}
-                disabled={saving}
-              >
-                إلغاء
-              </button>
-
-              <button
-                className="confirmAdd"
-                onClick={saveOperation}
-                disabled={saving}
-              >
-                {saving
-                  ? "جاري الحفظ..."
-                  : "حفظ التعديلات"}
-              </button>
-
-            </div>
-
           </div>
         </div>
       )}
 
       <style jsx>{`
-
         * {
           box-sizing: border-box;
         }
 
         .page {
           min-height: 100vh;
-          background:
-            linear-gradient(
-              180deg,
-              #f7faf8 0%,
-              #ffffff 48%,
-              #f7faf8 100%
-            );
-          color: #17221c;
-          padding: 30px 20px 70px;
+          background: #f6f8f7;
+          color: #0f172a;
+          direction: rtl;
+          font-family:
+            Arial,
+            "Noto Sans Arabic",
+            sans-serif;
+          padding: 30px 20px 60px;
         }
 
         .container {
-          max-width: 1280px;
+          max-width: 1380px;
           margin: auto;
         }
 
@@ -1284,505 +737,440 @@ export default function AdminPointsPage() {
           justify-content: space-between;
           align-items: flex-start;
           gap: 20px;
-          margin-bottom: 28px;
+          margin-bottom: 25px;
         }
 
         .eyebrow,
         .modalEyebrow {
-          color: #198754;
+          color: #16a34a;
           font-size: 11px;
-          font-weight: 900;
-          letter-spacing: .12em;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          margin-bottom: 7px;
         }
 
         h1 {
-          margin: 7px 0 0;
-          font-size: 34px;
-          letter-spacing: -.04em;
+          margin: 0;
+          font-size: 31px;
+          letter-spacing: -0.5px;
         }
 
         .header p {
+          color: #64748b;
           margin: 8px 0 0;
-          color: #718078;
-          font-size: 14px;
         }
 
         .refresh {
-          border: 1px solid #dce7e1;
+          border: 1px solid #dbe4df;
           background: white;
-          color: #29372f;
-          padding: 11px 16px;
+          color: #166534;
           border-radius: 12px;
-          font-weight: 800;
+          padding: 11px 17px;
           cursor: pointer;
+          font-weight: 700;
         }
 
-        .refresh:disabled {
-          opacity: .55;
+        .refresh:hover {
+          background: #f0fdf4;
         }
 
-        .alert {
+        .success,
+        .error {
           padding: 13px 16px;
-          border-radius: 13px;
-          margin-bottom: 16px;
-          display: flex;
-          gap: 10px;
-          font-size: 13px;
+          border-radius: 12px;
+          margin-bottom: 18px;
+          font-weight: 700;
         }
 
-        .alert.error {
-          background: #fff2f2;
-          border: 1px solid #efd0d0;
-          color: #9b3030;
+        .success {
+          background: #ecfdf3;
+          border: 1px solid #bbf7d0;
+          color: #166534;
         }
 
-        .alert.success {
-          background: #effaf3;
-          border: 1px solid #ccebd7;
-          color: #19713d;
+        .error {
+          background: #fff1f2;
+          border: 1px solid #fecdd3;
+          color: #be123c;
         }
 
         .stats {
           display: grid;
-          grid-template-columns:
-            repeat(6, minmax(0, 1fr));
-          gap: 12px;
-          margin-bottom: 18px;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 14px;
+          margin-bottom: 20px;
         }
 
         .stat {
           background: white;
-          border: 1px solid #e3ebe6;
-          border-radius: 17px;
-          padding: 17px;
+          border: 1px solid #e2e8f0;
+          border-radius: 18px;
+          padding: 18px;
           display: flex;
           align-items: center;
-          gap: 11px;
+          gap: 13px;
         }
 
-        .icon {
+        .statIcon {
           width: 42px;
           height: 42px;
-          border-radius: 12px;
+          border-radius: 13px;
+          background: #ecfdf3;
+          color: #16a34a;
           display: grid;
           place-items: center;
-          flex: 0 0 auto;
-        }
-
-        .icon.users {
-          background: #eef5ff;
-        }
-
-        .icon.balance {
-          background: #eaf8f0;
-          color: #198754;
-        }
-
-        .icon.earned {
-          background: #edf9f1;
-          color: #198754;
-        }
-
-        .icon.spent {
-          background: #fff3ed;
-          color: #c95b38;
-        }
-
-        .icon.transactions {
-          background: #f2efff;
-          color: #6c5bb1;
-        }
-
-        .icon.operations {
-          background: #fff8df;
-          color: #8c701c;
+          font-size: 19px;
         }
 
         .stat span {
           display: block;
-          color: #77837d;
-          font-size: 11px;
-          margin-bottom: 4px;
+          color: #64748b;
+          font-size: 12px;
+          margin-bottom: 5px;
         }
 
         .stat strong {
-          font-size: 20px;
-        }
-
-        .stat small {
-          color: #8d9792;
-          font-size: 10px;
-          margin-right: 3px;
+          font-size: 19px;
         }
 
         .panel {
           background: white;
-          border: 1px solid #e3ebe6;
-          border-radius: 20px;
-          padding: 21px;
-          margin-bottom: 18px;
-          box-shadow:
-            0 8px 30px rgba(25, 50, 38, .025);
+          border: 1px solid #e2e8f0;
+          border-radius: 22px;
+          padding: 22px;
+          margin-bottom: 20px;
         }
 
         .panelHeader {
           display: flex;
           justify-content: space-between;
-          align-items: flex-end;
-          gap: 15px;
-          margin-bottom: 16px;
+          align-items: center;
+          gap: 20px;
+          margin-bottom: 20px;
         }
 
         .panelHeader h2 {
-          margin: 0;
+          margin: 0 0 4px;
           font-size: 19px;
         }
 
-        .panelHeader p {
-          margin: 5px 0 0;
-          color: #7b8781;
+        .panelHeader span {
+          color: #64748b;
           font-size: 12px;
         }
 
         .filters {
           display: flex;
-          gap: 5px;
-          padding: 4px;
-          background: #f1f5f3;
-          border-radius: 10px;
+          gap: 9px;
         }
 
-        .filter {
-          border: 0;
-          background: transparent;
-          padding: 7px 10px;
-          border-radius: 7px;
-          color: #718078;
-          font-size: 11px;
-          cursor: pointer;
+        .filters input,
+        .filters select {
+          border: 1px solid #dbe4df;
+          background: #fafdfb;
+          border-radius: 11px;
+          padding: 10px 12px;
+          outline: none;
         }
 
-        .filter.active {
-          background: white;
-          color: #198754;
-          font-weight: 800;
-          box-shadow:
-            0 2px 7px rgba(20, 40, 30, .06);
+        .filters input {
+          width: 260px;
         }
 
-        .search {
+        .users {
+          display: grid;
+          gap: 11px;
+        }
+
+        .userCard {
+          display: grid;
+          grid-template-columns: minmax(260px, 1.4fr) 150px 220px 180px;
+          align-items: center;
+          gap: 18px;
+          border: 1px solid #e8eef0;
+          border-radius: 17px;
+          padding: 15px;
+        }
+
+        .userMain {
           display: flex;
           align-items: center;
-          gap: 9px;
-          border: 1px solid #e3ebe6;
-          background: #fafcfb;
-          border-radius: 12px;
-          padding: 0 13px;
-          margin-bottom: 13px;
-        }
-
-        .search span {
-          color: #8c9791;
-          font-size: 20px;
-        }
-
-        .search input {
-          width: 100%;
-          border: 0;
-          outline: 0;
-          background: transparent;
-          padding: 12px 0;
-          font-size: 13px;
-          color: #1e2b24;
-        }
-
-        .usersList {
-          border: 1px solid #edf1ef;
-          border-radius: 14px;
-          overflow: hidden;
-        }
-
-        .userRow {
-          display: grid;
-          grid-template-columns:
-            44px minmax(180px, 1fr)
-            110px 150px auto;
-          align-items: center;
-          gap: 14px;
-          padding: 13px;
-          border-bottom: 1px solid #edf1ef;
-        }
-
-        .userRow:last-child {
-          border-bottom: 0;
+          gap: 12px;
+          min-width: 0;
         }
 
         .avatar {
-          width: 42px;
-          height: 42px;
+          width: 45px;
+          height: 45px;
+          border-radius: 14px;
+          background: #dcfce7;
+          color: #15803d;
           display: grid;
           place-items: center;
-          border-radius: 12px;
-          background: #eaf8f0;
-          color: #198754;
-          font-weight: 900;
-          font-size: 16px;
+          font-weight: 800;
+          flex-shrink: 0;
         }
 
-        .userInfo strong {
+        .identity {
+          min-width: 0;
+        }
+
+        .identity h3 {
+          margin: 0 0 5px;
+          font-size: 15px;
+        }
+
+        .meta {
+          display: flex;
+          gap: 7px;
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        .identity small {
           display: block;
-          font-size: 13px;
-          margin-bottom: 3px;
+          margin-top: 5px;
+          color: #94a3b8;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
-        .userInfo span,
-        .userInfo small {
-          display: block;
-          color: #7b8781;
-          font-size: 10px;
-        }
-
-        .userInfo small {
-          margin-top: 3px;
-          color: #a0aaa5;
-        }
-
-        .userBalance {
+        .balance {
           text-align: center;
         }
 
-        .userBalance strong {
+        .balance span {
           display: block;
-          color: #198754;
-          font-size: 19px;
+          color: #64748b;
+          font-size: 11px;
         }
 
-        .userBalance span {
-          color: #8a958f;
-          font-size: 10px;
+        .balance strong {
+          font-size: 22px;
+          color: #166534;
         }
 
-        .userTotals {
+        .balance em {
+          font-style: normal;
+          font-size: 11px;
+          color: #64748b;
+          margin-right: 4px;
+        }
+
+        .totals {
           display: flex;
-          flex-direction: column;
-          gap: 3px;
-          color: #89938e;
-          font-size: 10px;
+          justify-content: center;
+          gap: 25px;
         }
 
-        .userTotals b {
-          color: #47564e;
+        .totals div {
+          text-align: center;
+        }
+
+        .totals span {
+          display: block;
+          font-size: 10px;
+          color: #94a3b8;
+          margin-bottom: 4px;
+        }
+
+        .totals b {
+          font-size: 13px;
         }
 
         .actions {
           display: flex;
-          gap: 6px;
+          gap: 7px;
         }
 
-        .actions button,
-        .edit {
-          border: 0;
-          border-radius: 9px;
-          padding: 8px 10px;
-          font-size: 11px;
+        .actions button {
+          flex: 1;
+          border-radius: 10px;
+          padding: 9px 7px;
           font-weight: 800;
           cursor: pointer;
         }
 
         .add {
-          background: #eaf8f0;
-          color: #19713d;
+          background: #f0fdf4;
+          border: 1px solid #bbf7d0;
+          color: #15803d;
         }
 
         .subtract {
-          background: #fff1ed;
-          color: #b94f32;
+          background: #fff7f7;
+          border: 1px solid #fecaca;
+          color: #b91c1c;
         }
 
         .operations {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 12px;
         }
 
         .operation {
-          display: grid;
-          grid-template-columns:
-            42px minmax(0, 1fr)
-            100px 75px 65px;
-          align-items: center;
-          gap: 14px;
-          padding: 13px;
-          border: 1px solid #edf1ef;
-          border-radius: 13px;
+          border: 1px solid #e8eef0;
+          border-radius: 15px;
+          padding: 15px;
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
         }
 
-        .operationIcon {
-          width: 40px;
-          height: 40px;
-          display: grid;
-          place-items: center;
-          border-radius: 11px;
-          background: #eaf8f0;
-          color: #198754;
+        .operation h3 {
+          font-size: 14px;
+          margin: 0 0 5px;
         }
 
-        .operationInfo strong {
-          display: block;
-          font-size: 13px;
-        }
-
-        .operationInfo span {
-          display: block;
-          color: #77837d;
+        .operation p {
           font-size: 11px;
-          margin-top: 3px;
-        }
-
-        .operationInfo small {
-          display: block;
-          color: #a0aaa5;
-          font-size: 9px;
-          margin-top: 4px;
+          color: #64748b;
+          margin: 0;
         }
 
         .operationCost {
           text-align: center;
+          white-space: nowrap;
         }
 
         .operationCost strong {
+          display: block;
+          color: #15803d;
           font-size: 20px;
-          color: #198754;
         }
 
         .operationCost span {
-          display: block;
-          color: #8c9691;
-          font-size: 9px;
-        }
-
-        .status {
-          text-align: center;
-          padding: 5px 7px;
-          border-radius: 999px;
-          font-size: 9px;
-          font-weight: 800;
-        }
-
-        .status.active {
-          color: #19713d;
-          background: #eaf8f0;
-        }
-
-        .status.inactive {
-          color: #9b5e30;
-          background: #fff4e9;
-        }
-
-        .edit {
-          background: #f1f5f3;
-          color: #526159;
+          color: #64748b;
+          font-size: 10px;
         }
 
         .transactions {
-          border: 1px solid #edf1ef;
-          border-radius: 14px;
-          overflow: hidden;
+          display: grid;
+          gap: 5px;
         }
 
         .transaction {
           display: grid;
-          grid-template-columns:
-            42px minmax(0,1fr)
-            150px 130px;
+          grid-template-columns: 42px 1fr 100px 140px;
           align-items: center;
-          gap: 14px;
-          padding: 12px 14px;
-          border-bottom: 1px solid #edf1ef;
-        }
-
-        .transaction:last-child {
-          border-bottom: 0;
+          gap: 12px;
+          padding: 12px 5px;
+          border-bottom: 1px solid #f1f5f9;
         }
 
         .transactionIcon {
-          width: 40px;
-          height: 40px;
+          width: 34px;
+          height: 34px;
+          border-radius: 10px;
           display: grid;
           place-items: center;
-          border-radius: 11px;
-          font-size: 19px;
-          font-weight: 900;
+          font-weight: 800;
         }
 
         .transactionIcon.credit {
-          background: #eaf8f0;
-          color: #198754;
+          background: #ecfdf3;
+          color: #15803d;
         }
 
         .transactionIcon.debit {
-          background: #fff1ed;
-          color: #c85637;
+          background: #fff1f2;
+          color: #be123c;
         }
 
         .transactionInfo strong {
           display: block;
-          font-size: 12px;
+          font-size: 13px;
         }
 
-        .transactionInfo span,
-        .transactionInfo small {
+        .transactionInfo span {
           display: block;
-          color: #7e8983;
-          font-size: 10px;
-          margin-top: 3px;
-        }
-
-        .transactionInfo small {
-          color: #a1aaa6;
-        }
-
-        .transactionDate {
-          color: #8b9590;
+          margin-top: 4px;
+          color: #94a3b8;
           font-size: 10px;
         }
 
         .transactionAmount {
-          text-align: left;
+          font-weight: 900;
+          text-align: center;
         }
 
-        .transactionAmount strong {
+        .transactionAmount.credit {
+          color: #15803d;
+        }
+
+        .transactionAmount.debit {
+          color: #be123c;
+        }
+
+        .transactionBalance {
+          text-align: center;
+        }
+
+        .transactionBalance span {
           display: block;
-          font-size: 15px;
-        }
-
-        .transactionAmount strong.credit {
-          color: #198754;
-        }
-
-        .transactionAmount strong.debit {
-          color: #c85637;
-        }
-
-        .transactionAmount span {
-          color: #9aa39f;
+          color: #94a3b8;
           font-size: 9px;
+        }
+
+        .transactionBalance strong {
+          font-size: 13px;
+        }
+
+        .security {
+          display: flex;
+          gap: 14px;
+          align-items: flex-start;
+          background: #f0fdf4;
+          border: 1px solid #bbf7d0;
+          border-radius: 18px;
+          padding: 17px;
+        }
+
+        .securityIcon {
+          font-size: 24px;
+        }
+
+        .security h3 {
+          margin: 0 0 5px;
+          font-size: 14px;
+        }
+
+        .security p {
+          margin: 0;
+          color: #166534;
+          font-size: 12px;
+          line-height: 1.7;
         }
 
         .empty {
           text-align: center;
-          padding: 35px 15px;
-          border: 1px dashed #dce5df;
-          border-radius: 13px;
-          color: #7e8983;
-          font-size: 13px;
+          padding: 55px 20px;
+          color: #64748b;
+        }
+
+        .empty > div {
+          font-size: 35px;
+          color: #16a34a;
+        }
+
+        .empty h3 {
+          margin: 10px 0 5px;
+          color: #0f172a;
+        }
+
+        .empty p {
+          margin: 0;
+        }
+
+        .empty.small {
+          padding: 35px;
         }
 
         .overlay {
           position: fixed;
           inset: 0;
-          background: rgba(17, 29, 23, .38);
-          backdrop-filter: blur(4px);
+          background: rgba(15, 23, 42, 0.38);
           display: grid;
           place-items: center;
           padding: 20px;
@@ -1791,13 +1179,10 @@ export default function AdminPointsPage() {
 
         .modal {
           width: min(500px, 100%);
-          max-height: 90vh;
-          overflow: auto;
           background: white;
-          border-radius: 22px;
-          padding: 23px;
-          box-shadow:
-            0 25px 80px rgba(15, 35, 25, .22);
+          border-radius: 24px;
+          padding: 24px;
+          box-shadow: 0 25px 80px rgba(15, 23, 42, 0.2);
         }
 
         .modalHeader {
@@ -1808,258 +1193,226 @@ export default function AdminPointsPage() {
         }
 
         .modalHeader h2 {
-          margin: 5px 0 3px;
-          font-size: 21px;
+          margin: 0 0 5px;
+          font-size: 22px;
         }
 
         .modalHeader p {
           margin: 0;
-          color: #7b8781;
-          font-size: 12px;
+          color: #64748b;
+          font-size: 13px;
         }
 
         .close {
-          width: 34px;
-          height: 34px;
+          width: 35px;
+          height: 35px;
           border: 0;
+          background: #f1f5f9;
           border-radius: 10px;
-          background: #f2f5f3;
-          color: #68756e;
-          font-size: 21px;
           cursor: pointer;
+          font-size: 22px;
         }
 
         .currentBalance {
-          padding: 15px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
           border-radius: 14px;
-          background: #f4faf6;
-          border: 1px solid #dceee3;
-          margin-bottom: 17px;
+          padding: 14px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 18px;
         }
 
         .currentBalance span {
-          display: block;
-          color: #78857e;
-          font-size: 11px;
-          margin-bottom: 5px;
+          color: #64748b;
+          font-size: 12px;
         }
 
         .currentBalance strong {
-          color: #198754;
-          font-size: 27px;
-        }
-
-        .currentBalance small {
-          color: #7c8982;
-          font-size: 11px;
+          color: #166534;
+          font-size: 18px;
         }
 
         label {
           display: block;
-          color: #405047;
           font-size: 12px;
           font-weight: 800;
-          margin-bottom: 14px;
+          color: #334155;
+          margin-bottom: 15px;
         }
 
-        input,
-        textarea,
-        select {
+        label input,
+        label textarea {
+          display: block;
           width: 100%;
           margin-top: 7px;
-          border: 1px solid #dfe8e2;
+          border: 1px solid #dbe4df;
           border-radius: 11px;
-          padding: 11px 12px;
-          outline: 0;
-          background: #fbfcfb;
-          color: #1e2b24;
-          font: inherit;
-          font-size: 13px;
+          padding: 12px;
+          outline: none;
+          font-family: inherit;
+          font-size: 14px;
+          background: #fff;
         }
 
-        textarea {
+        label textarea {
+          min-height: 90px;
           resize: vertical;
         }
 
-        input:focus,
-        textarea:focus,
-        select:focus {
-          border-color: #79b996;
-          background: white;
-          box-shadow:
-            0 0 0 3px rgba(25,135,84,.07);
+        label input:focus,
+        label textarea:focus {
+          border-color: #86efac;
+          box-shadow: 0 0 0 3px #f0fdf4;
         }
 
-        .modalWarning {
-          background: #f7faf8;
-          border: 1px solid #e3ebe6;
+        .warning {
+          background: #fff7ed;
+          border: 1px solid #fed7aa;
+          color: #9a3412;
           border-radius: 11px;
-          padding: 10px;
-          color: #718078;
+          padding: 11px;
           font-size: 11px;
-          line-height: 1.6;
-          margin-bottom: 18px;
+          margin-bottom: 14px;
+        }
+
+        .modalError {
+          background: #fff1f2;
+          border: 1px solid #fecdd3;
+          color: #be123c;
+          border-radius: 11px;
+          padding: 11px;
+          font-size: 12px;
+          margin-bottom: 14px;
         }
 
         .modalActions {
           display: flex;
-          justify-content: flex-end;
-          gap: 8px;
+          gap: 9px;
+          margin-top: 20px;
         }
 
         .modalActions button {
-          border: 0;
-          border-radius: 10px;
-          padding: 11px 15px;
+          flex: 1;
+          border-radius: 11px;
+          padding: 12px;
           font-weight: 800;
-          font-size: 12px;
           cursor: pointer;
         }
 
         .cancel {
-          background: #f1f4f2;
-          color: #66736c;
+          border: 1px solid #dbe4df;
+          background: white;
+          color: #475569;
         }
 
         .confirmAdd {
-          background: #198754;
+          border: 1px solid #16a34a;
+          background: #16a34a;
           color: white;
         }
 
         .confirmSubtract {
-          background: #c85637;
+          border: 1px solid #dc2626;
+          background: #dc2626;
           color: white;
         }
 
-        .modalActions button:disabled {
-          opacity: .55;
+        button:disabled {
+          opacity: 0.55;
           cursor: not-allowed;
         }
 
         @media (max-width: 1100px) {
           .stats {
-            grid-template-columns:
-              repeat(3, 1fr);
+            grid-template-columns: repeat(3, 1fr);
           }
 
-          .userRow {
-            grid-template-columns:
-              44px minmax(160px,1fr)
-              100px 130px;
+          .userCard {
+            grid-template-columns: 1fr 130px;
           }
 
+          .totals,
           .actions {
-            grid-column: 2 / -1;
+            grid-column: span 1;
+          }
+
+          .operations {
+            grid-template-columns: repeat(2, 1fr);
           }
         }
 
-        @media (max-width: 760px) {
+        @media (max-width: 700px) {
           .page {
-            padding: 20px 12px 50px;
+            padding: 20px 12px 40px;
           }
 
           .header {
             flex-direction: column;
           }
 
-          .refresh {
-            width: 100%;
+          .stats {
+            grid-template-columns: repeat(2, 1fr);
           }
 
-          .stats {
-            grid-template-columns:
-              repeat(2, 1fr);
+          .stat {
+            padding: 14px;
           }
 
           .panel {
             padding: 15px;
+            border-radius: 18px;
           }
 
           .panelHeader {
+            align-items: stretch;
             flex-direction: column;
-            align-items: flex-start;
           }
 
           .filters {
             width: 100%;
+            flex-direction: column;
           }
 
-          .filter {
-            flex: 1;
+          .filters input {
+            width: 100%;
           }
 
-          .userRow {
-            grid-template-columns:
-              42px minmax(0,1fr)
-              90px;
+          .userCard {
+            grid-template-columns: 1fr;
           }
 
-          .userTotals {
-            display: none;
+          .balance {
+            text-align: right;
           }
 
-          .actions {
-            grid-column: 2 / -1;
+          .totals {
+            justify-content: flex-start;
           }
 
-          .operation {
-            grid-template-columns:
-              40px minmax(0,1fr) 75px;
-          }
-
-          .operationCost {
-            grid-column: 3;
-            grid-row: 1;
-          }
-
-          .status,
-          .edit {
-            grid-column: 2 / -1;
+          .operations {
+            grid-template-columns: 1fr;
           }
 
           .transaction {
-            grid-template-columns:
-              40px minmax(0,1fr) 80px;
+            grid-template-columns: 35px 1fr auto;
           }
 
-          .transactionDate {
+          .transactionBalance {
             display: none;
-          }
-
-          .transactionAmount {
-            grid-column: 2 / -1;
-            text-align: right;
           }
         }
 
-        @media (max-width: 480px) {
+        @media (max-width: 430px) {
           .stats {
             grid-template-columns: 1fr;
           }
 
           h1 {
-            font-size: 28px;
-          }
-
-          .userRow {
-            grid-template-columns:
-              40px minmax(0,1fr);
-          }
-
-          .userBalance {
-            grid-column: 2;
-            text-align: right;
-          }
-
-          .actions {
-            grid-column: 1 / -1;
-          }
-
-          .actions button {
-            flex: 1;
+            font-size: 26px;
           }
         }
-
       `}</style>
     </main>
   );
