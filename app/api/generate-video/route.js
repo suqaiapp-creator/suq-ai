@@ -12,16 +12,6 @@ const supabase = createClient(
 // -----------------------------------------
 // Runway Cost Settings
 // -----------------------------------------
-//
-// حالياً نستخدم:
-// 480p = 2 Credits / second
-// Image-to-video start frame = +1 Credit
-//
-// سعر الـ Credit حسب شراء المستخدم الحالي:
-// $8.40 / 1000 Credits
-//
-// يمكن تغييره لاحقاً من Environment Variable.
-// -----------------------------------------
 
 const RUNWAY_CREDITS_PER_SECOND = 2;
 
@@ -31,6 +21,27 @@ const RUNWAY_COST_PER_CREDIT =
   Number(
     process.env.RUNWAY_CREDIT_COST_USD
   ) || 0.0084;
+
+// -----------------------------------------
+// Points Settings
+// -----------------------------------------
+
+const VIDEO_POINT_OPERATIONS = {
+  5: {
+    operation_key: "create_video_5",
+    points: 11,
+  },
+
+  8: {
+    operation_key: "create_video_8",
+    points: 17,
+  },
+
+  10: {
+    operation_key: "create_video_10",
+    points: 21,
+  },
+};
 
 function calculateRunwayCredits(duration) {
   const seconds = Number(duration) || 5;
@@ -49,21 +60,34 @@ function calculateRunwayCost(credits) {
   );
 }
 
+function getVideoPointOperation(duration) {
+  const seconds = Number(duration) || 5;
+
+  return (
+    VIDEO_POINT_OPERATIONS[seconds] ||
+    null
+  );
+}
+
 export async function POST(request) {
   let videoId = null;
 
   try {
     const body = await request.json();
 
-    videoId = body?.video_id || null;
+    videoId =
+      body?.video_id || null;
 
     if (!videoId) {
       return NextResponse.json(
         {
           success: false,
-          error: "معرّف الفيديو مطلوب.",
+          error:
+            "معرّف الفيديو مطلوب.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -88,9 +112,12 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "الفيديو غير موجود.",
+          error:
+            "الفيديو غير موجود.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
@@ -98,16 +125,55 @@ export async function POST(request) {
     // إذا الفيديو قيد المعالجة
     // -----------------------------------------
 
-    if (video.status === "processing") {
+    if (
+      video.status === "processing"
+    ) {
       return NextResponse.json({
         success: true,
-        message: "الفيديو قيد المعالجة بالفعل.",
+
+        message:
+          "الفيديو قيد المعالجة بالفعل.",
+
         video: {
           id: video.id,
           status: video.status,
         },
+
         already_processing: true,
       });
+    }
+
+    // -----------------------------------------
+    // التحقق من مدة الفيديو
+    // -----------------------------------------
+
+    const duration =
+      Number(
+        video.duration_seconds || 5
+      );
+
+    const pointOperation =
+      getVideoPointOperation(
+        duration
+      );
+
+    if (!pointOperation) {
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            "مدة الفيديو غير مدعومة في نظام النقاط حالياً.",
+
+          supported_durations:
+            Object.keys(
+              VIDEO_POINT_OPERATIONS
+            ).map(Number),
+        },
+        {
+          status: 400,
+        }
+      );
     }
 
     // -----------------------------------------
@@ -132,10 +198,13 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "المنتج المرتبط بالفيديو غير موجود.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
@@ -144,29 +213,38 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      product.safety_status === "locked" ||
-      product.safety_status === "violation"
+      product.safety_status ===
+        "locked" ||
+      product.safety_status ===
+        "violation"
     ) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "هذا المنتج مقفل ولا يمكن إنشاء فيديو له.",
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       );
     }
 
     if (
-      product.safety_status === "review"
+      product.safety_status ===
+      "review"
     ) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "هذا المنتج يحتاج إلى مراجعة قبل إنشاء الفيديو.",
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       );
     }
 
@@ -191,10 +269,13 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "المحل المرتبط بالفيديو غير موجود.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
@@ -212,14 +293,18 @@ export async function POST(request) {
         .from("ad_images")
         .select("*")
         .eq("id", video.design_id)
-        .eq("shop_id", video.shop_id)
+        .eq(
+          "shop_id",
+          video.shop_id
+        )
         .maybeSingle();
 
       if (designError) {
         throw designError;
       }
 
-      design = designData || null;
+      design =
+        designData || null;
     }
 
     // -----------------------------------------
@@ -234,11 +319,14 @@ export async function POST(request) {
         category: product.category,
         price: product.price,
         currency: product.currency,
-        description: product.description,
+        description:
+          product.description,
         specifications:
           product.specifications,
-        features: product.features,
-        image_url: product.image_url,
+        features:
+          product.features,
+        image_url:
+          product.image_url,
         model_number:
           product.model_number,
       },
@@ -246,33 +334,50 @@ export async function POST(request) {
       shop: {
         id: shop.id,
         name: shop.name,
-        logo_url: shop.logo_url,
+        logo_url:
+          shop.logo_url,
         phone: shop.phone,
-        whatsapp: shop.whatsapp,
+        whatsapp:
+          shop.whatsapp,
         email: shop.email,
-        instagram: shop.instagram,
-        tiktok: shop.tiktok,
-        snapchat: shop.snapchat,
-        website: shop.website,
+        instagram:
+          shop.instagram,
+        tiktok:
+          shop.tiktok,
+        snapchat:
+          shop.snapchat,
+        website:
+          shop.website,
       },
 
       design: design
         ? {
             id: design.id,
+
             image_url:
               design.image_url,
-            format: design.format,
+
+            format:
+              design.format,
           }
         : null,
 
       settings: {
-        mode: video.mode,
+        mode:
+          video.mode,
+
         video_type:
           video.video_type,
-        format: video.format,
+
+        format:
+          video.format,
+
         duration_seconds:
-          video.duration_seconds,
-        style: video.style,
+          duration,
+
+        style:
+          video.style,
+
         background:
           video.background,
       },
@@ -282,15 +387,177 @@ export async function POST(request) {
     };
 
     // -----------------------------------------
+    // حساب تكلفة Runway المتوقعة
+    // -----------------------------------------
+
+    const runwayCredits =
+      calculateRunwayCredits(
+        duration
+      );
+
+    const runwayEstimatedCost =
+      calculateRunwayCost(
+        runwayCredits
+      );
+
+    // -----------------------------------------
+    // خصم نقاط الفيديو
+    //
+    // مهم جداً:
+    // جميع التحققات تمت قبل هذه المرحلة.
+    //
+    // إذا الرصيد غير كافٍ:
+    // لن يتم استدعاء Runway.
+    // -----------------------------------------
+
+    const {
+      data: pointsResult,
+      error: pointsError,
+    } = await supabase.rpc(
+      "charge_operation_points",
+      {
+        p_operation_key:
+          pointOperation.operation_key,
+
+        p_user_id:
+          shop.owner_id,
+
+        p_shop_id:
+          video.shop_id,
+
+        p_reference_type:
+          "ad_video",
+
+        p_reference_id:
+          video.id,
+
+        p_description:
+          `إنشاء فيديو إعلاني لمدة ${duration} ثواني للمنتج: ${
+            product.name ||
+            "منتج"
+          }`,
+
+        p_metadata: {
+          source:
+            "generate-video",
+
+          operation:
+            pointOperation.operation_key,
+
+          duration_seconds:
+            duration,
+
+          points_cost:
+            pointOperation.points,
+
+          runway_credits:
+            runwayCredits,
+
+          runway_estimated_cost_usd:
+            runwayEstimatedCost,
+        },
+      }
+    );
+
+    if (pointsError) {
+      console.error(
+        "VIDEO POINTS CHARGE ERROR:",
+        pointsError
+      );
+
+      const pointsMessage =
+        pointsError?.message ||
+        "تعذر خصم نقاط الفيديو.";
+
+      const insufficient =
+        pointsMessage.includes(
+          "غير كاف"
+        ) ||
+        pointsMessage.includes(
+          "رصيد النقاط"
+        );
+
+      return NextResponse.json(
+        {
+          success: false,
+
+          error: insufficient
+            ? pointsMessage
+            : "تعذر تجهيز رصيد النقاط لإنشاء الفيديو.",
+
+          code: insufficient
+            ? "INSUFFICIENT_POINTS"
+            : "POINTS_CHARGE_FAILED",
+
+          points_required:
+            pointOperation.points,
+
+          duration_seconds:
+            duration,
+        },
+        {
+          status:
+            insufficient
+              ? 402
+              : 500,
+        }
+      );
+    }
+
+    if (
+      !pointsResult ||
+      pointsResult.success !==
+        true
+    ) {
+      console.error(
+        "VIDEO POINTS CHARGE INVALID RESULT:",
+        pointsResult
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            "تعذر تأكيد خصم نقاط الفيديو.",
+
+          code:
+            "POINTS_CHARGE_FAILED",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const pointsCharged =
+      Number(
+        pointsResult.points_charged ||
+          pointOperation.points
+      );
+
+    const pointsBalanceAfter =
+      Number(
+        pointsResult.balance_after ??
+          0
+      );
+
+    // -----------------------------------------
     // إرسال الطلب لمحرك الفيديو
+    //
+    // النقاط تم خصمها بنجاح.
+    // الآن فقط يتم استدعاء Runway.
     // -----------------------------------------
 
     const engineResult =
       await generateVideo({
         product,
+
         shop,
+
         video: {
           ...video,
+
           prompt:
             JSON.stringify(
               structuredPrompt
@@ -303,7 +570,8 @@ export async function POST(request) {
     // -----------------------------------------
 
     if (
-      engineResult?.enabled === false
+      engineResult?.enabled ===
+      false
     ) {
       const {
         data: updatedVideo,
@@ -320,9 +588,11 @@ export async function POST(request) {
 
           provider: null,
 
-          provider_task_id: null,
+          provider_task_id:
+            null,
 
-          generation_started_at: null,
+          generation_started_at:
+            null,
 
           error_message: null,
 
@@ -346,15 +616,26 @@ export async function POST(request) {
           "تم تجهيز الفيديو. محرك الذكاء الاصطناعي غير مفعّل حالياً.",
 
         video: {
-          id: updatedVideo.id,
+          id:
+            updatedVideo.id,
+
           status:
             updatedVideo.status,
         },
 
-        engine_enabled: false,
+        engine_enabled:
+          false,
 
         ai_generation_started:
           false,
+
+        points: {
+          charged:
+            pointsCharged,
+
+          balance_after:
+            pointsBalanceAfter,
+        },
       });
     }
 
@@ -362,32 +643,13 @@ export async function POST(request) {
     // التأكد من وجود Task ID
     // -----------------------------------------
 
-    if (!engineResult?.taskId) {
+    if (
+      !engineResult?.taskId
+    ) {
       throw new Error(
         "محرك الفيديو لم يرجع رقم المهمة."
       );
     }
-
-    // -----------------------------------------
-    // حساب تكلفة Runway
-    // -----------------------------------------
-
-    const duration =
-      Number(
-        engineResult.duration ||
-          video.duration_seconds ||
-          5
-      );
-
-    const runwayCredits =
-      calculateRunwayCredits(
-        duration
-      );
-
-    const runwayEstimatedCost =
-      calculateRunwayCost(
-        runwayCredits
-      );
 
     // -----------------------------------------
     // حفظ حالة المعالجة + Task ID
@@ -404,7 +666,8 @@ export async function POST(request) {
             structuredPrompt
           ),
 
-        status: "processing",
+        status:
+          "processing",
 
         provider:
           engineResult.engine ||
@@ -434,11 +697,6 @@ export async function POST(request) {
     // -----------------------------------------
     // تسجيل استخدام Runway في ai_usage
     // -----------------------------------------
-    //
-    // مهم:
-    // فشل التسجيل هنا لا يفشل إنشاء الفيديو.
-    // لأن الفيديو تم إرساله فعلياً إلى Runway.
-    // -----------------------------------------
 
     try {
       const {
@@ -447,13 +705,16 @@ export async function POST(request) {
         .from("ai_usage")
         .insert({
           user_id:
-            shop.owner_id || null,
+            shop.owner_id ||
+            null,
 
           shop_id:
-            video.shop_id || null,
+            video.shop_id ||
+            null,
 
           product_id:
-            video.product_id || null,
+            video.product_id ||
+            null,
 
           operation:
             "video_generation",
@@ -492,19 +753,24 @@ export async function POST(request) {
               duration,
 
             format:
-              video.format || null,
+              video.format ||
+              null,
 
             ratio:
-              engineResult.ratio || null,
+              engineResult.ratio ||
+              null,
 
             video_type:
-              video.video_type || null,
+              video.video_type ||
+              null,
 
             style:
-              video.style || null,
+              video.style ||
+              null,
 
             background:
-              video.background || null,
+              video.background ||
+              null,
 
             credits_per_second:
               RUNWAY_CREDITS_PER_SECOND,
@@ -517,6 +783,15 @@ export async function POST(request) {
 
             estimated_cost_usd:
               runwayEstimatedCost,
+
+            points_operation:
+              pointOperation.operation_key,
+
+            points_charged:
+              pointsCharged,
+
+            points_balance_after:
+              pointsBalanceAfter,
 
             note:
               "Runway usage recorded at task creation. Final status/cost will be updated after task completion.",
@@ -547,7 +822,8 @@ export async function POST(request) {
         "تم إرسال الفيديو إلى محرك التوليد.",
 
       video: {
-        id: processingVideo.id,
+        id:
+          processingVideo.id,
 
         status:
           processingVideo.status,
@@ -559,7 +835,8 @@ export async function POST(request) {
           processingVideo.provider_task_id,
       },
 
-      engine_enabled: true,
+      engine_enabled:
+        true,
 
       ai_generation_started:
         true,
@@ -581,6 +858,17 @@ export async function POST(request) {
 
         estimated_cost_usd:
           runwayEstimatedCost,
+      },
+
+      points: {
+        charged:
+          pointsCharged,
+
+        balance_after:
+          pointsBalanceAfter,
+
+        operation:
+          pointOperation.operation_key,
       },
     });
   } catch (error) {
@@ -627,7 +915,9 @@ export async function POST(request) {
           error?.message ||
           "حدث خطأ أثناء إنشاء الفيديو.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
