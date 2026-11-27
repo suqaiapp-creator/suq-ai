@@ -6,10 +6,10 @@ import { generateVideo } from "../../../lib/video-generator";
 
 export const runtime = "nodejs";
 
-// -----------------------------------------
+// =========================================================
 // Service Role Client
 // للعمليات الداخلية فقط
-// -----------------------------------------
+// =========================================================
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -22,9 +22,9 @@ const supabaseAdmin = createClient(
   }
 );
 
-// -----------------------------------------
+// =========================================================
 // Runway Cost Settings
-// -----------------------------------------
+// =========================================================
 
 const RUNWAY_CREDITS_PER_SECOND = 2;
 
@@ -35,9 +35,9 @@ const RUNWAY_COST_PER_CREDIT =
     process.env.RUNWAY_CREDIT_COST_USD
   ) || 0.0084;
 
-// -----------------------------------------
+// =========================================================
 // Points Settings
-// -----------------------------------------
+// =========================================================
 
 const VIDEO_POINT_OPERATIONS = {
   5: {
@@ -56,9 +56,9 @@ const VIDEO_POINT_OPERATIONS = {
   },
 };
 
-// -----------------------------------------
+// =========================================================
 // Runway helpers
-// -----------------------------------------
+// =========================================================
 
 function calculateRunwayCredits(duration) {
   const seconds =
@@ -78,13 +78,11 @@ function calculateRunwayCost(credits) {
   );
 }
 
-// -----------------------------------------
+// =========================================================
 // Points helper
-// -----------------------------------------
+// =========================================================
 
-function getVideoPointOperation(
-  duration
-) {
+function getVideoPointOperation(duration) {
   const seconds =
     Number(duration) || 5;
 
@@ -94,21 +92,129 @@ function getVideoPointOperation(
   );
 }
 
+// =========================================================
+// Refund helper
+// =========================================================
+
+async function refundVideoPoints({
+  supabaseAuth,
+  transactionId,
+  userId,
+  shopId,
+  productId,
+  videoId,
+  reason,
+  stage,
+  errorMessage,
+}) {
+  if (!transactionId) {
+    return {
+      success: false,
+      refunded: false,
+      error:
+        "لا توجد عملية نقاط لاسترجاعها.",
+    };
+  }
+
+  try {
+    const {
+      data: refundResult,
+      error: refundError,
+    } =
+      await supabaseAuth.rpc(
+        "refund_operation_points",
+        {
+          p_transaction_id:
+            transactionId,
+
+          p_reason:
+            reason ||
+            "استرجاع نقاط بسبب فشل عملية الفيديو.",
+
+          p_metadata: {
+            source:
+              "generate-video",
+
+            user_id:
+              userId,
+
+            shop_id:
+              shopId,
+
+            product_id:
+              productId,
+
+            video_id:
+              videoId,
+
+            stage:
+              stage || "unknown",
+
+            error:
+              errorMessage || null,
+          },
+        }
+      );
+
+    if (refundError) {
+      console.error(
+        "VIDEO POINTS REFUND ERROR:",
+        refundError
+      );
+
+      return {
+        success: false,
+        refunded: false,
+        error:
+          refundError.message,
+      };
+    }
+
+    return {
+      success: true,
+      ...(refundResult || {}),
+    };
+  } catch (error) {
+    console.error(
+      "VIDEO REFUND UNEXPECTED ERROR:",
+      error
+    );
+
+    return {
+      success: false,
+      refunded: false,
+      error:
+        error?.message ||
+        "تعذر استرجاع النقاط.",
+    };
+  }
+}
+
+// =========================================================
+// POST
+// =========================================================
+
 export async function POST(request) {
   let videoId = null;
   let userId = null;
   let shopId = null;
   let productId = null;
 
+  let supabaseAuth = null;
+
+  let pointsTransactionId = null;
+  let pointsCharged = 0;
+  let pointsBalanceAfter = null;
+
   try {
-    // -----------------------------------------
-    // التحقق من جلسة المستخدم
-    // -----------------------------------------
+    // =====================================================
+    // 1. جلسة المستخدم
+    // =====================================================
 
     const cookieStore =
       await cookies();
 
-    const supabaseAuth =
+    supabaseAuth =
       createServerClient(
         process.env
           .NEXT_PUBLIC_SUPABASE_URL,
@@ -169,9 +275,9 @@ export async function POST(request) {
 
     userId = user.id;
 
-    // -----------------------------------------
-    // قراءة الطلب
-    // -----------------------------------------
+    // =====================================================
+    // 2. قراءة الطلب
+    // =====================================================
 
     const body =
       await request.json();
@@ -192,9 +298,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // جلب الفيديو
-    // -----------------------------------------
+    // =====================================================
+    // 3. جلب الفيديو
+    // =====================================================
 
     const {
       data: video,
@@ -242,9 +348,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // جلب المحل والتحقق من الملكية
-    // -----------------------------------------
+    // =====================================================
+    // 4. جلب المحل والتحقق من الملكية
+    // =====================================================
 
     const {
       data: shop,
@@ -273,10 +379,6 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // حماية الملكية
-    // -----------------------------------------
-
     if (
       shop.owner_id !== userId
     ) {
@@ -292,9 +394,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // إذا الفيديو قيد المعالجة
-    // -----------------------------------------
+    // =====================================================
+    // 5. إذا الفيديو قيد المعالجة
+    // =====================================================
 
     if (
       video.status ===
@@ -317,9 +419,9 @@ export async function POST(request) {
       });
     }
 
-    // -----------------------------------------
-    // التحقق من مدة الفيديو
-    // -----------------------------------------
+    // =====================================================
+    // 6. مدة الفيديو
+    // =====================================================
 
     const duration =
       Number(
@@ -351,9 +453,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // جلب المنتج
-    // -----------------------------------------
+    // =====================================================
+    // 7. جلب المنتج
+    // =====================================================
 
     const {
       data: product,
@@ -384,9 +486,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // حماية المنتج
-    // -----------------------------------------
+    // =====================================================
+    // 8. حماية المنتج
+    // =====================================================
 
     if (
       product.safety_status ===
@@ -424,9 +526,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // جلب التصميم إذا تم اختياره
-    // -----------------------------------------
+    // =====================================================
+    // 9. جلب التصميم
+    // =====================================================
 
     let design = null;
 
@@ -456,9 +558,9 @@ export async function POST(request) {
         designData || null;
     }
 
-    // -----------------------------------------
-    // بناء بيانات الفيديو
-    // -----------------------------------------
+    // =====================================================
+    // 10. بيانات الفيديو
+    // =====================================================
 
     const structuredPrompt = {
       product: {
@@ -485,10 +587,12 @@ export async function POST(request) {
         name: shop.name,
         logo_url:
           shop.logo_url,
-        phone: shop.phone,
+        phone:
+          shop.phone,
         whatsapp:
           shop.whatsapp,
-        email: shop.email,
+        email:
+          shop.email,
         instagram:
           shop.instagram,
         tiktok:
@@ -510,15 +614,21 @@ export async function POST(request) {
         : null,
 
       settings: {
-        mode: video.mode,
+        mode:
+          video.mode,
+
         video_type:
           video.video_type,
+
         format:
           video.format,
+
         duration_seconds:
           duration,
+
         style:
           video.style,
+
         background:
           video.background,
       },
@@ -527,11 +637,11 @@ export async function POST(request) {
         video.prompt || null,
     };
 
-    // -----------------------------------------
-    // التأكد أن محرك الفيديو مفعّل
+    // =====================================================
+    // 11. التأكد من تفعيل محرك الفيديو
     //
-    // لا نخصم نقاط إذا كان المحرك متوقفاً.
-    // -----------------------------------------
+    // لا نخصم نقاط إذا المحرك غير مفعّل.
+    // =====================================================
 
     const videoGenerationEnabled =
       String(
@@ -570,9 +680,9 @@ export async function POST(request) {
       });
     }
 
-    // -----------------------------------------
-    // حساب تكلفة Runway
-    // -----------------------------------------
+    // =====================================================
+    // 12. حساب تكلفة Runway
+    // =====================================================
 
     const runwayCredits =
       calculateRunwayCredits(
@@ -584,16 +694,22 @@ export async function POST(request) {
         runwayCredits
       );
 
-    // -----------------------------------------
-    // خصم النقاط من جلسة المستخدم
+    // =====================================================
+    // 13. إنشاء مرجع مستقل للعملية
     //
-    // مهم جداً:
-    // هنا نستخدم supabaseAuth
-    // وليس Service Role.
+    // مهم:
+    // لا نستخدم video.id كـ reference_id.
     //
-    // لذلك auth.uid() داخل RPC
-    // سيكون المستخدم الحقيقي.
-    // -----------------------------------------
+    // حتى إذا فشلت المحاولة وتم استرجاع النقاط،
+    // يستطيع المستخدم إعادة المحاولة لنفس الفيديو.
+    // =====================================================
+
+    const operationReferenceId =
+      crypto.randomUUID();
+
+    // =====================================================
+    // 14. خصم النقاط
+    // =====================================================
 
     const {
       data: pointsResult,
@@ -612,10 +728,10 @@ export async function POST(request) {
             shopId,
 
           p_reference_type:
-            "ad_video",
+            "video_generation",
 
           p_reference_id:
-            video.id,
+            operationReferenceId,
 
           p_description:
             `إنشاء فيديو إعلاني لمدة ${duration} ثواني للمنتج: ${
@@ -630,6 +746,12 @@ export async function POST(request) {
             operation:
               pointOperation.operation_key,
 
+            video_id:
+              video.id,
+
+            product_id:
+              product.id,
+
             duration_seconds:
               duration,
 
@@ -641,6 +763,9 @@ export async function POST(request) {
 
             runway_estimated_cost_usd:
               runwayEstimatedCost,
+
+            operation_reference_id:
+              operationReferenceId,
           },
         }
       );
@@ -661,6 +786,9 @@ export async function POST(request) {
         ) ||
         pointsMessage.includes(
           "رصيد النقاط"
+        ) ||
+        pointsMessage.includes(
+          "تحتاج"
         );
 
       return NextResponse.json(
@@ -716,53 +844,195 @@ export async function POST(request) {
       );
     }
 
-    const pointsCharged =
+    pointsTransactionId =
+      pointsResult.transaction_id ||
+      null;
+
+    pointsCharged =
       Number(
         pointsResult.points_charged ||
           pointOperation.points
       );
 
-    const pointsBalanceAfter =
+    pointsBalanceAfter =
       Number(
         pointsResult.balance_after ??
           0
       );
 
-    // -----------------------------------------
-    // إرسال الطلب إلى Runway
-    // -----------------------------------------
+    // =====================================================
+    // 15. إرسال الطلب إلى Runway
+    // =====================================================
 
-    const engineResult =
-      await generateVideo({
-        product,
+    let engineResult;
 
-        shop,
+    try {
+      engineResult =
+        await generateVideo({
+          product,
 
-        video: {
-          ...video,
+          shop,
 
-          prompt:
-            JSON.stringify(
-              structuredPrompt
-            ),
+          video: {
+            ...video,
+
+            prompt:
+              JSON.stringify(
+                structuredPrompt
+              ),
+          },
+        });
+    } catch (engineError) {
+      console.error(
+        "RUNWAY GENERATION ERROR:",
+        engineError
+      );
+
+      const errorMessage =
+        engineError?.message ||
+        "فشل إرسال الفيديو إلى محرك Runway.";
+
+      const refundResult =
+        await refundVideoPoints({
+          supabaseAuth,
+
+          transactionId:
+            pointsTransactionId,
+
+          userId,
+
+          shopId,
+
+          productId,
+
+          videoId,
+
+          reason:
+            "استرجاع نقاط بسبب فشل إرسال الفيديو إلى محرك Runway.",
+
+          stage:
+            "runway_request",
+
+          errorMessage,
+        });
+
+      await supabaseAdmin
+        .from("ad_videos")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            errorMessage,
+
+          error_code:
+            "RUNWAY_REQUEST_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          video.id
+        );
+
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            errorMessage,
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
         },
-      });
+        {
+          status: 500,
+        }
+      );
+    }
 
-    // -----------------------------------------
-    // حماية إضافية
-    // -----------------------------------------
+    // =====================================================
+    // 16. التأكد من وجود taskId
+    // =====================================================
 
     if (
       !engineResult?.taskId
     ) {
-      throw new Error(
-        "محرك الفيديو لم يرجع رقم المهمة."
+      const errorMessage =
+        "محرك الفيديو لم يرجع رقم المهمة.";
+
+      const refundResult =
+        await refundVideoPoints({
+          supabaseAuth,
+
+          transactionId:
+            pointsTransactionId,
+
+          userId,
+
+          shopId,
+
+          productId,
+
+          videoId,
+
+          reason:
+            "استرجاع نقاط بسبب عدم الحصول على رقم مهمة Runway.",
+
+          stage:
+            "validate_runway_response",
+
+          errorMessage,
+        });
+
+      await supabaseAdmin
+        .from("ad_videos")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            errorMessage,
+
+          error_code:
+            "RUNWAY_TASK_ID_MISSING",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          video.id
+        );
+
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            errorMessage,
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
       );
     }
 
-    // -----------------------------------------
-    // حفظ حالة المعالجة
-    // -----------------------------------------
+    // =====================================================
+    // 17. حفظ حالة المعالجة
+    // =====================================================
 
     const {
       data: processingVideo,
@@ -789,9 +1059,11 @@ export async function POST(request) {
           generation_started_at:
             new Date().toISOString(),
 
-          error_message: null,
+          error_message:
+            null,
 
-          error_code: null,
+          error_code:
+            null,
 
           updated_at:
             new Date().toISOString(),
@@ -803,13 +1075,87 @@ export async function POST(request) {
         .select()
         .single();
 
+    // =====================================================
+    // إذا فشل حفظ حالة المهمة
+    // =====================================================
+
     if (processingError) {
-      throw processingError;
+      console.error(
+        "VIDEO PROCESSING UPDATE ERROR:",
+        processingError
+      );
+
+      const errorMessage =
+        processingError.message ||
+        "تعذر حفظ حالة الفيديو.";
+
+      const refundResult =
+        await refundVideoPoints({
+          supabaseAuth,
+
+          transactionId:
+            pointsTransactionId,
+
+          userId,
+
+          shopId,
+
+          productId,
+
+          videoId,
+
+          reason:
+            "استرجاع نقاط بسبب فشل حفظ حالة الفيديو.",
+
+          stage:
+            "save_processing_status",
+
+          errorMessage,
+        });
+
+      await supabaseAdmin
+        .from("ad_videos")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            errorMessage,
+
+          error_code:
+            "PROCESSING_STATUS_SAVE_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          video.id
+        );
+
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            "تعذر حفظ حالة الفيديو.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
     }
 
-    // -----------------------------------------
-    // تسجيل استخدام Runway
-    // -----------------------------------------
+    // =====================================================
+    // 18. تسجيل استخدام Runway
+    // =====================================================
 
     try {
       const {
@@ -841,11 +1187,14 @@ export async function POST(request) {
             status:
               "processing",
 
-            input_tokens: 0,
+            input_tokens:
+              0,
 
-            output_tokens: 0,
+            output_tokens:
+              0,
 
-            total_tokens: 0,
+            total_tokens:
+              0,
 
             credits_used:
               runwayCredits,
@@ -904,6 +1253,12 @@ export async function POST(request) {
               points_balance_after:
                 pointsBalanceAfter,
 
+              points_transaction_id:
+                pointsTransactionId,
+
+              operation_reference_id:
+                operationReferenceId,
+
               note:
                 "Runway usage recorded at task creation. Final status/cost will be updated after task completion.",
             },
@@ -922,9 +1277,9 @@ export async function POST(request) {
       );
     }
 
-    // -----------------------------------------
-    // الرد
-    // -----------------------------------------
+    // =====================================================
+    // 19. الرد
+    // =====================================================
 
     return NextResponse.json({
       success: true,
@@ -980,6 +1335,12 @@ export async function POST(request) {
 
         operation:
           pointOperation.operation_key,
+
+        transaction_id:
+          pointsTransactionId,
+
+        operation_reference_id:
+          operationReferenceId,
       },
     });
   } catch (error) {
@@ -988,16 +1349,54 @@ export async function POST(request) {
       error
     );
 
-    // -----------------------------------------
-    // تسجيل الخطأ
-    // -----------------------------------------
+    // =====================================================
+    // استرجاع النقاط في أي خطأ غير متوقع
+    // =====================================================
+
+    let refundResult = null;
+
+    if (
+      supabaseAuth &&
+      pointsTransactionId
+    ) {
+      refundResult =
+        await refundVideoPoints({
+          supabaseAuth,
+
+          transactionId:
+            pointsTransactionId,
+
+          userId,
+
+          shopId,
+
+          productId,
+
+          videoId,
+
+          reason:
+            "استرجاع نقاط بسبب خطأ غير متوقع أثناء إنشاء الفيديو.",
+
+          stage:
+            "unexpected_error",
+
+          errorMessage:
+            error?.message ||
+            "Unexpected video generation error",
+        });
+    }
+
+    // =====================================================
+    // تسجيل حالة الفشل
+    // =====================================================
 
     if (videoId) {
       try {
         await supabaseAdmin
           .from("ad_videos")
           .update({
-            status: "failed",
+            status:
+              "failed",
 
             error_message:
               error?.message ||
@@ -1028,6 +1427,13 @@ export async function POST(request) {
         error:
           error?.message ||
           "حدث خطأ أثناء إنشاء الفيديو.",
+
+        pointsRefunded:
+          !!refundResult?.refunded,
+
+        refundTransactionId:
+          refundResult?.refund_transaction_id ||
+          null,
       },
       {
         status: 500,
