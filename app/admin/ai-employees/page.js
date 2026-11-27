@@ -29,6 +29,17 @@ const EMPTY_FORM = {
   },
 };
 
+const PERMISSIONS = [
+  ["products", "المنتجات"],
+  ["marketing", "التسويق"],
+  ["design", "التصميم"],
+  ["video", "الفيديو"],
+  ["analytics", "التحليلات"],
+  ["moderation", "المراجعة"],
+  ["publishing", "النشر"],
+  ["tasks", "المهام"],
+];
+
 const LEVELS = [
   { value: "junior", label: "Junior" },
   { value: "mid", label: "Mid" },
@@ -36,59 +47,27 @@ const LEVELS = [
   { value: "expert", label: "Expert" },
 ];
 
-const STATUSES = [
-  { value: "active", label: "نشط" },
-  { value: "inactive", label: "غير نشط" },
-  { value: "suspended", label: "موقوف" },
-];
-
-const PERMISSIONS = [
-  { key: "products", label: "المنتجات", icon: "▣" },
-  { key: "marketing", label: "التسويق", icon: "✦" },
-  { key: "design", label: "التصميم", icon: "◈" },
-  { key: "video", label: "الفيديو", icon: "▶" },
-  { key: "analytics", label: "التحليلات", icon: "⌁" },
-  { key: "moderation", label: "المراجعة", icon: "✓" },
-  { key: "publishing", label: "النشر", icon: "↗" },
-  { key: "tasks", label: "المهام", icon: "☷" },
-];
-
-function formatNumber(value) {
-  return Number(value || 0).toLocaleString("en-US");
-}
-
-function formatCost(value) {
-  return Number(value || 0).toFixed(4);
-}
-
-function statusLabel(status) {
+function statusText(status) {
   if (status === "active") return "نشط";
   if (status === "inactive") return "غير نشط";
   if (status === "suspended") return "موقوف";
   return "غير محدد";
 }
 
-function getAdminName(admin, profiles) {
-  if (!admin) return "بدون Admin";
-
-  const profile = profiles.find(
-    (item) => item.id === admin.user_id
-  );
-
-  return (
-    admin.full_name ||
-    profile?.full_name ||
-    profile?.email ||
-    "Admin"
-  );
-}
-
-function levelLabel(level) {
+function levelText(level) {
   return (
     LEVELS.find((item) => item.value === level)?.label ||
     level ||
     "—"
   );
+}
+
+function money(value) {
+  return Number(value || 0).toFixed(4);
+}
+
+function number(value) {
+  return Number(value || 0).toLocaleString("en-US");
 }
 
 export default function AIEmployeesPage() {
@@ -105,14 +84,14 @@ export default function AIEmployeesPage() {
   const [selectedId, setSelectedId] = useState(null);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [filter, setFilter] = useState("all");
 
+  const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [modalOpen, setModalOpen] = useState(false);
 
   const [form, setForm] = useState(EMPTY_FORM);
 
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   async function loadData() {
@@ -159,12 +138,12 @@ export default function AIEmployeesPage() {
         supabase
           .from("departments")
           .select("*")
-          .order("name", { ascending: true }),
+          .order("name"),
 
         supabase
           .from("admins")
           .select("*")
-          .order("full_name", { ascending: true }),
+          .order("full_name"),
 
         supabase
           .from("profiles")
@@ -187,27 +166,25 @@ export default function AIEmployeesPage() {
         throw profilesResult.error;
       }
 
-      const employeeData = employeesResult.data || [];
+      const list = employeesResult.data || [];
 
-      setEmployees(employeeData);
+      setEmployees(list);
       setDepartments(departmentsResult.data || []);
       setAdmins(adminsResult.data || []);
       setProfiles(profilesResult.data || []);
 
-      if (!selectedId && employeeData.length > 0) {
-        setSelectedId(employeeData[0].id);
-      }
-
-      if (
-        selectedId &&
-        !employeeData.some((item) => item.id === selectedId)
+      if (list.length === 0) {
+        setSelectedId(null);
+      } else if (
+        !selectedId ||
+        !list.some((item) => item.id === selectedId)
       ) {
-        setSelectedId(employeeData[0]?.id || null);
+        setSelectedId(list[0].id);
       }
     } catch (err) {
       console.error(err);
       setError(
-        err.message || "حدث خطأ أثناء تحميل موظفي AI"
+        err.message || "تعذر تحميل موظفي الذكاء الاصطناعي"
       );
     } finally {
       setLoading(false);
@@ -222,86 +199,97 @@ export default function AIEmployeesPage() {
     return {
       total: employees.length,
       active: employees.filter(
-        (x) => x.status === "active"
+        (item) => item.status === "active"
       ).length,
       inactive: employees.filter(
-        (x) => x.status === "inactive"
+        (item) => item.status === "inactive"
       ).length,
       suspended: employees.filter(
-        (x) => x.status === "suspended"
+        (item) => item.status === "suspended"
       ).length,
       tasks: employees.reduce(
-        (sum, x) => sum + Number(x.tasks_completed || 0),
+        (sum, item) =>
+          sum + Number(item.tasks_completed || 0),
         0
       ),
       cost: employees.reduce(
-        (sum, x) => sum + Number(x.total_cost || 0),
+        (sum, item) =>
+          sum + Number(item.total_cost || 0),
         0
       ),
     };
   }, [employees]);
 
   const filteredEmployees = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const q = search.trim().toLowerCase();
 
     return employees.filter((employee) => {
       const department = departments.find(
         (item) => item.id === employee.department_id
       );
 
-      const admin = admins.find(
-        (item) => item.id === employee.admin_id
-      );
-
-      const adminName = getAdminName(admin, profiles);
-
       const matchesSearch =
-        !query ||
-        employee.name?.toLowerCase().includes(query) ||
+        !q ||
+        employee.name?.toLowerCase().includes(q) ||
         employee.specialization
           ?.toLowerCase()
-          .includes(query) ||
-        department?.name
-          ?.toLowerCase()
-          .includes(query) ||
-        adminName?.toLowerCase().includes(query);
+          .includes(q) ||
+        department?.name?.toLowerCase().includes(q);
 
-      const matchesStatus =
-        statusFilter === "all" ||
-        employee.status === statusFilter;
+      const matchesFilter =
+        filter === "all" ||
+        employee.status === filter;
 
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesFilter;
     });
   }, [
     employees,
     departments,
-    admins,
-    profiles,
     search,
-    statusFilter,
+    filter,
   ]);
 
-  const selectedEmployee = useMemo(() => {
+  const selectedEmployee = employees.find(
+    (item) => item.id === selectedId
+  );
+
+  function departmentName(id) {
     return (
-      employees.find(
-        (employee) => employee.id === selectedId
-      ) || null
+      departments.find(
+        (item) => item.id === id
+      )?.name || "بدون قسم"
     );
-  }, [employees, selectedId]);
+  }
+
+  function adminName(id) {
+    const admin = admins.find(
+      (item) => item.id === id
+    );
+
+    if (!admin) return "بدون Admin";
+
+    const profile = profiles.find(
+      (item) => item.id === admin.user_id
+    );
+
+    return (
+      admin.full_name ||
+      profile?.full_name ||
+      "Admin"
+    );
+  }
 
   function openCreate() {
     setEditingId(null);
-
     setForm({
       ...EMPTY_FORM,
       permissions: {
         ...EMPTY_FORM.permissions,
       },
     });
-
     setError("");
-    setMessage("");
-    setModalOpen(true);
+    setNotice("");
+    setEditorOpen(true);
   }
 
   function openEdit(employee) {
@@ -326,19 +314,11 @@ export default function AIEmployeesPage() {
     });
 
     setError("");
-    setMessage("");
-    setModalOpen(true);
+    setNotice("");
+    setEditorOpen(true);
   }
 
-  function closeModal() {
-    if (saving) return;
-
-    setModalOpen(false);
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-  }
-
-  function updateField(field, value) {
+  function updateForm(field, value) {
     setForm((current) => ({
       ...current,
       [field]: value,
@@ -358,15 +338,14 @@ export default function AIEmployeesPage() {
   async function saveEmployee(event) {
     event.preventDefault();
 
-    setError("");
-    setMessage("");
-
     if (!form.name.trim()) {
-      setError("اسم موظف AI مطلوب");
+      setError("اكتب اسم موظف AI أولاً");
       return;
     }
 
     setSaving(true);
+    setError("");
+    setNotice("");
 
     try {
       const payload = {
@@ -402,7 +381,7 @@ export default function AIEmployeesPage() {
 
         if (updateError) throw updateError;
 
-        setMessage("تم تحديث الموظف بنجاح");
+        setNotice("تم تحديث موظف AI");
       } else {
         const { data, error: insertError } =
           await supabase
@@ -420,19 +399,14 @@ export default function AIEmployeesPage() {
           setSelectedId(data.id);
         }
 
-        setMessage("تم إنشاء موظف AI بنجاح");
+        setNotice("تم إنشاء موظف AI");
       }
 
-      setModalOpen(false);
-      setEditingId(null);
-      setForm(EMPTY_FORM);
-
+      setEditorOpen(false);
       await loadData();
     } catch (err) {
       console.error(err);
-      setError(
-        err.message || "تعذر حفظ موظف AI"
-      );
+      setError(err.message || "تعذر حفظ الموظف");
     } finally {
       setSaving(false);
     }
@@ -441,7 +415,7 @@ export default function AIEmployeesPage() {
   async function toggleStatus(employee) {
     setError("");
 
-    const nextStatus =
+    const next =
       employee.status === "active"
         ? "inactive"
         : "active";
@@ -451,164 +425,159 @@ export default function AIEmployeesPage() {
         await supabase
           .from("ai_employees")
           .update({
-            status: nextStatus,
+            status: next,
             updated_at: new Date().toISOString(),
           })
           .eq("id", employee.id);
 
       if (updateError) throw updateError;
 
+      setNotice(
+        next === "active"
+          ? "تم تفعيل الموظف"
+          : "تم إيقاف الموظف"
+      );
+
       await loadData();
     } catch (err) {
       console.error(err);
       setError(
-        err.message ||
-          "تعذر تغيير حالة الموظف"
+        err.message || "تعذر تغيير حالة الموظف"
       );
     }
   }
 
-  function departmentName(id) {
-    return (
-      departments.find(
-        (item) => item.id === id
-      )?.name || "بدون قسم"
-    );
-  }
-
-  function adminName(id) {
-    const admin = admins.find(
-      (item) => item.id === id
-    );
-
-    return getAdminName(admin, profiles);
-  }
-
   if (loading) {
     return (
-      <main
-        dir="rtl"
-        className="min-h-screen bg-[#f7f8f8]"
-      >
-        <div className="flex min-h-screen items-center justify-center">
-          <div className="text-center">
-            <div className="mx-auto mb-4 h-9 w-9 animate-spin rounded-full border-[3px] border-emerald-100 border-t-emerald-600" />
-            <p className="text-sm text-gray-500">
-              جاري تحميل إدارة موظفي AI...
-            </p>
-          </div>
+      <main className="ai-page" dir="rtl">
+        <div className="loading-box">
+          <div className="loading-spinner" />
+          <div>جاري تحميل موظفي AI...</div>
         </div>
+
+        <Styles />
       </main>
     );
   }
 
   return (
-    <main
-      dir="rtl"
-      className="min-h-screen bg-[#f7f8f8]"
-    >
-      <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
+    <main className="ai-page" dir="rtl">
+      <Styles />
 
-        {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="ai-shell">
+
+        {/* HEADER */}
+        <header className="page-header">
           <div>
-            <div className="mb-2 text-xs text-gray-400">
-              الإدارة الداخلية / موظفو AI
+            <div className="breadcrumb">
+              الإدارة الداخلية
+              <span>/</span>
+              موظفو AI
             </div>
 
-            <h1 className="text-2xl font-bold text-gray-950">
-              فريق الذكاء الاصطناعي
-            </h1>
+            <div className="title-row">
+              <div className="title-mark">
+                AI
+              </div>
 
-            <p className="mt-1 text-sm text-gray-500">
-              أنشئ موظفي AI واربطهم بالأقسام والـ Admins
-              وأدر صلاحياتهم وأدائهم.
-            </p>
+              <div>
+                <h1>موظفو الذكاء الاصطناعي</h1>
+
+                <p>
+                  إدارة موظفي AI وربطهم بالأقسام
+                  والـ Admins والصلاحيات.
+                </p>
+              </div>
+            </div>
           </div>
 
           <button
+            className="primary-button"
             onClick={openCreate}
-            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
           >
-            <span className="text-lg">+</span>
+            <span>＋</span>
             موظف AI جديد
           </button>
-        </div>
+        </header>
 
-        {/* Messages */}
-        {message && (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {message}
+        {/* NOTICES */}
+        {notice && (
+          <div className="notice success">
+            <span>✓</span>
+            {notice}
           </div>
         )}
 
         {error && (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="notice danger">
+            <span>!</span>
             {error}
           </div>
         )}
 
-        {/* Overview */}
-        <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Overview
-            title="الموظفون"
+        {/* STATS */}
+        <section className="stats-grid">
+          <Stat
+            label="إجمالي الموظفين"
             value={stats.total}
+            main
           />
 
-          <Overview
-            title="نشط"
+          <Stat
+            label="نشط"
             value={stats.active}
             green
           />
 
-          <Overview
-            title="غير نشط"
+          <Stat
+            label="غير نشط"
             value={stats.inactive}
           />
 
-          <Overview
-            title="موقوف"
+          <Stat
+            label="موقوف"
             value={stats.suspended}
           />
 
-          <Overview
-            title="المهام"
-            value={formatNumber(stats.tasks)}
+          <Stat
+            label="المهام المكتملة"
+            value={number(stats.tasks)}
           />
 
-          <Overview
-            title="التكلفة"
-            value={`${formatCost(stats.cost)} $`}
+          <Stat
+            label="التكلفة"
+            value={`${money(stats.cost)} $`}
           />
         </section>
 
-        {/* Workspace */}
-        <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.035)]">
+        {/* MAIN WORKSPACE */}
+        <section className="workspace">
 
-          {/* Toolbar */}
-          <div className="border-b border-gray-100 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <div className="relative flex-1">
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                  ⌕
-                </span>
+          {/* TOOLBAR */}
+          <div className="toolbar">
+            <div className="toolbar-title">
+              <strong>فريق AI</strong>
+              <span>{filteredEmployees.length}</span>
+            </div>
+
+            <div className="toolbar-actions">
+              <div className="search">
+                <span>⌕</span>
 
                 <input
                   value={search}
                   onChange={(e) =>
                     setSearch(e.target.value)
                   }
-                  placeholder="بحث عن موظف..."
-                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pr-10 pl-4 text-sm outline-none focus:border-emerald-400 focus:bg-white"
+                  placeholder="ابحث عن موظف..."
                 />
               </div>
 
               <select
-                value={statusFilter}
+                value={filter}
                 onChange={(e) =>
-                  setStatusFilter(e.target.value)
+                  setFilter(e.target.value)
                 }
-                className="h-11 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-emerald-400"
               >
                 <option value="all">
                   كل الحالات
@@ -630,136 +599,348 @@ export default function AIEmployeesPage() {
           </div>
 
           {filteredEmployees.length === 0 ? (
-            <EmptyState
-              hasEmployees={employees.length > 0}
+            <Empty
+              hasEmployees={
+                employees.length > 0
+              }
               onCreate={openCreate}
             />
           ) : (
-            <div className="grid min-h-[620px] lg:grid-cols-[310px_1fr]">
+            <div className="employee-layout">
 
-              {/* Employee list */}
-              <aside className="border-b border-gray-100 bg-[#fbfcfc] lg:border-l lg:border-b-0">
-                <div className="border-b border-gray-100 px-5 py-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-gray-500">
-                      الموظفون
-                    </span>
-
-                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold text-gray-500">
-                      {filteredEmployees.length}
-                    </span>
-                  </div>
+              {/* EMPLOYEE LIST */}
+              <aside className="employee-list">
+                <div className="list-heading">
+                  <span>الموظفون</span>
+                  <b>
+                    {filteredEmployees.length}
+                  </b>
                 </div>
 
-                <div className="max-h-[650px] overflow-y-auto p-2">
-                  {filteredEmployees.map(
-                    (employee) => {
-                      const active =
-                        employee.id === selectedId;
+                {filteredEmployees.map(
+                  (employee) => {
+                    const active =
+                      employee.id === selectedId;
 
-                      return (
-                        <button
-                          key={employee.id}
-                          onClick={() =>
-                            setSelectedId(
-                              employee.id
-                            )
-                          }
-                          className={`mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-right transition ${
-                            active
-                              ? "bg-emerald-50"
-                              : "hover:bg-gray-100"
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <div
-                              className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl ${
-                                active
-                                  ? "bg-white"
-                                  : "bg-gray-100"
-                              }`}
-                            >
-                              {employee.avatar_url ? (
-                                <img
-                                  src={
-                                    employee.avatar_url
-                                  }
-                                  alt={
-                                    employee.name
-                                  }
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <span className="text-xl">
-                                  🤖
-                                </span>
-                              )}
-                            </div>
-
-                            <span
-                              className={`absolute -bottom-0.5 -left-0.5 h-3 w-3 rounded-full border-2 border-white ${
-                                employee.status ===
-                                "active"
-                                  ? "bg-emerald-500"
-                                  : employee.status ===
-                                    "suspended"
-                                  ? "bg-red-500"
-                                  : "bg-gray-300"
-                              }`}
+                    return (
+                      <button
+                        key={employee.id}
+                        className={`employee-item ${
+                          active ? "selected" : ""
+                        }`}
+                        onClick={() =>
+                          setSelectedId(
+                            employee.id
+                          )
+                        }
+                      >
+                        <div className="avatar">
+                          {employee.avatar_url ? (
+                            <img
+                              src={
+                                employee.avatar_url
+                              }
+                              alt=""
                             />
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div
-                              className={`truncate text-sm font-bold ${
-                                active
-                                  ? "text-emerald-800"
-                                  : "text-gray-800"
-                              }`}
-                            >
-                              {employee.name}
-                            </div>
-
-                            <div className="mt-0.5 truncate text-[11px] text-gray-400">
-                              {employee.specialization ||
-                                "موظف AI"}
-                            </div>
-                          </div>
-
-                          {active && (
-                            <span className="text-emerald-600">
-                              ←
-                            </span>
+                          ) : (
+                            <span>AI</span>
                           )}
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
+
+                          <i
+                            className={
+                              employee.status ===
+                              "active"
+                                ? "online"
+                                : ""
+                            }
+                          />
+                        </div>
+
+                        <div className="employee-summary">
+                          <strong>
+                            {employee.name}
+                          </strong>
+
+                          <small>
+                            {employee.specialization ||
+                              "موظف AI"}
+                          </small>
+
+                          <em>
+                            {departmentName(
+                              employee.department_id
+                            )}
+                          </em>
+                        </div>
+
+                        {active && (
+                          <div className="selected-line" />
+                        )}
+                      </button>
+                    );
+                  }
+                )}
               </aside>
 
-              {/* Employee profile */}
-              <div className="bg-white">
-                {selectedEmployee ? (
-                  <EmployeeProfile
-                    employee={
-                      selectedEmployee
-                    }
-                    departmentName={
-                      departmentName
-                    }
-                    adminName={adminName}
-                    openEdit={openEdit}
-                    toggleStatus={
-                      toggleStatus
-                    }
-                  />
-                ) : (
-                  <div className="flex h-full min-h-[600px] items-center justify-center">
-                    <p className="text-sm text-gray-400">
-                      اختر موظفاً لعرض ملفه
-                    </p>
-                  </div>
+              {/* PROFILE */}
+              <div className="profile">
+
+                {selectedEmployee && (
+                  <>
+                    <div className="profile-header">
+                      <div className="profile-identity">
+                        <div className="big-avatar">
+                          {selectedEmployee.avatar_url ? (
+                            <img
+                              src={
+                                selectedEmployee.avatar_url
+                              }
+                              alt=""
+                            />
+                          ) : (
+                            <span>AI</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <div className="profile-name">
+                            <h2>
+                              {selectedEmployee.name}
+                            </h2>
+
+                            <span
+                              className={`status ${
+                                selectedEmployee.status
+                              }`}
+                            >
+                              <i />
+                              {statusText(
+                                selectedEmployee.status
+                              )}
+                            </span>
+                          </div>
+
+                          <p>
+                            {selectedEmployee.specialization ||
+                              "موظف ذكاء اصطناعي"}
+                          </p>
+
+                          <div className="meta">
+                            <span>
+                              {departmentName(
+                                selectedEmployee.department_id
+                              )}
+                            </span>
+
+                            <span>•</span>
+
+                            <span>
+                              {levelText(
+                                selectedEmployee.level
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="profile-actions">
+                        <button
+                          className="secondary-button"
+                          onClick={() =>
+                            openEdit(
+                              selectedEmployee
+                            )
+                          }
+                        >
+                          تعديل الموظف
+                        </button>
+
+                        <button
+                          className="dark-button"
+                          onClick={() =>
+                            toggleStatus(
+                              selectedEmployee
+                            )
+                          }
+                        >
+                          {selectedEmployee.status ===
+                          "active"
+                            ? "إيقاف الموظف"
+                            : "تفعيل الموظف"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* PERFORMANCE */}
+                    <div className="performance">
+                      <Metric
+                        label="المهام المكتملة"
+                        value={number(
+                          selectedEmployee.tasks_completed
+                        )}
+                      />
+
+                      <Metric
+                        label="نسبة النجاح"
+                        value={`${Number(
+                          selectedEmployee.success_rate ||
+                            0
+                        ).toFixed(1)}%`}
+                      />
+
+                      <Metric
+                        label="التقييم"
+                        value={`${Number(
+                          selectedEmployee.average_rating ||
+                            0
+                        ).toFixed(1)} / 5`}
+                      />
+
+                      <Metric
+                        label="التكلفة"
+                        value={`${money(
+                          selectedEmployee.total_cost
+                        )} $`}
+                      />
+                    </div>
+
+                    {/* INFO GRID */}
+                    <div className="content-grid">
+
+                      <InfoBox title="الهيكل الإداري">
+                        <InfoRow
+                          label="القسم"
+                          value={departmentName(
+                            selectedEmployee.department_id
+                          )}
+                        />
+
+                        <InfoRow
+                          label="Admin المسؤول"
+                          value={adminName(
+                            selectedEmployee.admin_id
+                          )}
+                        />
+
+                        <InfoRow
+                          label="المستوى"
+                          value={levelText(
+                            selectedEmployee.level
+                          )}
+                        />
+
+                        <InfoRow
+                          label="الحالة"
+                          value={statusText(
+                            selectedEmployee.status
+                          )}
+                        />
+                      </InfoBox>
+
+                      <InfoBox title="الشخصية والأسلوب">
+                        <InfoRow
+                          label="الشخصية"
+                          value={
+                            selectedEmployee.personality ||
+                            "غير محددة"
+                          }
+                        />
+
+                        <InfoRow
+                          label="الأسلوب"
+                          value={
+                            selectedEmployee.tone ||
+                            "غير محدد"
+                          }
+                        />
+                      </InfoBox>
+
+                      <InfoBox
+                        title="الصلاحيات"
+                        wide
+                      >
+                        <div className="permissions">
+                          {PERMISSIONS.map(
+                            ([key, label]) => {
+                              const enabled =
+                                !!(
+                                  selectedEmployee
+                                    .permissions || {}
+                                )[key];
+
+                              return (
+                                <div
+                                  key={key}
+                                  className={`permission ${
+                                    enabled
+                                      ? "enabled"
+                                      : ""
+                                  }`}
+                                >
+                                  <span>
+                                    {enabled
+                                      ? "✓"
+                                      : "—"}
+                                  </span>
+
+                                  {label}
+                                </div>
+                              );
+                            }
+                          )}
+                        </div>
+                      </InfoBox>
+
+                      <InfoBox
+                        title="وصف الموظف"
+                        wide
+                      >
+                        <p className="description">
+                          {selectedEmployee.description ||
+                            "لم تتم إضافة وصف لهذا الموظف."}
+                        </p>
+                      </InfoBox>
+
+                      <InfoBox
+                        title="تعليمات التشغيل"
+                        wide
+                      >
+                        <p className="description">
+                          {selectedEmployee.instructions ||
+                            "لم تتم إضافة تعليمات تشغيل لهذا الموظف."}
+                        </p>
+                      </InfoBox>
+
+                      <InfoBox
+                        title="الأداء التشغيلي"
+                        wide
+                      >
+                        <div className="operation-grid">
+                          <Operation
+                            label="المهام المكتملة"
+                            value={number(
+                              selectedEmployee.tasks_completed
+                            )}
+                          />
+
+                          <Operation
+                            label="المهام الفاشلة"
+                            value={number(
+                              selectedEmployee.tasks_failed
+                            )}
+                          />
+
+                          <Operation
+                            label="متوسط السرعة"
+                            value={`${Number(
+                              selectedEmployee.average_speed_seconds ||
+                                0
+                            ).toFixed(0)} ثانية`}
+                          />
+                        </div>
+                      </InfoBox>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -767,373 +948,176 @@ export default function AIEmployeesPage() {
         </section>
       </div>
 
-      {/* Modal */}
-      {modalOpen && (
-        <EmployeeModal
-          editingId={editingId}
+      {/* EDITOR */}
+      {editorOpen && (
+        <Editor
           form={form}
+          editingId={editingId}
           saving={saving}
           departments={departments}
           admins={admins}
           profiles={profiles}
-          employees={employees}
-          updateField={updateField}
+          updateForm={updateForm}
           togglePermission={
             togglePermission
           }
-          closeModal={closeModal}
-          saveEmployee={saveEmployee}
+          onClose={() =>
+            setEditorOpen(false)
+          }
+          onSave={saveEmployee}
         />
       )}
     </main>
   );
 }
 
-function EmployeeProfile({
-  employee,
-  departmentName,
-  adminName,
-  openEdit,
-  toggleStatus,
+function Stat({
+  label,
+  value,
+  green,
+  main,
 }) {
-  const permissions =
-    employee.permissions || {};
-
-  const enabledPermissions =
-    PERMISSIONS.filter(
-      (item) => permissions[item.key]
-    );
-
   return (
-    <div>
-      {/* Profile header */}
-      <div className="border-b border-gray-100 px-5 py-6 sm:px-8">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-gray-50 text-4xl">
-                {employee.avatar_url ? (
-                  <img
-                    src={employee.avatar_url}
-                    alt={employee.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  "🤖"
-                )}
-              </div>
+    <div
+      className={`stat ${
+        main ? "main" : ""
+      }`}
+    >
+      <span>{label}</span>
 
-              <span
-                className={`absolute -bottom-1 -left-1 h-5 w-5 rounded-full border-[3px] border-white ${
-                  employee.status === "active"
-                    ? "bg-emerald-500"
-                    : employee.status ===
-                      "suspended"
-                    ? "bg-red-500"
-                    : "bg-gray-300"
-                }`}
-              />
-            </div>
-
-            <div>
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <h2 className="text-2xl font-bold text-gray-950">
-                  {employee.name}
-                </h2>
-
-                <span
-                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                    employee.status ===
-                    "active"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : employee.status ===
-                        "suspended"
-                      ? "bg-red-50 text-red-700"
-                      : "bg-gray-100 text-gray-500"
-                  }`}
-                >
-                  {statusLabel(
-                    employee.status
-                  )}
-                </span>
-              </div>
-
-              <p className="text-sm text-gray-500">
-                {employee.specialization ||
-                  "موظف ذكاء اصطناعي"}
-              </p>
-
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-400">
-                <span>
-                  {departmentName(
-                    employee.department_id
-                  )}
-                </span>
-
-                <span>•</span>
-
-                <span>
-                  {levelLabel(
-                    employee.level
-                  )}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() =>
-                openEdit(employee)
-              }
-              className="rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50"
-            >
-              تعديل
-            </button>
-
-            <button
-              onClick={() =>
-                toggleStatus(employee)
-              }
-              className="rounded-xl bg-gray-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-gray-800"
-            >
-              {employee.status === "active"
-                ? "إيقاف"
-                : "تفعيل"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick stats */}
-      <div className="grid grid-cols-2 border-b border-gray-100 sm:grid-cols-4">
-        <ProfileStat
-          label="المهام المكتملة"
-          value={formatNumber(
-            employee.tasks_completed
-          )}
-        />
-
-        <ProfileStat
-          label="نسبة النجاح"
-          value={`${Number(
-            employee.success_rate || 0
-          ).toFixed(1)}%`}
-        />
-
-        <ProfileStat
-          label="التقييم"
-          value={`${Number(
-            employee.average_rating || 0
-          ).toFixed(1)} / 5`}
-        />
-
-        <ProfileStat
-          label="التكلفة"
-          value={`${formatCost(
-            employee.total_cost
-          )} $`}
-        />
-      </div>
-
-      {/* Details */}
-      <div className="grid gap-6 p-5 sm:p-8 xl:grid-cols-2">
-
-        <ProfileSection
-          title="الهيكل الإداري"
-          icon="⌂"
-        >
-          <Detail
-            label="القسم"
-            value={departmentName(
-              employee.department_id
-            )}
-          />
-
-          <Detail
-            label="Admin المسؤول"
-            value={adminName(
-              employee.admin_id
-            )}
-          />
-
-          <Detail
-            label="المستوى"
-            value={levelLabel(
-              employee.level
-            )}
-          />
-
-          <Detail
-            label="الحالة"
-            value={statusLabel(
-              employee.status
-            )}
-          />
-        </ProfileSection>
-
-        <ProfileSection
-          title="الشخصية والأسلوب"
-          icon="✦"
-        >
-          <Detail
-            label="الشخصية"
-            value={
-              employee.personality ||
-              "لم يتم تحديدها"
-            }
-          />
-
-          <Detail
-            label="أسلوب الكلام"
-            value={
-              employee.tone ||
-              "لم يتم تحديده"
-            }
-          />
-        </ProfileSection>
-
-        <ProfileSection
-          title="الوصف"
-          icon="i"
-        >
-          <p className="text-sm leading-7 text-gray-600">
-            {employee.description ||
-              "لا يوجد وصف لهذا الموظف حتى الآن."}
-          </p>
-        </ProfileSection>
-
-        <ProfileSection
-          title="التعليمات"
-          icon="!"
-        >
-          <p className="whitespace-pre-wrap text-sm leading-7 text-gray-600">
-            {employee.instructions ||
-              "لا توجد تعليمات مخصصة حتى الآن."}
-          </p>
-        </ProfileSection>
-
-        <div className="xl:col-span-2">
-          <ProfileSection
-            title="الصلاحيات"
-            icon="✓"
-          >
-            {enabledPermissions.length > 0 ? (
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {enabledPermissions.map(
-                  (permission) => (
-                    <div
-                      key={permission.key}
-                      className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3"
-                    >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm text-emerald-600">
-                        {permission.icon}
-                      </span>
-
-                      <span className="text-xs font-bold text-emerald-800">
-                        {permission.label}
-                      </span>
-                    </div>
-                  )
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400">
-                لم يتم تحديد صلاحيات لهذا الموظف.
-              </p>
-            )}
-          </ProfileSection>
-        </div>
-
-        <div className="xl:col-span-2">
-          <ProfileSection
-            title="الأداء التشغيلي"
-            icon="⌁"
-          >
-            <div className="grid gap-3 sm:grid-cols-3">
-              <OperationMetric
-                label="المهام المكتملة"
-                value={formatNumber(
-                  employee.tasks_completed
-                )}
-              />
-
-              <OperationMetric
-                label="المهام الفاشلة"
-                value={formatNumber(
-                  employee.tasks_failed
-                )}
-              />
-
-              <OperationMetric
-                label="متوسط سرعة التنفيذ"
-                value={`${Number(
-                  employee.average_speed_seconds ||
-                    0
-                ).toFixed(0)} ثانية`}
-              />
-            </div>
-          </ProfileSection>
-        </div>
-      </div>
+      <strong
+        className={green ? "green" : ""}
+      >
+        {value}
+      </strong>
     </div>
   );
 }
 
-function EmployeeModal({
-  editingId,
+function Metric({ label, value }) {
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function InfoBox({
+  title,
+  children,
+  wide,
+}) {
+  return (
+    <div
+      className={`info-box ${
+        wide ? "wide" : ""
+      }`}
+    >
+      <h3>{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="info-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Operation({ label, value }) {
+  return (
+    <div className="operation">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Empty({
+  hasEmployees,
+  onCreate,
+}) {
+  return (
+    <div className="empty">
+      <div className="empty-icon">
+        AI
+      </div>
+
+      <h2>
+        {hasEmployees
+          ? "لا توجد نتائج"
+          : "لا يوجد موظفو AI حتى الآن"}
+      </h2>
+
+      <p>
+        {hasEmployees
+          ? "غيّر البحث أو فلتر الحالة."
+          : "أنشئ أول موظف AI داخل سوق AI."}
+      </p>
+
+      {!hasEmployees && (
+        <button
+          className="primary-button"
+          onClick={onCreate}
+        >
+          ＋ إضافة أول موظف
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Editor({
   form,
+  editingId,
   saving,
   departments,
   admins,
   profiles,
-  updateField,
+  updateForm,
   togglePermission,
-  closeModal,
-  saveEmployee,
+  onClose,
+  onSave,
 }) {
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-3 py-5 backdrop-blur-sm">
-      <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="editor-overlay">
+      <div className="editor">
 
-        <div className="border-b border-gray-100 px-5 py-5 sm:px-7">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-emerald-600">
-                AI EMPLOYEE
-              </p>
-
-              <h2 className="mt-1 text-xl font-bold">
-                {editingId
-                  ? "تعديل موظف AI"
-                  : "إضافة موظف AI"}
-              </h2>
-            </div>
-
-            <button
-              type="button"
-              onClick={closeModal}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200"
-            >
-              ×
-            </button>
+        <div className="editor-header">
+          <div>
+            <span>AI EMPLOYEE</span>
+            <h2>
+              {editingId
+                ? "تعديل موظف AI"
+                : "موظف AI جديد"}
+            </h2>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="close-button"
+          >
+            ×
+          </button>
         </div>
 
-        <form
-          onSubmit={saveEmployee}
-          className="max-h-[75vh] overflow-y-auto p-5 sm:p-7"
-        >
-          <div className="space-y-6">
+        <form onSubmit={onSave}>
+          <div className="form-content">
 
-            <ModalSection title="البيانات الأساسية">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Input
+            <FormSection title="البيانات الأساسية">
+              <div className="form-grid">
+                <Field
                   label="اسم الموظف"
                   required
                   value={form.name}
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "name",
                       value
                     )
@@ -1141,13 +1125,13 @@ function EmployeeModal({
                   placeholder="مثال: والم"
                 />
 
-                <Input
+                <Field
                   label="التخصص"
                   value={
                     form.specialization
                   }
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "specialization",
                       value
                     )
@@ -1155,25 +1139,11 @@ function EmployeeModal({
                   placeholder="مثال: مساعد إدارة وتشغيل"
                 />
 
-                <Input
-                  label="رابط الصورة"
-                  value={
-                    form.avatar_url
-                  }
-                  onChange={(value) =>
-                    updateField(
-                      "avatar_url",
-                      value
-                    )
-                  }
-                  placeholder="اختياري"
-                />
-
-                <Select
+                <SelectField
                   label="المستوى"
                   value={form.level}
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "level",
                       value
                     )
@@ -1181,29 +1151,42 @@ function EmployeeModal({
                   options={LEVELS}
                 />
 
-                <Select
+                <SelectField
                   label="الحالة"
                   value={form.status}
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "status",
                       value
                     )
                   }
-                  options={STATUSES}
+                  options={[
+                    {
+                      value: "active",
+                      label: "نشط",
+                    },
+                    {
+                      value: "inactive",
+                      label: "غير نشط",
+                    },
+                    {
+                      value: "suspended",
+                      label: "موقوف",
+                    },
+                  ]}
                 />
               </div>
-            </ModalSection>
+            </FormSection>
 
-            <ModalSection title="الهيكل الإداري">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Select
+            <FormSection title="الهيكل الإداري">
+              <div className="form-grid">
+                <SelectField
                   label="القسم"
                   value={
                     form.department_id
                   }
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "department_id",
                       value
                     )
@@ -1222,11 +1205,11 @@ function EmployeeModal({
                   ]}
                 />
 
-                <Select
+                <SelectField
                   label="Admin المسؤول"
                   value={form.admin_id}
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "admin_id",
                       value
                     )
@@ -1237,28 +1220,37 @@ function EmployeeModal({
                       label: "بدون Admin",
                     },
                     ...admins.map(
-                      (item) => ({
-                        value: item.id,
-                        label: getAdminName(
-                          item,
-                          profiles
-                        ),
-                      })
+                      (admin) => {
+                        const profile =
+                          profiles.find(
+                            (item) =>
+                              item.id ===
+                              admin.user_id
+                          );
+
+                        return {
+                          value: admin.id,
+                          label:
+                            admin.full_name ||
+                            profile?.full_name ||
+                            "Admin",
+                        };
+                      }
                     ),
                   ]}
                 />
               </div>
-            </ModalSection>
+            </FormSection>
 
-            <ModalSection title="الشخصية وطريقة العمل">
-              <div className="space-y-4">
-                <TextArea
+            <FormSection title="الشخصية">
+              <div className="form-grid">
+                <Field
                   label="الشخصية"
                   value={
                     form.personality
                   }
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "personality",
                       value
                     )
@@ -1266,126 +1258,99 @@ function EmployeeModal({
                   placeholder="دقيق، عملي، مبادر..."
                 />
 
-                <TextArea
+                <Field
                   label="أسلوب الكلام"
                   value={form.tone}
                   onChange={(value) =>
-                    updateField(
+                    updateForm(
                       "tone",
                       value
                     )
                   }
-                  placeholder="إماراتية احترافية وودية..."
-                />
-
-                <TextArea
-                  label="الوصف"
-                  value={
-                    form.description
-                  }
-                  onChange={(value) =>
-                    updateField(
-                      "description",
-                      value
-                    )
-                  }
-                  placeholder="ما دور الموظف داخل سوق AI؟"
-                />
-
-                <TextArea
-                  label="التعليمات الأساسية"
-                  value={
-                    form.instructions
-                  }
-                  onChange={(value) =>
-                    updateField(
-                      "instructions",
-                      value
-                    )
-                  }
-                  placeholder="تعليمات يجب على الموظف الالتزام بها..."
-                  rows={6}
+                  placeholder="إماراتية احترافية وودية"
                 />
               </div>
-            </ModalSection>
+            </FormSection>
 
-            <ModalSection title="الصلاحيات">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <FormSection title="التعريف والتعليمات">
+              <TextArea
+                label="وصف الموظف"
+                value={form.description}
+                onChange={(value) =>
+                  updateForm(
+                    "description",
+                    value
+                  )
+                }
+                placeholder="اكتب دور الموظف داخل سوق AI..."
+              />
+
+              <TextArea
+                label="تعليمات التشغيل"
+                value={form.instructions}
+                onChange={(value) =>
+                  updateForm(
+                    "instructions",
+                    value
+                  )
+                }
+                placeholder="ما الذي يجب على الموظف فعله وما الذي يجب عليه تجنبه؟"
+              />
+            </FormSection>
+
+            <FormSection title="الصلاحيات">
+              <div className="permission-editor">
                 {PERMISSIONS.map(
-                  (permission) => {
+                  ([key, label]) => {
                     const enabled =
                       !!form.permissions[
-                        permission.key
+                        key
                       ];
 
                     return (
                       <button
                         type="button"
-                        key={permission.key}
+                        key={key}
                         onClick={() =>
                           togglePermission(
-                            permission.key
+                            key
                           )
                         }
-                        className={`rounded-xl border p-3 text-right transition ${
+                        className={`permission-option ${
                           enabled
-                            ? "border-emerald-200 bg-emerald-50"
-                            : "border-gray-200 bg-gray-50"
+                            ? "active"
+                            : ""
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm">
-                            {
-                              permission.icon
-                            }
-                          </span>
+                        <span>
+                          {enabled
+                            ? "✓"
+                            : ""}
+                        </span>
 
-                          <span
-                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
-                              enabled
-                                ? "bg-emerald-600 text-white"
-                                : "bg-gray-200 text-gray-400"
-                            }`}
-                          >
-                            {enabled
-                              ? "✓"
-                              : ""}
-                          </span>
-                        </div>
-
-                        <div
-                          className={`mt-2 text-xs font-bold ${
-                            enabled
-                              ? "text-emerald-700"
-                              : "text-gray-600"
-                          }`}
-                        >
-                          {
-                            permission.label
-                          }
-                        </div>
+                        {label}
                       </button>
                     );
                   }
                 )}
               </div>
-            </ModalSection>
+            </FormSection>
           </div>
 
-          <div className="mt-7 flex flex-col-reverse gap-2 border-t border-gray-100 pt-5 sm:flex-row sm:justify-end">
+          <div className="editor-footer">
             <button
               type="button"
-              onClick={closeModal}
+              className="secondary-button"
+              onClick={onClose}
               disabled={saving}
-              className="rounded-xl border border-gray-200 px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50"
             >
               إلغاء
             </button>
 
             <button
               type="submit"
+              className="primary-button"
               disabled={saving}
-              className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {saving
                 ? "جاري الحفظ..."
@@ -1400,135 +1365,31 @@ function EmployeeModal({
   );
 }
 
-function Overview({
+function FormSection({
   title,
-  value,
-  green,
-}) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.025)]">
-      <p className="text-[11px] text-gray-400">
-        {title}
-      </p>
-
-      <p
-        className={`mt-2 text-xl font-bold ${
-          green
-            ? "text-emerald-600"
-            : "text-gray-900"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function ProfileStat({
-  label,
-  value,
-}) {
-  return (
-    <div className="border-l border-gray-100 px-5 py-5 text-center last:border-l-0">
-      <div className="text-lg font-bold text-gray-900">
-        {value}
-      </div>
-
-      <div className="mt-1 text-[10px] text-gray-400">
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function ProfileSection({
-  title,
-  icon,
   children,
 }) {
   return (
-    <section className="rounded-2xl border border-gray-200 p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-sm text-emerald-600">
-          {icon}
-        </span>
-
-        <h3 className="text-sm font-bold">
-          {title}
-        </h3>
-      </div>
-
+    <section className="form-section">
+      <h3>{title}</h3>
       {children}
     </section>
   );
 }
 
-function Detail({
+function Field({
   label,
-  value,
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-gray-100 py-3 last:border-b-0">
-      <span className="text-xs text-gray-400">
-        {label}
-      </span>
-
-      <span className="max-w-[65%] text-left text-xs font-bold leading-5 text-gray-700">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function OperationMetric({
-  label,
-  value,
-}) {
-  return (
-    <div className="rounded-xl bg-gray-50 p-4">
-      <p className="text-[10px] text-gray-400">
-        {label}
-      </p>
-
-      <p className="mt-2 text-lg font-bold text-gray-900">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function ModalSection({
-  title,
-  children,
-}) {
-  return (
-    <section>
-      <h3 className="mb-3 text-sm font-bold text-gray-900">
-        {title}
-      </h3>
-
-      <div className="rounded-xl border border-gray-200 p-4">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function Input({
-  label,
-  required,
   value,
   onChange,
   placeholder,
+  required,
 }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-bold text-gray-700">
+    <label className="field">
+      <span>
         {label}
         {required && (
-          <span className="mr-1 text-red-500">
-            *
-          </span>
+          <b>*</b>
         )}
       </span>
 
@@ -1538,7 +1399,6 @@ function Input({
           onChange(e.target.value)
         }
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white"
       />
     </label>
   );
@@ -1549,13 +1409,10 @@ function TextArea({
   value,
   onChange,
   placeholder,
-  rows = 4,
 }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-bold text-gray-700">
-        {label}
-      </span>
+    <label className="field full">
+      <span>{label}</span>
 
       <textarea
         value={value}
@@ -1563,31 +1420,27 @@ function TextArea({
           onChange(e.target.value)
         }
         placeholder={placeholder}
-        rows={rows}
-        className="w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 outline-none focus:border-emerald-400 focus:bg-white"
+        rows={4}
       />
     </label>
   );
 }
 
-function Select({
+function SelectField({
   label,
   value,
   onChange,
   options,
 }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-xs font-bold text-gray-700">
-        {label}
-      </span>
+    <label className="field">
+      <span>{label}</span>
 
       <select
         value={value}
         onChange={(e) =>
           onChange(e.target.value)
         }
-        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white"
       >
         {options.map((option) => (
           <option
@@ -1602,38 +1455,1115 @@ function Select({
   );
 }
 
-function EmptyState({
-  hasEmployees,
-  onCreate,
-}) {
+function Styles() {
   return (
-    <div className="flex min-h-[500px] items-center justify-center p-8">
-      <div className="max-w-md text-center">
-        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-50 text-4xl">
-          🤖
-        </div>
+    <style jsx global>{`
+      * {
+        box-sizing: border-box;
+      }
 
-        <h2 className="text-xl font-bold">
-          {hasEmployees
-            ? "لا توجد نتائج"
-            : "لا يوجد موظفو AI حتى الآن"}
-        </h2>
+      body {
+        margin: 0;
+        background: #f5f7f6;
+        color: #111827;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Tahoma,
+          Arial,
+          sans-serif;
+      }
 
-        <p className="mt-2 text-sm leading-7 text-gray-500">
-          {hasEmployees
-            ? "جرّب تغيير البحث أو فلتر الحالة."
-            : "أنشئ أول موظف AI وابدأ ببناء فريق الذكاء الاصطناعي داخل سوق AI."}
-        </p>
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
 
-        {!hasEmployees && (
-          <button
-            onClick={onCreate}
-            className="mt-5 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700"
-          >
-            + إضافة أول موظف AI
-          </button>
-        )}
-      </div>
-    </div>
+      button {
+        cursor: pointer;
+      }
+
+      .ai-page {
+        min-height: 100vh;
+        background: #f5f7f6;
+      }
+
+      .ai-shell {
+        width: min(1480px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 28px 0 50px;
+      }
+
+      .page-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+
+      .breadcrumb {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        color: #8b9490;
+        font-size: 12px;
+        margin-bottom: 12px;
+      }
+
+      .title-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .title-mark {
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        background: #e7f6ee;
+        color: #08783f;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(24px, 3vw, 34px);
+        line-height: 1.2;
+        letter-spacing: -1px;
+      }
+
+      .title-row p {
+        margin: 7px 0 0;
+        color: #69736f;
+        font-size: 13px;
+      }
+
+      .primary-button,
+      .secondary-button,
+      .dark-button {
+        border: 0;
+        border-radius: 11px;
+        min-height: 42px;
+        padding: 0 17px;
+        font-size: 13px;
+        font-weight: 800;
+        transition: 0.18s ease;
+      }
+
+      .primary-button {
+        background: #079447;
+        color: white;
+        box-shadow: 0 5px 15px rgba(7, 148, 71, 0.14);
+      }
+
+      .primary-button:hover {
+        background: #067d3c;
+        transform: translateY(-1px);
+      }
+
+      .secondary-button {
+        background: white;
+        color: #26302c;
+        border: 1px solid #dfe5e2;
+      }
+
+      .secondary-button:hover {
+        background: #f7f9f8;
+      }
+
+      .dark-button {
+        background: #17201c;
+        color: white;
+      }
+
+      .dark-button:hover {
+        background: #0e1512;
+      }
+
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 12px 15px;
+        border-radius: 11px;
+        margin-bottom: 16px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .notice.success {
+        color: #08783f;
+        background: #e9f8f0;
+        border: 1px solid #c8ecd9;
+      }
+
+      .notice.danger {
+        color: #b42318;
+        background: #fff0ee;
+        border: 1px solid #ffd4cf;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .stat {
+        background: white;
+        border: 1px solid #e2e7e4;
+        border-radius: 14px;
+        padding: 15px 16px;
+        min-height: 84px;
+      }
+
+      .stat span {
+        display: block;
+        color: #8b9490;
+        font-size: 11px;
+        margin-bottom: 9px;
+      }
+
+      .stat strong {
+        display: block;
+        font-size: 22px;
+        line-height: 1;
+        letter-spacing: -0.5px;
+      }
+
+      .stat strong.green {
+        color: #079447;
+      }
+
+      .stat.main {
+        border-color: #cfe9db;
+      }
+
+      .workspace {
+        overflow: hidden;
+        background: white;
+        border: 1px solid #dfe5e2;
+        border-radius: 16px;
+        box-shadow: 0 5px 25px rgba(20, 35, 28, 0.035);
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #edf0ee;
+      }
+
+      .toolbar-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        white-space: nowrap;
+      }
+
+      .toolbar-title strong {
+        font-size: 14px;
+      }
+
+      .toolbar-title span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 25px;
+        height: 22px;
+        padding: 0 7px;
+        border-radius: 20px;
+        background: #edf1ef;
+        color: #68716d;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .toolbar-actions {
+        display: flex;
+        gap: 8px;
+        flex: 1;
+        justify-content: flex-end;
+      }
+
+      .search {
+        width: min(340px, 100%);
+        height: 39px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 11px;
+        border: 1px solid #dfe5e2;
+        border-radius: 10px;
+        background: #fafbfa;
+      }
+
+      .search span {
+        color: #89938e;
+        font-size: 18px;
+      }
+
+      .search input {
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12px;
+        color: #17201c;
+      }
+
+      .toolbar-actions select {
+        min-width: 125px;
+        height: 39px;
+        border: 1px solid #dfe5e2;
+        border-radius: 10px;
+        background: white;
+        padding: 0 10px;
+        color: #39423e;
+        outline: 0;
+        font-size: 12px;
+      }
+
+      .employee-layout {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        min-height: 650px;
+      }
+
+      .employee-list {
+        background: #fafbfa;
+        border-left: 1px solid #edf0ee;
+        padding: 10px;
+      }
+
+      .list-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 8px 13px;
+        color: #69736f;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .list-heading b {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 23px;
+        height: 21px;
+        border-radius: 20px;
+        background: #e9efec;
+        font-size: 10px;
+      }
+
+      .employee-item {
+        position: relative;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 9px;
+        border: 0;
+        border-radius: 11px;
+        background: transparent;
+        text-align: right;
+        margin-bottom: 3px;
+      }
+
+      .employee-item:hover {
+        background: #f0f4f2;
+      }
+
+      .employee-item.selected {
+        background: #e8f6ef;
+      }
+
+      .selected-line {
+        position: absolute;
+        right: 0;
+        top: 8px;
+        bottom: 8px;
+        width: 3px;
+        border-radius: 4px;
+        background: #079447;
+      }
+
+      .avatar {
+        position: relative;
+        width: 43px;
+        height: 43px;
+        flex: 0 0 43px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: visible;
+        border-radius: 12px;
+        background: #e8f6ef;
+        color: #08783f;
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      .avatar img,
+      .big-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .avatar i {
+        position: absolute;
+        left: -2px;
+        bottom: -2px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #b8c1bd;
+        border: 2px solid white;
+      }
+
+      .avatar i.online {
+        background: #12b76a;
+      }
+
+      .employee-summary {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .employee-summary strong {
+        overflow: hidden;
+        color: #1b2420;
+        font-size: 12px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .employee-summary small,
+      .employee-summary em {
+        overflow: hidden;
+        color: #8a948f;
+        font-size: 10px;
+        font-style: normal;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .employee-summary em {
+        color: #079447;
+      }
+
+      .profile {
+        min-width: 0;
+      }
+
+      .profile-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 28px 30px;
+        border-bottom: 1px solid #edf0ee;
+      }
+
+      .profile-identity {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        min-width: 0;
+      }
+
+      .big-avatar {
+        width: 74px;
+        height: 74px;
+        flex: 0 0 74px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 19px;
+        background: #e8f6ef;
+        color: #08783f;
+        font-size: 17px;
+        font-weight: 900;
+      }
+
+      .profile-name {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 9px;
+      }
+
+      .profile-name h2 {
+        margin: 0;
+        color: #111916;
+        font-size: 24px;
+      }
+
+      .profile-identity p {
+        margin: 5px 0 7px;
+        color: #66716c;
+        font-size: 12px;
+      }
+
+      .meta {
+        display: flex;
+        gap: 7px;
+        color: #87918c;
+        font-size: 10px;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 8px;
+        border-radius: 20px;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .status i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .status.active {
+        background: #e8f7ef;
+        color: #08783f;
+      }
+
+      .status.inactive {
+        background: #f0f2f1;
+        color: #747d79;
+      }
+
+      .status.suspended {
+        background: #fff0ee;
+        color: #b42318;
+      }
+
+      .profile-actions {
+        display: flex;
+        gap: 7px;
+        flex-shrink: 0;
+      }
+
+      .performance {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border-bottom: 1px solid #edf0ee;
+      }
+
+      .metric {
+        padding: 19px 22px;
+        border-left: 1px solid #edf0ee;
+      }
+
+      .metric:last-child {
+        border-left: 0;
+      }
+
+      .metric span {
+        display: block;
+        color: #8a948f;
+        font-size: 10px;
+        margin-bottom: 7px;
+      }
+
+      .metric strong {
+        font-size: 19px;
+        color: #18201d;
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: 20px 22px 25px;
+      }
+
+      .info-box {
+        min-width: 0;
+        padding: 17px;
+        border: 1px solid #e6ebe8;
+        border-radius: 13px;
+        background: #fff;
+      }
+
+      .info-box.wide {
+        grid-column: 1 / -1;
+      }
+
+      .info-box h3 {
+        margin: 0 0 13px;
+        color: #27312d;
+        font-size: 12px;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 15px;
+        padding: 9px 0;
+        border-bottom: 1px solid #f0f2f1;
+      }
+
+      .info-row:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .info-row span {
+        color: #8a948f;
+        font-size: 10px;
+      }
+
+      .info-row strong {
+        max-width: 60%;
+        color: #35403b;
+        font-size: 11px;
+        text-align: left;
+      }
+
+      .permissions {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 7px;
+      }
+
+      .permission {
+        padding: 9px 10px;
+        border-radius: 9px;
+        background: #f5f7f6;
+        color: #a0a8a4;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .permission span {
+        margin-left: 5px;
+      }
+
+      .permission.enabled {
+        background: #e8f6ef;
+        color: #08783f;
+      }
+
+      .description {
+        margin: 0;
+        color: #68736e;
+        font-size: 11px;
+        line-height: 1.9;
+        white-space: pre-wrap;
+      }
+
+      .operation-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .operation {
+        padding: 12px;
+        border-radius: 10px;
+        background: #f7f9f8;
+      }
+
+      .operation span {
+        display: block;
+        margin-bottom: 5px;
+        color: #89938e;
+        font-size: 9px;
+      }
+
+      .operation strong {
+        color: #1c2521;
+        font-size: 14px;
+      }
+
+      .empty {
+        min-height: 500px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 30px;
+        text-align: center;
+      }
+
+      .empty-icon {
+        width: 70px;
+        height: 70px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 16px;
+        border-radius: 18px;
+        background: #e8f6ef;
+        color: #08783f;
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .empty h2 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .empty p {
+        max-width: 380px;
+        margin: 8px 0 18px;
+        color: #7b8580;
+        font-size: 12px;
+      }
+
+      .editor-overlay {
+        position: fixed;
+        z-index: 1000;
+        inset: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 18px;
+        background: rgba(12, 18, 15, 0.52);
+        backdrop-filter: blur(4px);
+      }
+
+      .editor {
+        width: min(760px, 100%);
+        max-height: calc(100vh - 36px);
+        overflow: hidden;
+        border-radius: 17px;
+        background: white;
+        box-shadow: 0 25px 80px rgba(0, 0, 0, 0.2);
+      }
+
+      .editor-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 22px;
+        border-bottom: 1px solid #edf0ee;
+      }
+
+      .editor-header span {
+        color: #079447;
+        font-size: 9px;
+        font-weight: 900;
+        letter-spacing: 1px;
+      }
+
+      .editor-header h2 {
+        margin: 4px 0 0;
+        font-size: 19px;
+      }
+
+      .close-button {
+        width: 35px;
+        height: 35px;
+        border: 0;
+        border-radius: 9px;
+        background: #f2f4f3;
+        color: #68726e;
+        font-size: 21px;
+      }
+
+      .form-content {
+        max-height: calc(100vh - 180px);
+        overflow-y: auto;
+        padding: 20px 22px;
+      }
+
+      .form-section {
+        padding-bottom: 20px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid #edf0ee;
+      }
+
+      .form-section:last-child {
+        margin-bottom: 0;
+        border-bottom: 0;
+      }
+
+      .form-section h3 {
+        margin: 0 0 12px;
+        font-size: 12px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .field {
+        display: block;
+      }
+
+      .field.full {
+        margin-bottom: 12px;
+      }
+
+      .field span {
+        display: block;
+        margin-bottom: 6px;
+        color: #4e5954;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .field span b {
+        margin-right: 4px;
+        color: #d92d20;
+      }
+
+      .field input,
+      .field select,
+      .field textarea {
+        width: 100%;
+        border: 1px solid #dfe5e2;
+        border-radius: 9px;
+        background: #fafbfa;
+        color: #1a231f;
+        outline: none;
+        font-size: 12px;
+      }
+
+      .field input,
+      .field select {
+        height: 40px;
+        padding: 0 11px;
+      }
+
+      .field textarea {
+        resize: vertical;
+        min-height: 90px;
+        padding: 10px 11px;
+        line-height: 1.7;
+      }
+
+      .field input:focus,
+      .field select:focus,
+      .field textarea:focus {
+        border-color: #079447;
+        background: white;
+      }
+
+      .permission-editor {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 7px;
+      }
+
+      .permission-option {
+        min-height: 42px;
+        border: 1px solid #e0e6e3;
+        border-radius: 9px;
+        background: #fafbfa;
+        color: #68736e;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      .permission-option span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 17px;
+        height: 17px;
+        margin-left: 5px;
+        border-radius: 50%;
+        background: #e7ebe9;
+        color: transparent;
+      }
+
+      .permission-option.active {
+        border-color: #bfe7d0;
+        background: #e9f7f0;
+        color: #08783f;
+      }
+
+      .permission-option.active span {
+        background: #079447;
+        color: white;
+      }
+
+      .editor-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 14px 22px;
+        border-top: 1px solid #edf0ee;
+        background: #fcfdfc;
+      }
+
+      .loading-box {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        color: #6f7975;
+        font-size: 12px;
+      }
+
+      .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #dcefe4;
+        border-top-color: #079447;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (max-width: 1100px) {
+        .stats-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .employee-layout {
+          grid-template-columns: 250px minmax(0, 1fr);
+        }
+
+        .permissions {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 800px) {
+        .ai-shell {
+          width: min(100% - 20px, 680px);
+          padding-top: 16px;
+        }
+
+        .page-header {
+          align-items: stretch;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .page-header .primary-button {
+          width: 100%;
+        }
+
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .toolbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .toolbar-actions {
+          justify-content: stretch;
+        }
+
+        .search {
+          flex: 1;
+        }
+
+        .employee-layout {
+          display: block;
+        }
+
+        .employee-list {
+          border-left: 0;
+          border-bottom: 1px solid #edf0ee;
+        }
+
+        .employee-item {
+          display: inline-flex;
+          width: calc(50% - 4px);
+          vertical-align: top;
+        }
+
+        .profile-header {
+          align-items: stretch;
+          flex-direction: column;
+          padding: 20px;
+        }
+
+        .profile-actions {
+          width: 100%;
+        }
+
+        .profile-actions button {
+          flex: 1;
+        }
+
+        .performance {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .metric:nth-child(2) {
+          border-left: 0;
+        }
+
+        .metric:nth-child(3),
+        .metric:nth-child(4) {
+          border-top: 1px solid #edf0ee;
+        }
+
+        .content-grid {
+          grid-template-columns: 1fr;
+          padding: 15px;
+        }
+
+        .info-box.wide {
+          grid-column: auto;
+        }
+
+        .permission-editor {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .operation-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .ai-shell {
+          width: calc(100% - 14px);
+        }
+
+        .title-row {
+          align-items: flex-start;
+        }
+
+        .title-mark {
+          width: 42px;
+          height: 42px;
+          flex: 0 0 42px;
+        }
+
+        h1 {
+          font-size: 23px;
+        }
+
+        .title-row p {
+          line-height: 1.7;
+        }
+
+        .stats-grid {
+          gap: 7px;
+        }
+
+        .stat {
+          min-height: 75px;
+          padding: 12px;
+        }
+
+        .stat strong {
+          font-size: 19px;
+        }
+
+        .toolbar-actions {
+          flex-direction: column;
+        }
+
+        .search,
+        .toolbar-actions select {
+          width: 100%;
+        }
+
+        .employee-item {
+          width: 100%;
+        }
+
+        .profile-identity {
+          align-items: flex-start;
+        }
+
+        .big-avatar {
+          width: 60px;
+          height: 60px;
+          flex-basis: 60px;
+          border-radius: 15px;
+        }
+
+        .profile-name h2 {
+          font-size: 21px;
+        }
+
+        .profile-actions {
+          flex-direction: column;
+        }
+
+        .performance {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .metric {
+          padding: 15px;
+        }
+
+        .content-grid {
+          padding: 12px;
+        }
+
+        .permissions {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .permission-editor {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .editor-overlay {
+          padding: 0;
+          align-items: flex-end;
+        }
+
+        .editor {
+          max-height: 94vh;
+          border-radius: 17px 17px 0 0;
+        }
+
+        .form-content {
+          max-height: calc(94vh - 145px);
+        }
+
+        .editor-footer {
+          padding: 12px;
+        }
+
+        .editor-footer button {
+          flex: 1;
+        }
+      }
+    `}</style>
   );
 }
