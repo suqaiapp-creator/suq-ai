@@ -3,11 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { logAIUsage } from "../../../lib/ai-usage";
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -18,19 +16,16 @@ const supabaseAdmin = createClient(
     },
   }
 );
-
 function isProductUnclear(product) {
   if (!product) {
     return true;
   }
-
   if (
     product.verification_status === "review" ||
     product.verification_status === "unverified"
   ) {
     return true;
   }
-
   if (
     product.confidence === "low" ||
     product.confidence === "منخفض" ||
@@ -39,7 +34,6 @@ function isProductUnclear(product) {
   ) {
     return true;
   }
-
   if (
     product.name &&
     (
@@ -50,22 +44,17 @@ function isProductUnclear(product) {
   ) {
     return true;
   }
-
   return false;
 }
-
 export async function POST(request) {
   let userId = null;
   let shopId = null;
   let productId = null;
-
   try {
     // -----------------------------------------
     // التحقق من تسجيل الدخول
     // -----------------------------------------
-
     const cookieStore = await cookies();
-
     const supabaseAuth = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -74,7 +63,6 @@ export async function POST(request) {
           getAll() {
             return cookieStore.getAll();
           },
-
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(
@@ -91,12 +79,10 @@ export async function POST(request) {
         },
       }
     );
-
     const {
       data: { user },
       error: userError,
     } = await supabaseAuth.auth.getUser();
-
     if (userError || !user) {
       return Response.json(
         {
@@ -107,23 +93,17 @@ export async function POST(request) {
         }
       );
     }
-
     userId = user.id;
-
     // -----------------------------------------
     // قراءة الطلب
     // -----------------------------------------
-
     const body = await request.json();
-
     const incomingProduct =
       body?.product || null;
-
     productId =
       body?.productId ||
       incomingProduct?.id ||
       null;
-
     if (!productId) {
       return Response.json(
         {
@@ -134,11 +114,9 @@ export async function POST(request) {
         }
       );
     }
-
     // -----------------------------------------
     // قراءة المنتج
     // -----------------------------------------
-
     const {
       data: product,
       error: productError,
@@ -175,13 +153,11 @@ export async function POST(request) {
       )
       .eq("id", productId)
       .maybeSingle();
-
     if (productError) {
       console.error(
         "PRODUCT LOAD ERROR:",
         productError
       );
-
       return Response.json(
         {
           error:
@@ -192,7 +168,6 @@ export async function POST(request) {
         }
       );
     }
-
     if (!product) {
       return Response.json(
         {
@@ -203,9 +178,7 @@ export async function POST(request) {
         }
       );
     }
-
     shopId = product.shop_id || null;
-
     if (!shopId) {
       return Response.json(
         {
@@ -217,11 +190,9 @@ export async function POST(request) {
         }
       );
     }
-
     // -----------------------------------------
     // قراءة المحل
     // -----------------------------------------
-
     const {
       data: shop,
       error: shopError,
@@ -235,13 +206,11 @@ export async function POST(request) {
       )
       .eq("id", shopId)
       .maybeSingle();
-
     if (shopError) {
       console.error(
         "SHOP LOAD ERROR:",
         shopError
       );
-
       return Response.json(
         {
           error:
@@ -252,7 +221,6 @@ export async function POST(request) {
         }
       );
     }
-
     if (!shop) {
       return Response.json(
         {
@@ -263,11 +231,9 @@ export async function POST(request) {
         }
       );
     }
-
     // -----------------------------------------
     // التحقق من ملكية المحل
     // -----------------------------------------
-
     if (shop.owner_id !== user.id) {
       return Response.json(
         {
@@ -279,11 +245,9 @@ export async function POST(request) {
         }
       );
     }
-
     // -----------------------------------------
     // منع المنتجات المقفلة أو المخالفة
     // -----------------------------------------
-
     if (
       product.safety_status === "locked" ||
       product.safety_status === "violation" ||
@@ -299,19 +263,15 @@ export async function POST(request) {
         }
       );
     }
-
     // -----------------------------------------
     // التحقق من وضوح المنتج
     // -----------------------------------------
-
     const unclear =
       isProductUnclear(product);
-
     // -----------------------------------------
     // المنتجات غير الواضحة تحتاج
     // إلى تأكيد مسؤولية التاجر
     // -----------------------------------------
-
     if (unclear) {
       const {
         data: responsibilityAcceptance,
@@ -334,13 +294,11 @@ export async function POST(request) {
         .eq("shop_id", shopId)
         .eq("product_id", product.id)
         .maybeSingle();
-
       if (responsibilityError) {
         console.error(
           "RESPONSIBILITY CHECK ERROR:",
           responsibilityError
         );
-
         return Response.json(
           {
             error:
@@ -351,13 +309,11 @@ export async function POST(request) {
           }
         );
       }
-
       if (!responsibilityAcceptance) {
         return Response.json(
           {
             error:
               "هذا المنتج يحتاج إلى تأكيد مسؤولية التاجر قبل إنشاء المحتوى التسويقي.",
-
             code:
               "RESPONSIBILITY_REQUIRED",
           },
@@ -367,77 +323,52 @@ export async function POST(request) {
         );
       }
     }
-
     // -----------------------------------------
     // Prompt التسويق
     // -----------------------------------------
-
     const prompt = `
 أنت خبير تسويق للمتاجر في الإمارات.
-
 مهمتك إنشاء محتوى تسويقي احترافي للمنتج التالي.
-
 بيانات المنتج:
-
 الاسم:
 ${product.name || ""}
-
 العلامة التجارية:
 ${product.brand || ""}
-
 التصنيف:
 ${product.category || ""}
-
 السعر:
 ${product.price || ""}
-
 العملة:
 ${product.currency || "AED"}
-
 الوصف:
 ${product.description || ""}
-
 المواصفات:
 ${product.specifications || ""}
-
 المميزات:
 ${product.features || ""}
-
 الاستخدامات:
 ${product.uses || ""}
-
 الفئة المستهدفة:
 ${product.target_audience || ""}
-
 الشركة المصنعة:
 ${product.manufacturer || ""}
-
 بلد المنشأ:
 ${product.country_of_origin || ""}
-
 الحجم أو السعة:
 ${product.size_or_volume || ""}
-
 المكونات:
 ${product.ingredients || ""}
-
 التحذيرات:
 ${product.warnings || ""}
-
 التخزين:
 ${product.storage || ""}
-
 الضمان:
 ${product.warranty || ""}
-
 ملاحظات التحقق:
 ${product.verification_notes || ""}
-
 رقم الموديل:
 ${product.model_number || ""}
-
 قواعد مهمة جدًا:
-
 1. لا تخترع أي مواصفة أو معلومة غير موجودة.
 2. لا تضف أرقامًا أو تقنيات أو شهادات أو ضمانات غير مذكورة.
 3. إذا كانت معلومة غير موجودة، لا تخمنها.
@@ -453,9 +384,7 @@ ${product.model_number || ""}
 13. لا تخترع معلومات عن الشحن أو التوصيل.
 14. لا تخترع وسائل دفع.
 15. اجعل كل منصة مناسبة لأسلوبها.
-
 أرجع النتيجة بصيغة JSON فقط بهذا الشكل:
-
 {
   "marketing_description": "",
   "instagram": "",
@@ -467,50 +396,39 @@ ${product.model_number || ""}
   "call_to_action": ""
 }
 `;
-
     // -----------------------------------------
     // استدعاء OpenAI
     // -----------------------------------------
-
     const response =
       await openai.responses.create({
         model: "gpt-5-mini",
         input: prompt,
       });
-
     // -----------------------------------------
     // قراءة استخدام OpenAI
     // -----------------------------------------
-
     const usage =
       response.usage || {};
-
     const inputTokens =
       Number(
         usage.input_tokens || 0
       );
-
     const outputTokens =
       Number(
         usage.output_tokens || 0
       );
-
     const totalTokens =
       Number(
         usage.total_tokens || 0
       ) ||
       inputTokens +
         outputTokens;
-
     const text =
       response.output_text || "";
-
     // -----------------------------------------
     // تحويل نتيجة OpenAI إلى JSON
     // -----------------------------------------
-
     let content;
-
     try {
       content = JSON.parse(text);
     } catch (parseError) {
@@ -518,7 +436,6 @@ ${product.model_number || ""}
         "OPENAI JSON PARSE ERROR:",
         parseError
       );
-
       // نسجل الاستخدام حتى لو فشل
       // تحويل النتيجة.
       // التكلفة تحسب تلقائيًا داخل
@@ -527,32 +444,24 @@ ${product.model_number || ""}
         userId,
         shopId,
         productId,
-
         operation:
           "marketing_generation",
-
         model:
           "gpt-5-mini",
-
         status:
           "failed",
-
         inputTokens,
         outputTokens,
         totalTokens,
-
         metadata: {
           source:
             "generate-marketing",
-
           reason:
             "invalid_json",
-
           responsibility_required:
             unclear,
         },
       });
-
       return Response.json(
         {
           error:
@@ -563,7 +472,6 @@ ${product.model_number || ""}
         }
       );
     }
-
     // -----------------------------------------
     // تسجيل استخدام OpenAI
     //
@@ -571,38 +479,29 @@ ${product.model_number || ""}
     // lib/ai-usage.js يحسب التكلفة
     // تلقائيًا من الموديل والـ tokens.
     // -----------------------------------------
-
     await logAIUsage({
       userId,
       shopId,
       productId,
-
       operation:
         "marketing_generation",
-
       model:
         "gpt-5-mini",
-
       status:
         "success",
-
       inputTokens,
       outputTokens,
       totalTokens,
-
       metadata: {
         source:
           "generate-marketing",
-
         responsibility_required:
           unclear,
       },
     });
-
     // -----------------------------------------
     // إعادة المحتوى
     // -----------------------------------------
-
     return Response.json(
       content
     );
@@ -611,35 +510,27 @@ ${product.model_number || ""}
       "OPENAI MARKETING ERROR:",
       error
     );
-
     // -----------------------------------------
     // تسجيل فشل العملية
     // -----------------------------------------
-
     await logAIUsage({
       userId,
       shopId,
       productId,
-
       operation:
         "marketing_generation",
-
       model:
         "gpt-5-mini",
-
       status:
         "failed",
-
       metadata: {
         source:
           "generate-marketing",
-
         error:
           error?.message ||
           "unknown_error",
       },
     });
-
     return Response.json(
       {
         error:
