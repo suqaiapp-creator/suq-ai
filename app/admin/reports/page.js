@@ -20,9 +20,7 @@ function formatPercent(value = 0) {
 function formatDuration(seconds = 0) {
   const total = Math.max(0, Math.round(Number(seconds || 0)));
 
-  if (total < 60) {
-    return `${total} ث`;
-  }
+  if (total < 60) return `${total} ث`;
 
   const minutes = Math.floor(total / 60);
   const secs = total % 60;
@@ -37,7 +35,7 @@ function formatDuration(seconds = 0) {
   return `${hours} س ${mins} د`;
 }
 
-function getDateLabel(value) {
+function formatDate(value) {
   if (!value) return "—";
 
   try {
@@ -58,7 +56,10 @@ function StatCard({ icon, label, value, helper }) {
       <div className="stat-content">
         <div className="stat-label">{label}</div>
         <div className="stat-value">{value}</div>
-        {helper ? <div className="stat-helper">{helper}</div> : null}
+
+        {helper ? (
+          <div className="stat-helper">{helper}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -70,7 +71,10 @@ function Section({ title, description, children }) {
       <div className="section-header">
         <div>
           <h2>{title}</h2>
-          {description ? <p>{description}</p> : null}
+
+          {description ? (
+            <p>{description}</p>
+          ) : null}
         </div>
       </div>
 
@@ -82,6 +86,7 @@ function Section({ title, description, children }) {
 export default function AdminReportsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -95,6 +100,7 @@ export default function AdminReportsPage() {
   const [videos, setVideos] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [usage, setUsage] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [performance, setPerformance] = useState([]);
 
   const [period, setPeriod] = useState("all_time");
@@ -118,16 +124,19 @@ export default function AdminReportsPage() {
 
       setUser(currentUser);
 
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, is_super_admin")
-        .eq("id", currentUser.id)
-        .maybeSingle();
+      const { data: profile, error: profileError } =
+        await supabase
+          .from("profiles")
+          .select("id, is_super_admin")
+          .eq("id", currentUser.id)
+          .maybeSingle();
 
       if (profileError) throw profileError;
 
       if (!profile?.is_super_admin) {
-        throw new Error("غير مصرح. هذه الصفحة خاصة بـ Super Admin.");
+        throw new Error(
+          "غير مصرح. هذه الصفحة خاصة بـ Super Admin."
+        );
       }
 
       const [
@@ -139,6 +148,7 @@ export default function AdminReportsPage() {
         videosResult,
         tasksResult,
         usageResult,
+        employeesResult,
         performanceResult,
       ] = await Promise.all([
         supabase
@@ -146,57 +156,90 @@ export default function AdminReportsPage() {
           .select(
             "id, full_name, role, account_status, is_super_admin, created_at, last_login_at"
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("shops")
-          .select("id, owner_id, name, status, created_at")
-          .order("created_at", { ascending: false }),
+          .select(
+            "id, owner_id, name, status, created_at"
+          )
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("products")
           .select(
             "id, shop_id, name, brand, verification_status, ai_status, safety_status, safety_level, created_at"
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("marketing_contents")
-          .select("id, shop_id, product_id, status, created_at")
-          .order("created_at", { ascending: false }),
+          .select(
+            "id, shop_id, product_id, status, created_at"
+          )
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("ad_images")
-          .select("id, shop_id, product_id, status, created_at")
-          .order("created_at", { ascending: false }),
+          .select(
+            "id, shop_id, product_id, status, created_at"
+          )
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("ad_videos")
           .select(
             "id, shop_id, product_id, status, provider, created_at, completed_at"
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("ai_tasks")
           .select(
-            "id, ai_employee_id, status, points_cost, estimated_cost, actual_cost, created_at, started_at, completed_at, updated_at"
+            "id, title, ai_employee_id, status, points_cost, estimated_cost, actual_cost, created_at, started_at, completed_at, updated_at"
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
 
         supabase
           .from("ai_usage")
           .select(
             "id, user_id, shop_id, product_id, operation, model, provider, status, total_tokens, estimated_cost, credits_used, created_at"
           )
-          .order("created_at", { ascending: false }),
+          .order("created_at", {
+            ascending: false,
+          }),
+
+        supabase
+          .from("ai_employees")
+          .select(
+            "id, name, specialization, status, level, tasks_completed, tasks_failed, success_rate, average_speed_seconds, total_cost, last_active_at"
+          )
+          .order("created_at", {
+            ascending: true,
+          }),
 
         supabase
           .from("ai_employee_performance")
           .select(
-            "id, ai_employee_id, tasks_total, tasks_completed, tasks_failed, success_rate, average_speed_seconds, total_cost, quality_score, efficiency_score, overall_score, updated_at"
+            "id, ai_employee_id, tasks_total, tasks_completed, tasks_failed, tasks_cancelled, success_rate, average_speed_seconds, total_cost, quality_score, efficiency_score, overall_score, updated_at"
           )
-          .order("updated_at", { ascending: false }),
+          .order("updated_at", {
+            ascending: false,
+          }),
       ]);
 
       const results = [
@@ -208,10 +251,13 @@ export default function AdminReportsPage() {
         videosResult,
         tasksResult,
         usageResult,
+        employeesResult,
         performanceResult,
       ];
 
-      const failed = results.find((result) => result.error);
+      const failed = results.find(
+        (result) => result.error
+      );
 
       if (failed?.error) {
         throw failed.error;
@@ -225,182 +271,549 @@ export default function AdminReportsPage() {
       setVideos(videosResult.data || []);
       setTasks(tasksResult.data || []);
       setUsage(usageResult.data || []);
+      setEmployees(employeesResult.data || []);
       setPerformance(performanceResult.data || []);
     } catch (err) {
       console.error(err);
-      setError(err?.message || "تعذر تحميل التقارير.");
+
+      setError(
+        err?.message || "تعذر تحميل التقارير."
+      );
     } finally {
       setLoading(false);
     }
   }
 
-  const report = useMemo(() => {
-    const totalUsers = profiles.length;
+  /*
+   * حالات المنتجات هنا متبادلة:
+   *
+   * 1. locked
+   * 2. review
+   * 3. verified
+   * 4. processing
+   * 5. other
+   *
+   * لذلك مجموع الحالات لا يتجاوز إجمالي المنتجات.
+   */
+  const productStatus = useMemo(() => {
+    let locked = 0;
+    let review = 0;
+    let verified = 0;
+    let processing = 0;
+    let other = 0;
 
-    const activeUsers = profiles.filter(
-      (item) => item.account_status === "active"
-    ).length;
-
-    const totalShops = shops.length;
-
-    const activeShops = shops.filter(
-      (item) => item.status === "active"
-    ).length;
-
-    const totalProducts = products.length;
-
-    const verifiedProducts = products.filter((item) => {
-      const status = String(item.verification_status || "").toLowerCase();
-
-      return (
-        ["verified", "approved", "verified_by_ai"].includes(status) ||
-        item.ai_status === "completed"
-      );
-    }).length;
-
-    const reviewProducts = products.filter((item) => {
-      const safety = String(item.safety_status || "").toLowerCase();
-      const verification = String(
-        item.verification_status || ""
+    products.forEach((product) => {
+      const safety = String(
+        product.safety_status || ""
       ).toLowerCase();
 
-      return (
-        ["review", "pending", "unverified"].includes(verification) ||
-        safety === "review"
-      );
-    }).length;
+      const verification = String(
+        product.verification_status || ""
+      ).toLowerCase();
 
-    const lockedProducts = products.filter((item) => {
-      const safety = String(item.safety_status || "").toLowerCase();
+      const aiStatus = String(
+        product.ai_status || ""
+      ).toLowerCase();
 
-      return (
+      if (
         safety === "locked" ||
         safety === "violation" ||
         safety === "blocked"
-      );
-    }).length;
+      ) {
+        locked += 1;
+        return;
+      }
 
-    const totalMarketing = marketing.length;
+      if (
+        safety === "review" ||
+        verification === "review" ||
+        verification === "pending" ||
+        verification === "unverified"
+      ) {
+        review += 1;
+        return;
+      }
 
-    const completedMarketing = marketing.filter(
-      (item) =>
-        String(item.status || "").toLowerCase() === "completed"
-    ).length;
+      if (
+        verification === "verified" ||
+        verification === "approved" ||
+        verification === "verified_by_ai" ||
+        aiStatus === "completed"
+      ) {
+        verified += 1;
+        return;
+      }
 
-    const totalDesigns = designs.length;
+      if (
+        aiStatus === "processing" ||
+        aiStatus === "pending" ||
+        aiStatus === "analyzing"
+      ) {
+        processing += 1;
+        return;
+      }
 
-    const completedDesigns = designs.filter(
-      (item) =>
-        String(item.status || "").toLowerCase() === "completed"
-    ).length;
-
-    const totalVideos = videos.length;
-
-    const completedVideos = videos.filter(
-      (item) =>
-        String(item.status || "").toLowerCase() === "completed"
-    ).length;
-
-    const totalTasks = tasks.length;
-
-    const completedTasks = tasks.filter(
-      (item) => item.status === "completed"
-    ).length;
-
-    const failedTasks = tasks.filter(
-      (item) => item.status === "failed"
-    ).length;
-
-    const cancelledTasks = tasks.filter(
-      (item) => item.status === "cancelled"
-    ).length;
-
-    const processingTasks = tasks.filter((item) =>
-      ["pending", "in_progress", "processing"].includes(item.status)
-    ).length;
-
-    const successfulUsage = usage.filter(
-      (item) => item.status === "completed" || item.status === "success"
-    ).length;
-
-    const failedUsage = usage.filter(
-      (item) => item.status === "failed"
-    ).length;
-
-    const totalUsageCost = usage.reduce(
-      (sum, item) => sum + Number(item.estimated_cost || 0),
-      0
-    );
-
-    const openaiCost = usage
-      .filter((item) => item.provider === "openai")
-      .reduce(
-        (sum, item) => sum + Number(item.estimated_cost || 0),
-        0
-      );
-
-    const runwayCost = usage
-      .filter((item) => item.provider === "runway")
-      .reduce(
-        (sum, item) => sum + Number(item.estimated_cost || 0),
-        0
-      );
-
-    const runwayCredits = usage
-      .filter((item) => item.provider === "runway")
-      .reduce(
-        (sum, item) => sum + Number(item.credits_used || 0),
-        0
-      );
-
-    const totalCredits = usage.reduce(
-      (sum, item) => sum + Number(item.credits_used || 0),
-      0
-    );
-
-    const pointsUsed = tasks.reduce(
-      (sum, item) => sum + Number(item.points_cost || 0),
-      0
-    );
-
-    const completedWithTime = tasks.filter(
-      (item) =>
-        item.completed_at &&
-        (item.started_at || item.created_at)
-    );
-
-    const taskDurations = completedWithTime.map((item) => {
-      const start = new Date(
-        item.started_at || item.created_at
-      ).getTime();
-
-      const end = new Date(item.completed_at).getTime();
-
-      return Math.max(0, Math.round((end - start) / 1000));
+      other += 1;
     });
 
+    return {
+      locked,
+      review,
+      verified,
+      processing,
+      other,
+    };
+  }, [products]);
+
+  /*
+   * نحسب أداء الموظفين مباشرة من ai_tasks.
+   * هذا يجعل التقرير يعمل حتى لو لم يتم حفظ سجل
+   * ai_employee_performance بعد.
+   */
+  const employeeReports = useMemo(() => {
+    const employeeMap = new Map();
+
+    employees.forEach((employee) => {
+      employeeMap.set(employee.id, {
+        employee,
+        tasks: [],
+      });
+    });
+
+    tasks.forEach((task) => {
+      if (!task.ai_employee_id) return;
+
+      if (!employeeMap.has(task.ai_employee_id)) {
+        employeeMap.set(task.ai_employee_id, {
+          employee: {
+            id: task.ai_employee_id,
+            name: "موظف AI",
+            specialization: "غير محدد",
+            status: "unknown",
+            level: "—",
+          },
+          tasks: [],
+        });
+      }
+
+      employeeMap
+        .get(task.ai_employee_id)
+        .tasks.push(task);
+    });
+
+    const savedPerformance = new Map();
+
+    performance.forEach((item) => {
+      if (
+        !savedPerformance.has(item.ai_employee_id)
+      ) {
+        savedPerformance.set(
+          item.ai_employee_id,
+          item
+        );
+      }
+    });
+
+    return Array.from(employeeMap.values())
+      .map((entry) => {
+        const employee = entry.employee;
+        const employeeTasks = entry.tasks;
+
+        const total = employeeTasks.length;
+
+        const completed = employeeTasks.filter(
+          (task) => task.status === "completed"
+        ).length;
+
+        const failed = employeeTasks.filter(
+          (task) => task.status === "failed"
+        ).length;
+
+        const cancelled = employeeTasks.filter(
+          (task) => task.status === "cancelled"
+        ).length;
+
+        const completedWithTime =
+          employeeTasks.filter(
+            (task) =>
+              task.status === "completed" &&
+              task.completed_at &&
+              (task.started_at ||
+                task.created_at)
+          );
+
+        const durations =
+          completedWithTime.map((task) => {
+            const start = new Date(
+              task.started_at ||
+                task.created_at
+            ).getTime();
+
+            const end = new Date(
+              task.completed_at
+            ).getTime();
+
+            return Math.max(
+              0,
+              Math.round((end - start) / 1000)
+            );
+          });
+
+        const averageSpeed =
+          durations.length > 0
+            ? durations.reduce(
+                (sum, value) =>
+                  sum + value,
+                0
+              ) / durations.length
+            : Number(
+                employee.average_speed_seconds || 0
+              );
+
+        const successRate =
+          total > 0
+            ? (completed / total) * 100
+            : Number(
+                employee.success_rate || 0
+              );
+
+        let speedScore = 0;
+
+        if (averageSpeed > 0) {
+          if (averageSpeed <= 60) {
+            speedScore = 100;
+          } else if (averageSpeed <= 300) {
+            speedScore = 90;
+          } else if (averageSpeed <= 600) {
+            speedScore = 80;
+          } else if (averageSpeed <= 1200) {
+            speedScore = 70;
+          } else {
+            speedScore = 60;
+          }
+        }
+
+        const qualityScore =
+          successRate;
+
+        const efficiencyScore =
+          averageSpeed > 0
+            ? successRate * 0.7 +
+              speedScore * 0.3
+            : successRate;
+
+        const saved =
+          savedPerformance.get(employee.id);
+
+        const savedOverall =
+          saved &&
+          Number(saved.overall_score || 0) > 0
+            ? Number(saved.overall_score)
+            : null;
+
+        const overallScore =
+          savedOverall !== null
+            ? savedOverall
+            : averageSpeed > 0
+            ? qualityScore * 0.65 +
+              efficiencyScore * 0.35
+            : qualityScore;
+
+        const latestTask = [...employeeTasks]
+          .sort((a, b) => {
+            const dateA = new Date(
+              a.completed_at ||
+                a.updated_at ||
+                a.created_at
+            ).getTime();
+
+            const dateB = new Date(
+              b.completed_at ||
+                b.updated_at ||
+                b.created_at
+            ).getTime();
+
+            return dateB - dateA;
+          })[0];
+
+        const totalCost =
+          employeeTasks.reduce(
+            (sum, task) =>
+              sum +
+              Number(
+                task.actual_cost ||
+                  task.estimated_cost ||
+                  0
+              ),
+            0
+          );
+
+        return {
+          employee,
+          total,
+          completed,
+          failed,
+          cancelled,
+          successRate,
+          averageSpeed,
+          qualityScore,
+          efficiencyScore,
+          overallScore,
+          totalCost,
+          latestTask,
+        };
+      })
+      .filter(
+        (item) =>
+          item.total > 0 ||
+          item.employee.status === "active"
+      )
+      .sort(
+        (a, b) =>
+          b.overallScore -
+          a.overallScore
+      );
+  }, [
+    employees,
+    tasks,
+    performance,
+  ]);
+
+  const report = useMemo(() => {
+    const totalUsers = profiles.length;
+
+    const activeUsers =
+      profiles.filter(
+        (item) =>
+          item.account_status === "active"
+      ).length;
+
+    const totalShops = shops.length;
+
+    const activeShops =
+      shops.filter(
+        (item) => item.status === "active"
+      ).length;
+
+    const totalProducts = products.length;
+
+    const totalMarketing =
+      marketing.length;
+
+    const completedMarketing =
+      marketing.filter(
+        (item) =>
+          String(item.status || "")
+            .toLowerCase() ===
+          "completed"
+      ).length;
+
+    const totalDesigns =
+      designs.length;
+
+    const completedDesigns =
+      designs.filter(
+        (item) =>
+          String(item.status || "")
+            .toLowerCase() ===
+          "completed"
+      ).length;
+
+    const totalVideos =
+      videos.length;
+
+    const completedVideos =
+      videos.filter(
+        (item) =>
+          String(item.status || "")
+            .toLowerCase() ===
+          "completed"
+      ).length;
+
+    const totalTasks =
+      tasks.length;
+
+    const completedTasks =
+      tasks.filter(
+        (item) =>
+          item.status === "completed"
+      ).length;
+
+    const failedTasks =
+      tasks.filter(
+        (item) =>
+          item.status === "failed"
+      ).length;
+
+    const cancelledTasks =
+      tasks.filter(
+        (item) =>
+          item.status === "cancelled"
+      ).length;
+
+    const processingTasks =
+      tasks.filter((item) =>
+        [
+          "pending",
+          "in_progress",
+          "processing",
+        ].includes(item.status)
+      ).length;
+
+    const successfulUsage =
+      usage.filter(
+        (item) =>
+          item.status === "completed" ||
+          item.status === "success"
+      ).length;
+
+    const failedUsage =
+      usage.filter(
+        (item) =>
+          item.status === "failed"
+      ).length;
+
+    const totalUsageCost =
+      usage.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.estimated_cost || 0
+          ),
+        0
+      );
+
+    const openaiCost =
+      usage
+        .filter(
+          (item) =>
+            item.provider === "openai"
+        )
+        .reduce(
+          (sum, item) =>
+            sum +
+            Number(
+              item.estimated_cost || 0
+            ),
+          0
+        );
+
+    const runwayCost =
+      usage
+        .filter(
+          (item) =>
+            item.provider === "runway"
+        )
+        .reduce(
+          (sum, item) =>
+            sum +
+            Number(
+              item.estimated_cost || 0
+            ),
+          0
+        );
+
+    const runwayCredits =
+      usage
+        .filter(
+          (item) =>
+            item.provider === "runway"
+        )
+        .reduce(
+          (sum, item) =>
+            sum +
+            Number(
+              item.credits_used || 0
+            ),
+          0
+        );
+
+    const totalCredits =
+      usage.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.credits_used || 0
+          ),
+        0
+      );
+
+    const pointsUsed =
+      tasks.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.points_cost || 0
+          ),
+        0
+      );
+
+    const completedWithTime =
+      tasks.filter(
+        (item) =>
+          item.status === "completed" &&
+          item.completed_at &&
+          (item.started_at ||
+            item.created_at)
+      );
+
+    const durations =
+      completedWithTime.map(
+        (item) => {
+          const start =
+            new Date(
+              item.started_at ||
+                item.created_at
+            ).getTime();
+
+          const end =
+            new Date(
+              item.completed_at
+            ).getTime();
+
+          return Math.max(
+            0,
+            Math.round(
+              (end - start) / 1000
+            )
+          );
+        }
+      );
+
     const averageTaskSpeed =
-      taskDurations.length > 0
-        ? taskDurations.reduce((sum, value) => sum + value, 0) /
-          taskDurations.length
+      durations.length > 0
+        ? durations.reduce(
+            (sum, value) =>
+              sum + value,
+            0
+          ) / durations.length
         : 0;
 
     const successRate =
       totalTasks > 0
-        ? (completedTasks / totalTasks) * 100
+        ? (completedTasks /
+            totalTasks) *
+          100
         : 0;
 
     const failureRate =
       totalTasks > 0
-        ? (failedTasks / totalTasks) * 100
+        ? (failedTasks /
+            totalTasks) *
+          100
         : 0;
 
     const averageEmployeeScore =
-      performance.length > 0
-        ? performance.reduce(
-            (sum, item) => sum + Number(item.overall_score || 0),
+      employeeReports.length > 0
+        ? employeeReports.reduce(
+            (sum, item) =>
+              sum +
+              Number(
+                item.overallScore || 0
+              ),
             0
-          ) / performance.length
+          ) /
+          employeeReports.length
         : 0;
 
     return {
@@ -408,32 +821,49 @@ export default function AdminReportsPage() {
       activeUsers,
       totalShops,
       activeShops,
+
       totalProducts,
-      verifiedProducts,
-      reviewProducts,
-      lockedProducts,
+      verifiedProducts:
+        productStatus.verified,
+      reviewProducts:
+        productStatus.review,
+      lockedProducts:
+        productStatus.locked,
+      processingProducts:
+        productStatus.processing,
+      otherProducts:
+        productStatus.other,
+
       totalMarketing,
       completedMarketing,
+
       totalDesigns,
       completedDesigns,
+
       totalVideos,
       completedVideos,
+
       totalTasks,
       completedTasks,
       failedTasks,
       cancelledTasks,
       processingTasks,
+
       successfulUsage,
       failedUsage,
+
       totalUsageCost,
       openaiCost,
       runwayCost,
       runwayCredits,
       totalCredits,
+
       pointsUsed,
+
       averageTaskSpeed,
       successRate,
       failureRate,
+
       averageEmployeeScore,
     };
   }, [
@@ -445,24 +875,9 @@ export default function AdminReportsPage() {
     videos,
     tasks,
     usage,
-    performance,
+    productStatus,
+    employeeReports,
   ]);
-
-  const topEmployees = useMemo(() => {
-    const map = new Map();
-
-    performance.forEach((item) => {
-      map.set(item.ai_employee_id, item);
-    });
-
-    return Array.from(map.values())
-      .sort(
-        (a, b) =>
-          Number(b.overall_score || 0) -
-          Number(a.overall_score || 0)
-      )
-      .slice(0, 5);
-  }, [performance]);
 
   async function saveReport() {
     if (!user) return;
@@ -472,8 +887,6 @@ export default function AdminReportsPage() {
     setMessage("");
 
     try {
-      const now = new Date();
-
       const title =
         period === "all_time"
           ? "التقرير الشامل"
@@ -481,57 +894,171 @@ export default function AdminReportsPage() {
           ? "التقرير الشهري"
           : period === "weekly"
           ? "التقرير الأسبوعي"
-          : "تقرير اليوم";
+          : "التقرير اليومي";
 
-      const { error: insertError } = await supabase
-        .from("ai_reports")
-        .insert({
-          report_type: "overview",
-          period_type: period,
-          title,
-          description:
-            "تقرير شامل مبني على البيانات الفعلية المسجلة في سوق AI.",
-          total_users: report.totalUsers,
-          active_users: report.activeUsers,
-          total_shops: report.totalShops,
-          active_shops: report.activeShops,
-          total_products: report.totalProducts,
-          verified_products: report.verifiedProducts,
-          review_products: report.reviewProducts,
-          locked_products: report.lockedProducts,
-          total_marketing: report.totalMarketing,
-          total_designs: report.totalDesigns,
-          total_videos: report.totalVideos,
-          total_ai_tasks: report.totalTasks,
-          completed_ai_tasks: report.completedTasks,
-          failed_ai_tasks: report.failedTasks,
-          total_ai_cost: report.totalUsageCost,
-          openai_cost: report.openaiCost,
-          runway_cost: report.runwayCost,
-          total_ai_credits: report.totalCredits,
-          runway_credits: report.runwayCredits,
-          success_rate: report.successRate,
-          failure_rate: report.failureRate,
-          average_task_speed_seconds: report.averageTaskSpeed,
-          total_points_used: report.pointsUsed,
-          report_data: {
-            processing_tasks: report.processingTasks,
-            cancelled_tasks: report.cancelledTasks,
-            successful_usage: report.successfulUsage,
-            failed_usage: report.failedUsage,
-            average_employee_score:
-              report.averageEmployeeScore,
-            generated_at: now.toISOString(),
-          },
-          generated_by: user.id,
-        });
+      const { error: insertError } =
+        await supabase
+          .from("ai_reports")
+          .insert({
+            report_type:
+              "overview",
 
-      if (insertError) throw insertError;
+            period_type:
+              period,
 
-      setMessage("تم حفظ التقرير بنجاح.");
+            title,
+
+            description:
+              "تقرير شامل مبني على البيانات الفعلية المسجلة في سوق AI.",
+
+            total_users:
+              report.totalUsers,
+
+            active_users:
+              report.activeUsers,
+
+            total_shops:
+              report.totalShops,
+
+            active_shops:
+              report.activeShops,
+
+            total_products:
+              report.totalProducts,
+
+            verified_products:
+              report.verifiedProducts,
+
+            review_products:
+              report.reviewProducts,
+
+            locked_products:
+              report.lockedProducts,
+
+            total_marketing:
+              report.totalMarketing,
+
+            total_designs:
+              report.totalDesigns,
+
+            total_videos:
+              report.totalVideos,
+
+            total_ai_tasks:
+              report.totalTasks,
+
+            completed_ai_tasks:
+              report.completedTasks,
+
+            failed_ai_tasks:
+              report.failedTasks,
+
+            total_ai_cost:
+              report.totalUsageCost,
+
+            openai_cost:
+              report.openaiCost,
+
+            runway_cost:
+              report.runwayCost,
+
+            total_ai_credits:
+              report.totalCredits,
+
+            runway_credits:
+              report.runwayCredits,
+
+            success_rate:
+              report.successRate,
+
+            failure_rate:
+              report.failureRate,
+
+            average_task_speed_seconds:
+              report.averageTaskSpeed,
+
+            total_points_used:
+              report.pointsUsed,
+
+            report_data: {
+              processing_tasks:
+                report.processingTasks,
+
+              cancelled_tasks:
+                report.cancelledTasks,
+
+              processing_products:
+                report.processingProducts,
+
+              other_products:
+                report.otherProducts,
+
+              successful_usage:
+                report.successfulUsage,
+
+              failed_usage:
+                report.failedUsage,
+
+              average_employee_score:
+                report.averageEmployeeScore,
+
+              employees:
+                employeeReports.map(
+                  (item) => ({
+                    id:
+                      item.employee.id,
+
+                    name:
+                      item.employee.name,
+
+                    tasks:
+                      item.total,
+
+                    completed:
+                      item.completed,
+
+                    failed:
+                      item.failed,
+
+                    success_rate:
+                      item.successRate,
+
+                    quality:
+                      item.qualityScore,
+
+                    efficiency:
+                      item.efficiencyScore,
+
+                    overall:
+                      item.overallScore,
+
+                    cost:
+                      item.totalCost,
+                  })
+                ),
+
+              generated_at:
+                new Date().toISOString(),
+            },
+
+            generated_by:
+              user.id,
+          });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setMessage(
+        "تم حفظ التقرير بنجاح."
+      );
     } catch (err) {
       console.error(err);
-      setError(err?.message || "تعذر حفظ التقرير.");
+
+      setError(
+        err?.message ||
+          "تعذر حفظ التقرير."
+      );
     } finally {
       setSaving(false);
     }
@@ -544,28 +1071,50 @@ export default function AdminReportsPage() {
   return (
     <main className="page">
       <div className="container">
+
         <header className="topbar">
           <div>
-            <div className="eyebrow">AI • REPORTS</div>
+            <div className="eyebrow">
+              AI • REPORTS
+            </div>
 
-            <h1>التقارير والتحليلات</h1>
+            <h1>
+              التقارير والتحليلات
+            </h1>
 
             <p>
-              قراءة شاملة لأداء سوق AI وربط التقارير بالبيانات
+              قراءة شاملة لأداء سوق AI
+              وربط التقارير بالبيانات
               الفعلية للنظام.
             </p>
           </div>
 
           <div className="actions">
+
             <select
               value={period}
-              onChange={(event) => setPeriod(event.target.value)}
+              onChange={(event) =>
+                setPeriod(
+                  event.target.value
+                )
+              }
               className="period-select"
             >
-              <option value="all_time">كل الفترة</option>
-              <option value="daily">اليومي</option>
-              <option value="weekly">الأسبوعي</option>
-              <option value="monthly">الشهري</option>
+              <option value="all_time">
+                كل الفترة
+              </option>
+
+              <option value="daily">
+                اليومي
+              </option>
+
+              <option value="weekly">
+                الأسبوعي
+              </option>
+
+              <option value="monthly">
+                الشهري
+              </option>
             </select>
 
             <button
@@ -579,56 +1128,89 @@ export default function AdminReportsPage() {
             <button
               className="primary-button"
               onClick={saveReport}
-              disabled={saving || loading}
+              disabled={
+                saving || loading
+              }
             >
-              {saving ? "جاري الحفظ..." : "حفظ التقرير"}
+              {saving
+                ? "جاري الحفظ..."
+                : "حفظ التقرير"}
             </button>
+
           </div>
         </header>
 
         {error ? (
           <div className="alert error">
-            <strong>حدث خطأ</strong>
-            <span>{error}</span>
+            <strong>
+              حدث خطأ
+            </strong>
+
+            <span>
+              {error}
+            </span>
           </div>
         ) : null}
 
         {message ? (
           <div className="alert success">
-            <strong>تم</strong>
-            <span>{message}</span>
+            <strong>
+              تم
+            </strong>
+
+            <span>
+              {message}
+            </span>
           </div>
         ) : null}
 
         {loading ? (
           <div className="loading-card">
             <div className="spinner" />
+
             <div>
-              <strong>جاري تحميل التقرير...</strong>
-              <span>يتم جمع البيانات من أقسام سوق AI.</span>
+              <strong>
+                جاري تحميل التقرير...
+              </strong>
+
+              <span>
+                يتم جمع البيانات من أقسام
+                سوق AI.
+              </span>
             </div>
           </div>
         ) : (
           <>
             <div className="stats-grid">
+
               <StatCard
                 icon="👥"
                 label="المستخدمون"
-                value={formatNumber(report.totalUsers)}
-                helper={`${formatNumber(report.activeUsers)} نشط`}
+                value={formatNumber(
+                  report.totalUsers
+                )}
+                helper={`${formatNumber(
+                  report.activeUsers
+                )} نشط`}
               />
 
               <StatCard
                 icon="🏪"
                 label="المتاجر"
-                value={formatNumber(report.totalShops)}
-                helper={`${formatNumber(report.activeShops)} نشط`}
+                value={formatNumber(
+                  report.totalShops
+                )}
+                helper={`${formatNumber(
+                  report.activeShops
+                )} نشط`}
               />
 
               <StatCard
                 icon="📦"
                 label="المنتجات"
-                value={formatNumber(report.totalProducts)}
+                value={formatNumber(
+                  report.totalProducts
+                )}
                 helper={`${formatNumber(
                   report.verifiedProducts
                 )} موثق`}
@@ -637,7 +1219,9 @@ export default function AdminReportsPage() {
               <StatCard
                 icon="🤖"
                 label="مهام AI"
-                value={formatNumber(report.totalTasks)}
+                value={formatNumber(
+                  report.totalTasks
+                )}
                 helper={`${formatNumber(
                   report.completedTasks
                 )} مكتملة`}
@@ -646,7 +1230,9 @@ export default function AdminReportsPage() {
               <StatCard
                 icon="📣"
                 label="التسويق"
-                value={formatNumber(report.totalMarketing)}
+                value={formatNumber(
+                  report.totalMarketing
+                )}
                 helper={`${formatNumber(
                   report.completedMarketing
                 )} مكتمل`}
@@ -655,7 +1241,9 @@ export default function AdminReportsPage() {
               <StatCard
                 icon="🎨"
                 label="التصاميم"
-                value={formatNumber(report.totalDesigns)}
+                value={formatNumber(
+                  report.totalDesigns
+                )}
                 helper={`${formatNumber(
                   report.completedDesigns
                 )} مكتمل`}
@@ -664,7 +1252,9 @@ export default function AdminReportsPage() {
               <StatCard
                 icon="🎬"
                 label="الفيديوهات"
-                value={formatNumber(report.totalVideos)}
+                value={formatNumber(
+                  report.totalVideos
+                )}
                 helper={`${formatNumber(
                   report.completedVideos
                 )} مكتمل`}
@@ -673,89 +1263,189 @@ export default function AdminReportsPage() {
               <StatCard
                 icon="💰"
                 label="تكلفة AI"
-                value={formatMoney(report.totalUsageCost)}
+                value={formatMoney(
+                  report.totalUsageCost
+                )}
                 helper={`${formatNumber(
                   report.totalCredits
                 )} credits`}
               />
+
             </div>
 
             <div className="content-grid">
+
               <Section
                 title="أداء العمليات"
                 description="ملخص الإنتاج والتنفيذ داخل المنصة."
               >
                 <div className="metric-list">
-                  <div className="metric-row">
-                    <span>المهام المكتملة</span>
-                    <strong>{formatNumber(report.completedTasks)}</strong>
-                  </div>
 
                   <div className="metric-row">
-                    <span>المهام قيد التنفيذ</span>
-                    <strong>{formatNumber(report.processingTasks)}</strong>
-                  </div>
+                    <span>
+                      المهام المكتملة
+                    </span>
 
-                  <div className="metric-row">
-                    <span>المهام الفاشلة</span>
-                    <strong>{formatNumber(report.failedTasks)}</strong>
-                  </div>
-
-                  <div className="metric-row">
-                    <span>المهام الملغاة</span>
-                    <strong>{formatNumber(report.cancelledTasks)}</strong>
-                  </div>
-
-                  <div className="metric-row">
-                    <span>نسبة النجاح</span>
-                    <strong>{formatPercent(report.successRate)}</strong>
-                  </div>
-
-                  <div className="metric-row">
-                    <span>نسبة الفشل</span>
-                    <strong>{formatPercent(report.failureRate)}</strong>
-                  </div>
-
-                  <div className="metric-row">
-                    <span>متوسط سرعة المهمة</span>
                     <strong>
-                      {formatDuration(report.averageTaskSpeed)}
+                      {formatNumber(
+                        report.completedTasks
+                      )}
                     </strong>
                   </div>
 
                   <div className="metric-row">
-                    <span>النقاط المستخدمة</span>
+                    <span>
+                      المهام قيد التنفيذ
+                    </span>
+
                     <strong>
-                      {formatNumber(report.pointsUsed)}
+                      {formatNumber(
+                        report.processingTasks
+                      )}
                     </strong>
                   </div>
+
+                  <div className="metric-row">
+                    <span>
+                      المهام الفاشلة
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        report.failedTasks
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>
+                      المهام الملغاة
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        report.cancelledTasks
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>
+                      نسبة النجاح
+                    </span>
+
+                    <strong>
+                      {formatPercent(
+                        report.successRate
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>
+                      نسبة الفشل
+                    </span>
+
+                    <strong>
+                      {formatPercent(
+                        report.failureRate
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>
+                      متوسط سرعة المهمة
+                    </span>
+
+                    <strong>
+                      {formatDuration(
+                        report.averageTaskSpeed
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="metric-row">
+                    <span>
+                      النقاط المستخدمة
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        report.pointsUsed
+                      )}
+                    </strong>
+                  </div>
+
                 </div>
               </Section>
 
               <Section
                 title="المنتجات"
-                description="حالة المنتجات والتحقق والمراجعة."
+                description="حالة المنتجات بشكل متبادل ودقيق."
               >
                 <div className="product-summary">
+
                   <div className="summary-box">
-                    <span>إجمالي</span>
-                    <strong>{report.totalProducts}</strong>
+                    <span>
+                      إجمالي
+                    </span>
+
+                    <strong>
+                      {report.totalProducts}
+                    </strong>
                   </div>
 
                   <div className="summary-box good">
-                    <span>موثقة</span>
-                    <strong>{report.verifiedProducts}</strong>
+                    <span>
+                      موثقة
+                    </span>
+
+                    <strong>
+                      {report.verifiedProducts}
+                    </strong>
                   </div>
 
                   <div className="summary-box warning">
-                    <span>مراجعة</span>
-                    <strong>{report.reviewProducts}</strong>
+                    <span>
+                      مراجعة
+                    </span>
+
+                    <strong>
+                      {report.reviewProducts}
+                    </strong>
                   </div>
 
                   <div className="summary-box danger">
-                    <span>مقفلة</span>
-                    <strong>{report.lockedProducts}</strong>
+                    <span>
+                      مقفلة
+                    </span>
+
+                    <strong>
+                      {report.lockedProducts}
+                    </strong>
                   </div>
+
+                </div>
+
+                <div className="product-extra">
+
+                  <span>
+                    قيد المعالجة:
+                    {" "}
+                    <strong>
+                      {report.processingProducts}
+                    </strong>
+                  </span>
+
+                  <span>
+                    حالات أخرى:
+                    {" "}
+                    <strong>
+                      {report.otherProducts}
+                    </strong>
+                  </span>
+
                 </div>
               </Section>
 
@@ -764,33 +1454,55 @@ export default function AdminReportsPage() {
                 description="التكلفة المسجلة من عمليات AI الفعلية."
               >
                 <div className="cost-grid">
+
                   <div className="cost-card">
-                    <span>الإجمالي</span>
+                    <span>
+                      الإجمالي
+                    </span>
+
                     <strong>
-                      {formatMoney(report.totalUsageCost)}
+                      {formatMoney(
+                        report.totalUsageCost
+                      )}
                     </strong>
                   </div>
 
                   <div className="cost-card">
-                    <span>OpenAI</span>
+                    <span>
+                      OpenAI
+                    </span>
+
                     <strong>
-                      {formatMoney(report.openaiCost)}
+                      {formatMoney(
+                        report.openaiCost
+                      )}
                     </strong>
                   </div>
 
                   <div className="cost-card">
-                    <span>Runway</span>
+                    <span>
+                      Runway
+                    </span>
+
                     <strong>
-                      {formatMoney(report.runwayCost)}
+                      {formatMoney(
+                        report.runwayCost
+                      )}
                     </strong>
                   </div>
 
                   <div className="cost-card">
-                    <span>Runway Credits</span>
+                    <span>
+                      Runway Credits
+                    </span>
+
                     <strong>
-                      {formatNumber(report.runwayCredits)}
+                      {formatNumber(
+                        report.runwayCredits
+                      )}
                     </strong>
                   </div>
+
                 </div>
               </Section>
 
@@ -799,126 +1511,370 @@ export default function AdminReportsPage() {
                 description="حجم أعمال التسويق والتصميم والفيديو."
               >
                 <div className="media-grid">
+
                   <div>
-                    <span>التسويق</span>
-                    <strong>{report.totalMarketing}</strong>
+                    <span>
+                      التسويق
+                    </span>
+
+                    <strong>
+                      {report.totalMarketing}
+                    </strong>
                   </div>
 
                   <div>
-                    <span>التصاميم</span>
-                    <strong>{report.totalDesigns}</strong>
+                    <span>
+                      التصاميم
+                    </span>
+
+                    <strong>
+                      {report.totalDesigns}
+                    </strong>
                   </div>
 
                   <div>
-                    <span>الفيديوهات</span>
-                    <strong>{report.totalVideos}</strong>
+                    <span>
+                      الفيديوهات
+                    </span>
+
+                    <strong>
+                      {report.totalVideos}
+                    </strong>
                   </div>
+
                 </div>
               </Section>
+
             </div>
 
             <Section
               title="أداء موظفي AI"
-              description="أفضل النتائج المسجلة في نظام الأداء."
+              description="الأداء محسوب مباشرة من المهام الفعلية."
             >
-              {topEmployees.length === 0 ? (
+
+              {employeeReports.length === 0 ? (
                 <div className="empty">
-                  لا توجد بيانات أداء كافية حتى الآن.
+                  لا يوجد موظفو AI أو لا توجد
+                  مهام مرتبطة بهم حتى الآن.
                 </div>
               ) : (
                 <div className="employee-table">
-                  {topEmployees.map((item, index) => (
-                    <div
-                      className="employee-row"
-                      key={item.id || item.ai_employee_id}
-                    >
-                      <div className="rank">
-                        #{index + 1}
-                      </div>
 
-                      <div className="employee-main">
-                        <strong>
-                          موظف AI #{item.ai_employee_id?.slice(
-                            0,
-                            8
-                          )}
-                        </strong>
+                  {employeeReports.map(
+                    (item, index) => (
+                      <div
+                        className="employee-row"
+                        key={
+                          item.employee.id
+                        }
+                      >
 
-                        <span>
-                          {formatNumber(item.tasks_total)} مهمة
-                        </span>
-                      </div>
+                        <div className="rank">
+                          #{index + 1}
+                        </div>
 
-                      <div className="employee-stat">
-                        <span>نجاح</span>
-                        <strong>
-                          {formatPercent(item.success_rate)}
-                        </strong>
-                      </div>
+                        <div className="employee-main">
 
-                      <div className="employee-stat">
-                        <span>جودة</span>
-                        <strong>
-                          {formatPercent(item.quality_score)}
-                        </strong>
-                      </div>
+                          <strong>
+                            {item.employee.name ||
+                              "موظف AI"}
+                          </strong>
 
-                      <div className="employee-stat">
-                        <span>كفاءة</span>
-                        <strong>
-                          {formatPercent(item.efficiency_score)}
-                        </strong>
-                      </div>
+                          <span>
+                            {item.employee
+                              .specialization ||
+                              "غير محدد"}
+                          </span>
 
-                      <div className="employee-score">
-                        {Number(item.overall_score || 0).toFixed(
-                          0
-                        )}
-                        %
+                        </div>
+
+                        <div className="employee-stat">
+                          <span>
+                            المهام
+                          </span>
+
+                          <strong>
+                            {item.total}
+                          </strong>
+                        </div>
+
+                        <div className="employee-stat">
+                          <span>
+                            النجاح
+                          </span>
+
+                          <strong>
+                            {formatPercent(
+                              item.successRate
+                            )}
+                          </strong>
+                        </div>
+
+                        <div className="employee-stat">
+                          <span>
+                            الكفاءة
+                          </span>
+
+                          <strong>
+                            {formatPercent(
+                              item.efficiencyScore
+                            )}
+                          </strong>
+                        </div>
+
+                        <div className="employee-score">
+                          {Number(
+                            item.overallScore || 0
+                          ).toFixed(0)}
+                          %
+                        </div>
+
                       </div>
-                    </div>
-                  ))}
+                    )
+                  )}
+
                 </div>
               )}
+
+            </Section>
+
+            <Section
+              title="تفاصيل أداء الموظف"
+              description="تفاصيل الأداء الحالية لكل موظف AI."
+            >
+
+              {employeeReports.length === 0 ? (
+                <div className="empty">
+                  لا توجد بيانات.
+                </div>
+              ) : (
+                <div className="employee-details">
+
+                  {employeeReports.map(
+                    (item) => (
+                      <div
+                        className="employee-detail"
+                        key={
+                          `detail-${item.employee.id}`
+                        }
+                      >
+
+                        <div className="detail-head">
+
+                          <div>
+                            <strong>
+                              {item.employee.name}
+                            </strong>
+
+                            <span>
+                              {item.employee
+                                .specialization ||
+                                "غير محدد"}
+                            </span>
+                          </div>
+
+                          <div className="big-score">
+                            {Number(
+                              item.overallScore || 0
+                            ).toFixed(0)}
+                            %
+                          </div>
+
+                        </div>
+
+                        <div className="detail-grid">
+
+                          <div>
+                            <span>
+                              إجمالي المهام
+                            </span>
+
+                            <strong>
+                              {item.total}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              مكتملة
+                            </span>
+
+                            <strong>
+                              {item.completed}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              فاشلة
+                            </span>
+
+                            <strong>
+                              {item.failed}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              النجاح
+                            </span>
+
+                            <strong>
+                              {formatPercent(
+                                item.successRate
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              الجودة
+                            </span>
+
+                            <strong>
+                              {formatPercent(
+                                item.qualityScore
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              الكفاءة
+                            </span>
+
+                            <strong>
+                              {formatPercent(
+                                item.efficiencyScore
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              متوسط السرعة
+                            </span>
+
+                            <strong>
+                              {formatDuration(
+                                item.averageSpeed
+                              )}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>
+                              التكلفة
+                            </span>
+
+                            <strong>
+                              {formatMoney(
+                                item.totalCost
+                              )}
+                            </strong>
+                          </div>
+
+                        </div>
+
+                        <div className="last-task">
+
+                          <span>
+                            آخر مهمة
+                          </span>
+
+                          <strong>
+                            {item.latestTask?.title ||
+                              "لا توجد مهمة"}
+                          </strong>
+
+                          <small>
+                            {formatDate(
+                              item.latestTask?.completed_at ||
+                                item.latestTask?.updated_at ||
+                                item.latestTask?.created_at
+                            )}
+                          </small>
+
+                        </div>
+
+                      </div>
+                    )
+                  )}
+
+                </div>
+              )}
+
             </Section>
 
             <Section
               title="ملخص الاستخدام"
               description="عمليات الذكاء الاصطناعي المسجلة في النظام."
             >
+
               <div className="usage-summary">
-                <div>
-                  <span>عمليات ناجحة</span>
-                  <strong>{report.successfulUsage}</strong>
-                </div>
 
                 <div>
-                  <span>عمليات فاشلة</span>
-                  <strong>{report.failedUsage}</strong>
-                </div>
+                  <span>
+                    عمليات ناجحة
+                  </span>
 
-                <div>
-                  <span>إجمالي العمليات</span>
-                  <strong>{usage.length}</strong>
-                </div>
-
-                <div>
-                  <span>متوسط تقييم موظفي AI</span>
                   <strong>
-                    {report.averageEmployeeScore.toFixed(0)}%
+                    {report.successfulUsage}
                   </strong>
                 </div>
+
+                <div>
+                  <span>
+                    عمليات فاشلة
+                  </span>
+
+                  <strong>
+                    {report.failedUsage}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    إجمالي العمليات
+                  </span>
+
+                  <strong>
+                    {usage.length}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>
+                    متوسط أداء موظفي AI
+                  </span>
+
+                  <strong>
+                    {report.averageEmployeeScore.toFixed(
+                      0
+                    )}
+                    %
+                  </strong>
+                </div>
+
               </div>
+
             </Section>
 
             <div className="footer-note">
+
               <span>
-                آخر تحديث: {getDateLabel(new Date().toISOString())}
+                آخر تحديث:
+                {" "}
+                {formatDate(
+                  new Date().toISOString()
+                )}
               </span>
 
               <span>
-                هذه الصفحة للقراءة والتحليل ولا تشغّل أي نموذج AI.
+                هذه الصفحة للقراءة والتحليل
+                ولا تشغّل أي نموذج AI.
               </span>
+
             </div>
           </>
         )}
@@ -1032,7 +1988,8 @@ export default function AdminReportsPage() {
         }
 
         .loading-card,
-        .section {
+        .section,
+        .stat-card {
           background: #fff;
           border: 1px solid #e2e8e4;
           border-radius: 20px;
@@ -1077,14 +2034,10 @@ export default function AdminReportsPage() {
         }
 
         .stat-card {
-          background: #fff;
-          border: 1px solid #e2e8e4;
-          border-radius: 18px;
           padding: 18px;
           display: flex;
           align-items: center;
           gap: 14px;
-          box-shadow: 0 8px 30px rgba(18, 44, 31, 0.04);
         }
 
         .stat-icon {
@@ -1149,7 +2102,6 @@ export default function AdminReportsPage() {
 
         .metric-list {
           display: grid;
-          gap: 0;
         }
 
         .metric-row {
@@ -1211,6 +2163,19 @@ export default function AdminReportsPage() {
 
         .summary-box strong {
           font-size: 22px;
+        }
+
+        .product-extra {
+          display: flex;
+          gap: 20px;
+          flex-wrap: wrap;
+          margin-top: 14px;
+          color: #737e78;
+          font-size: 12px;
+        }
+
+        .product-extra strong {
+          color: #18221d;
         }
 
         .cost-grid {
@@ -1326,6 +2291,104 @@ export default function AdminReportsPage() {
           font-weight: 900;
         }
 
+        .employee-details {
+          display: grid;
+          gap: 12px;
+        }
+
+        .employee-detail {
+          border: 1px solid #e8eeea;
+          border-radius: 16px;
+          padding: 17px;
+        }
+
+        .detail-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          margin-bottom: 15px;
+        }
+
+        .detail-head strong,
+        .detail-head span {
+          display: block;
+        }
+
+        .detail-head strong {
+          font-size: 16px;
+        }
+
+        .detail-head span {
+          margin-top: 4px;
+          color: #7a847f;
+          font-size: 12px;
+        }
+
+        .big-score {
+          color: #16834f;
+          background: #edf8f2;
+          border-radius: 12px;
+          padding: 9px 14px;
+          font-weight: 900;
+          font-size: 18px;
+        }
+
+        .detail-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 9px;
+        }
+
+        .detail-grid > div {
+          background: #f7f9f8;
+          border-radius: 12px;
+          padding: 12px;
+        }
+
+        .detail-grid span,
+        .detail-grid strong {
+          display: block;
+        }
+
+        .detail-grid span {
+          color: #7a847f;
+          font-size: 10px;
+          margin-bottom: 6px;
+        }
+
+        .detail-grid strong {
+          font-size: 15px;
+        }
+
+        .last-task {
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid #edf1ee;
+        }
+
+        .last-task span,
+        .last-task strong,
+        .last-task small {
+          display: block;
+        }
+
+        .last-task span {
+          color: #7a847f;
+          font-size: 10px;
+          margin-bottom: 5px;
+        }
+
+        .last-task strong {
+          font-size: 13px;
+        }
+
+        .last-task small {
+          margin-top: 4px;
+          color: #929b96;
+          font-size: 10px;
+        }
+
         .empty {
           padding: 35px 20px;
           text-align: center;
@@ -1346,15 +2409,29 @@ export default function AdminReportsPage() {
 
         @media (max-width: 1100px) {
           .stats-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            );
           }
 
           .employee-row {
-            grid-template-columns: 40px 1fr repeat(2, 90px) 70px;
+            grid-template-columns:
+              40px
+              1fr
+              repeat(2, 90px)
+              70px;
           }
 
           .employee-stat:nth-of-type(4) {
             display: none;
+          }
+
+          .detail-grid {
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            );
           }
         }
 
@@ -1386,7 +2463,10 @@ export default function AdminReportsPage() {
           }
 
           .product-summary {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            );
           }
 
           .media-grid,
@@ -1395,7 +2475,10 @@ export default function AdminReportsPage() {
           }
 
           .employee-row {
-            grid-template-columns: 36px 1fr 70px;
+            grid-template-columns:
+              36px
+              1fr
+              70px;
           }
 
           .employee-stat {
@@ -1404,6 +2487,13 @@ export default function AdminReportsPage() {
 
           .employee-score {
             justify-self: end;
+          }
+
+          .detail-grid {
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            );
           }
 
           .footer-note {
@@ -1428,6 +2518,10 @@ export default function AdminReportsPage() {
           .section,
           .stat-card {
             border-radius: 15px;
+          }
+
+          .detail-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>
