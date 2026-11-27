@@ -1,20 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "../../../lib/supabase/client";
+
+const supabase = createClient();
 
 const EMPTY_FORM = {
   name: "",
-  description: "",
+  specialization: "",
   department_id: "",
   admin_id: "",
-  specialization: "",
   personality: "",
   tone: "",
-  avatar_url: "",
+  level: "senior",
   status: "active",
-  level: "junior",
+  avatar_url: "",
+  description: "",
   instructions: "",
   permissions: {
     products: false,
@@ -24,146 +25,250 @@ const EMPTY_FORM = {
     analytics: false,
     moderation: false,
     publishing: false,
+    tasks: false,
   },
 };
 
-const PERMISSION_LABELS = {
-  products: "المنتجات",
-  marketing: "التسويق",
-  design: "التصميم",
-  video: "الفيديو",
-  analytics: "التحليلات",
-  moderation: "المراجعة",
-  publishing: "النشر",
-};
+const LEVELS = [
+  { value: "junior", label: "Junior" },
+  { value: "mid", label: "Mid" },
+  { value: "senior", label: "Senior" },
+  { value: "expert", label: "Expert" },
+];
+
+const STATUSES = [
+  { value: "active", label: "نشط" },
+  { value: "inactive", label: "غير نشط" },
+  { value: "suspended", label: "موقوف" },
+];
+
+const PERMISSIONS = [
+  { key: "products", label: "المنتجات" },
+  { key: "marketing", label: "التسويق" },
+  { key: "design", label: "التصميم" },
+  { key: "video", label: "الفيديو" },
+  { key: "analytics", label: "التحليلات" },
+  { key: "moderation", label: "المراجعة" },
+  { key: "publishing", label: "النشر" },
+  { key: "tasks", label: "إدارة المهام" },
+];
+
+function statusLabel(status) {
+  if (status === "active") return "نشط";
+  if (status === "inactive") return "غير نشط";
+  if (status === "suspended") return "موقوف";
+  return status || "غير محدد";
+}
+
+function statusClass(status) {
+  if (status === "active") {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  }
+
+  if (status === "suspended") {
+    return "bg-red-50 text-red-700 border-red-200";
+  }
+
+  return "bg-gray-50 text-gray-600 border-gray-200";
+}
+
+function levelLabel(level) {
+  return LEVELS.find((item) => item.value === level)?.label || level || "—";
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-US");
+}
+
+function formatCost(value) {
+  return Number(value || 0).toFixed(4);
+}
+
+function getAdminName(admin, profiles) {
+  if (!admin) return "بدون Admin";
+
+  const profile = profiles.find((p) => p.id === admin.user_id);
+
+  return (
+    admin.full_name ||
+    profile?.full_name ||
+    profile?.email ||
+    "Admin"
+  );
+}
 
 export default function AIEmployeesPage() {
-  const router = useRouter();
-  const supabase = createClient();
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [user, setUser] = useState(null);
 
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [admins, setAdmins] = useState([]);
+  const [profiles, setProfiles] = useState([]);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
-  const [showModal, setShowModal] =
-    useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const [editingEmployee, setEditingEmployee] =
-    useState(null);
-
-  const [form, setForm] = useState(
-    EMPTY_FORM
-  );
-
-  async function checkAccess() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.replace("/login");
-      return false;
-    }
-
-    const { data: profile } =
-      await supabase
-        .from("profiles")
-        .select(
-          "id,is_super_admin"
-        )
-        .eq("id", user.id)
-        .maybeSingle();
-
-    if (!profile?.is_super_admin) {
-      router.replace("/dashboard");
-      return false;
-    }
-
-    return true;
-  }
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   async function loadData() {
     setLoading(true);
+    setError("");
 
-    const allowed =
-      await checkAccess();
+    try {
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser();
 
-    if (!allowed) {
+      if (!currentUser) {
+        window.location.href = "/login";
+        return;
+      }
+
+      setUser(currentUser);
+
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, full_name, role, is_super_admin")
+        .eq("id", currentUser.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      if (!profile?.is_super_admin) {
+        window.location.href = "/dashboard";
+        return;
+      }
+
+      const [
+        employeesResult,
+        departmentsResult,
+        adminsResult,
+        profilesResult,
+      ] = await Promise.all([
+        supabase
+          .from("ai_employees")
+          .select("*")
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("departments")
+          .select("*")
+          .order("name", { ascending: true }),
+
+        supabase
+          .from("admins")
+          .select("*")
+          .order("full_name", { ascending: true }),
+
+        supabase
+          .from("profiles")
+          .select("id, full_name, role, is_super_admin"),
+      ]);
+
+      if (employeesResult.error) throw employeesResult.error;
+      if (departmentsResult.error) throw departmentsResult.error;
+      if (adminsResult.error) throw adminsResult.error;
+      if (profilesResult.error) throw profilesResult.error;
+
+      setEmployees(employeesResult.data || []);
+      setDepartments(departmentsResult.data || []);
+      setAdmins(adminsResult.data || []);
+      setProfiles(profilesResult.data || []);
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "حدث خطأ أثناء تحميل البيانات");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const [
-      employeesResult,
-      departmentsResult,
-      adminsResult,
-    ] = await Promise.all([
-      supabase
-        .from("ai_employees")
-        .select("*")
-        .order("created_at", {
-          ascending: false,
-        }),
-
-      supabase
-        .from("departments")
-        .select("*")
-        .order("name"),
-
-      supabase
-        .from("admins")
-        .select("*")
-        .order("full_name"),
-    ]);
-
-    if (employeesResult.error) {
-      console.error(
-        "AI EMPLOYEES LOAD ERROR:",
-        employeesResult.error
-      );
-    }
-
-    if (departmentsResult.error) {
-      console.error(
-        "DEPARTMENTS LOAD ERROR:",
-        departmentsResult.error
-      );
-    }
-
-    if (adminsResult.error) {
-      console.error(
-        "ADMINS LOAD ERROR:",
-        adminsResult.error
-      );
-    }
-
-    setEmployees(
-      employeesResult.data || []
-    );
-
-    setDepartments(
-      departmentsResult.data || []
-    );
-
-    setAdmins(
-      adminsResult.data || []
-    );
-
-    setLoading(false);
   }
 
   useEffect(() => {
     loadData();
   }, []);
 
-  function resetForm() {
+  const stats = useMemo(() => {
+    const total = employees.length;
+
+    const active = employees.filter(
+      (item) => item.status === "active"
+    ).length;
+
+    const inactive = employees.filter(
+      (item) => item.status === "inactive"
+    ).length;
+
+    const suspended = employees.filter(
+      (item) => item.status === "suspended"
+    ).length;
+
+    const tasks = employees.reduce(
+      (sum, item) => sum + Number(item.tasks_completed || 0),
+      0
+    );
+
+    const cost = employees.reduce(
+      (sum, item) => sum + Number(item.total_cost || 0),
+      0
+    );
+
+    return {
+      total,
+      active,
+      inactive,
+      suspended,
+      tasks,
+      cost,
+    };
+  }, [employees]);
+
+  const filteredEmployees = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return employees.filter((employee) => {
+      const department = departments.find(
+        (item) => item.id === employee.department_id
+      );
+
+      const admin = admins.find(
+        (item) => item.id === employee.admin_id
+      );
+
+      const adminName = getAdminName(admin, profiles);
+
+      const matchesSearch =
+        !query ||
+        employee.name?.toLowerCase().includes(query) ||
+        employee.specialization?.toLowerCase().includes(query) ||
+        employee.description?.toLowerCase().includes(query) ||
+        department?.name?.toLowerCase().includes(query) ||
+        adminName?.toLowerCase().includes(query);
+
+      const matchesStatus =
+        statusFilter === "all" ||
+        employee.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [
+    employees,
+    departments,
+    admins,
+    profiles,
+    search,
+    statusFilter,
+  ]);
+
+  function openCreate() {
+    setEditingId(null);
+
     setForm({
       ...EMPTY_FORM,
       permissions: {
@@ -171,354 +276,175 @@ export default function AIEmployeesPage() {
       },
     });
 
-    setEditingEmployee(null);
-  }
-
-  function openNew() {
-    resetForm();
-    setShowModal(true);
+    setMessage("");
+    setError("");
+    setModalOpen(true);
   }
 
   function openEdit(employee) {
-    setEditingEmployee(employee);
+    setEditingId(employee.id);
 
     setForm({
       name: employee.name || "",
-      description:
-        employee.description || "",
-      department_id:
-        employee.department_id || "",
-      admin_id:
-        employee.admin_id || "",
-      specialization:
-        employee.specialization || "",
-      personality:
-        employee.personality || "",
-      tone:
-        employee.tone || "",
-      avatar_url:
-        employee.avatar_url || "",
-      status:
-        employee.status || "active",
-      level:
-        employee.level || "junior",
-      instructions:
-        employee.instructions || "",
+      specialization: employee.specialization || "",
+      department_id: employee.department_id || "",
+      admin_id: employee.admin_id || "",
+      personality: employee.personality || "",
+      tone: employee.tone || "",
+      level: employee.level || "senior",
+      status: employee.status || "active",
+      avatar_url: employee.avatar_url || "",
+      description: employee.description || "",
+      instructions: employee.instructions || "",
       permissions: {
-        products:
-          Boolean(
-            employee.permissions?.products
-          ),
-        marketing:
-          Boolean(
-            employee.permissions?.marketing
-          ),
-        design:
-          Boolean(
-            employee.permissions?.design
-          ),
-        video:
-          Boolean(
-            employee.permissions?.video
-          ),
-        analytics:
-          Boolean(
-            employee.permissions?.analytics
-          ),
-        moderation:
-          Boolean(
-            employee.permissions?.moderation
-          ),
-        publishing:
-          Boolean(
-            employee.permissions?.publishing
-          ),
+        ...EMPTY_FORM.permissions,
+        ...(employee.permissions || {}),
       },
     });
 
-    setShowModal(true);
+    setMessage("");
+    setError("");
+    setModalOpen(true);
   }
 
-  function getDepartmentName(
-    departmentId
-  ) {
-    return (
-      departments.find(
-        (item) =>
-          item.id === departmentId
-      )?.name ||
-      "بدون قسم"
-    );
+  function closeModal() {
+    if (saving) return;
+
+    setModalOpen(false);
+    setEditingId(null);
+    setForm(EMPTY_FORM);
   }
 
-  function getAdminName(adminId) {
-    return (
-      admins.find(
-        (item) =>
-          item.id === adminId
-      )?.full_name ||
-      "بدون Admin"
-    );
+  function updateField(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
   }
 
-  function updatePermission(
-    permission,
-    value
-  ) {
+  function togglePermission(key) {
     setForm((current) => ({
       ...current,
       permissions: {
         ...current.permissions,
-        [permission]: value,
+        [key]: !current.permissions[key],
       },
     }));
   }
 
-  async function saveEmployee() {
-    if (!form.name.trim()) {
-      alert(
-        "اسم موظف AI مطلوب."
-      );
-      return;
-    }
+  async function saveEmployee(event) {
+    event.preventDefault();
 
-    if (!form.specialization.trim()) {
-      alert(
-        "تخصص موظف AI مطلوب."
-      );
+    setError("");
+    setMessage("");
+
+    if (!form.name.trim()) {
+      setError("اسم موظف AI مطلوب");
       return;
     }
 
     setSaving(true);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
       const payload = {
         name: form.name.trim(),
-
-        description:
-          form.description.trim() ||
-          null,
-
-        department_id:
-          form.department_id ||
-          null,
-
-        admin_id:
-          form.admin_id ||
-          null,
-
-        specialization:
-          form.specialization.trim(),
-
-        personality:
-          form.personality.trim() ||
-          null,
-
-        tone:
-          form.tone.trim() ||
-          null,
-
-        avatar_url:
-          form.avatar_url.trim() ||
-          null,
-
-        status:
-          form.status,
-
-        level:
-          form.level,
-
-        instructions:
-          form.instructions.trim() ||
-          null,
-
-        permissions:
-          form.permissions,
+        specialization: form.specialization.trim() || null,
+        department_id: form.department_id || null,
+        admin_id: form.admin_id || null,
+        personality: form.personality.trim() || null,
+        tone: form.tone.trim() || null,
+        level: form.level,
+        status: form.status,
+        avatar_url: form.avatar_url.trim() || null,
+        description: form.description.trim() || null,
+        instructions: form.instructions.trim() || null,
+        permissions: form.permissions,
+        updated_at: new Date().toISOString(),
       };
 
-      if (editingEmployee) {
-        const { error } =
-          await supabase
-            .from("ai_employees")
-            .update({
-              ...payload,
-              updated_at:
-                new Date().toISOString(),
-            })
-            .eq(
-              "id",
-              editingEmployee.id
-            );
+      if (editingId) {
+        const { error: updateError } = await supabase
+          .from("ai_employees")
+          .update(payload)
+          .eq("id", editingId);
 
-        if (error) {
-          throw error;
-        }
+        if (updateError) throw updateError;
+
+        setMessage("تم تحديث موظف AI بنجاح");
       } else {
-        const { error } =
-          await supabase
-            .from("ai_employees")
-            .insert({
-              ...payload,
-              created_by:
-                user?.id || null,
-            });
+        const { error: insertError } = await supabase
+          .from("ai_employees")
+          .insert({
+            ...payload,
+            created_by: user?.id || null,
+          });
 
-        if (error) {
-          throw error;
-        }
+        if (insertError) throw insertError;
+
+        setMessage("تم إنشاء موظف AI بنجاح");
       }
 
-      setShowModal(false);
-      resetForm();
+      setModalOpen(false);
+      setEditingId(null);
+      setForm(EMPTY_FORM);
 
       await loadData();
-    } catch (error) {
-      console.error(
-        "SAVE AI EMPLOYEE ERROR:",
-        error
-      );
-
-      alert(
-        error?.message ||
-          "تعذر حفظ موظف AI."
-      );
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "تعذر حفظ موظف AI");
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleStatus(
-    employee
-  ) {
-    const newStatus =
-      employee.status === "active"
-        ? "inactive"
-        : "active";
+  async function toggleStatus(employee) {
+    const nextStatus =
+      employee.status === "active" ? "inactive" : "active";
 
-    const { error } =
-      await supabase
+    setError("");
+
+    try {
+      const { error: updateError } = await supabase
         .from("ai_employees")
         .update({
-          status: newStatus,
-          updated_at:
-            new Date().toISOString(),
+          status: nextStatus,
+          updated_at: new Date().toISOString(),
         })
-        .eq(
-          "id",
-          employee.id
-        );
+        .eq("id", employee.id);
 
-    if (error) {
-      alert(
-        error.message ||
-          "تعذر تغيير حالة الموظف."
-      );
-      return;
+      if (updateError) throw updateError;
+
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "تعذر تغيير حالة الموظف");
     }
-
-    await loadData();
   }
 
-  const filteredEmployees =
-    useMemo(() => {
-      const value =
-        search
-          .trim()
-          .toLowerCase();
+  function departmentName(id) {
+    return (
+      departments.find((item) => item.id === id)?.name ||
+      "بدون قسم"
+    );
+  }
 
-      return employees.filter(
-        (employee) => {
-          const matchesSearch =
-            !value ||
-            employee.name
-              ?.toLowerCase()
-              .includes(value) ||
-            employee.specialization
-              ?.toLowerCase()
-              .includes(value) ||
-            employee.personality
-              ?.toLowerCase()
-              .includes(value) ||
-            getDepartmentName(
-              employee.department_id
-            )
-              ?.toLowerCase()
-              .includes(value) ||
-            getAdminName(
-              employee.admin_id
-            )
-              ?.toLowerCase()
-              .includes(value);
-
-          const matchesStatus =
-            statusFilter === "all" ||
-            employee.status ===
-              statusFilter;
-
-          return (
-            matchesSearch &&
-            matchesStatus
-          );
-        }
-      );
-    }, [
-      employees,
-      search,
-      statusFilter,
-      departments,
-      admins,
-    ]);
-
-  const stats = {
-    total: employees.length,
-
-    active: employees.filter(
-      (item) =>
-        item.status === "active"
-    ).length,
-
-    inactive: employees.filter(
-      (item) =>
-        item.status === "inactive"
-    ).length,
-
-    suspended: employees.filter(
-      (item) =>
-        item.status === "suspended"
-    ).length,
-
-    tasks: employees.reduce(
-      (sum, item) =>
-        sum +
-        Number(
-          item.tasks_completed || 0
-        ),
-      0
-    ),
-
-    cost: employees.reduce(
-      (sum, item) =>
-        sum +
-        Number(
-          item.total_cost || 0
-        ),
-      0
-    ),
-  };
+  function adminName(id) {
+    const admin = admins.find((item) => item.id === id);
+    return getAdminName(admin, profiles);
+  }
 
   if (loading) {
     return (
       <main
         dir="rtl"
-        className="min-h-screen bg-green-50 p-6"
+        className="min-h-screen bg-gray-50 p-6"
       >
         <div className="mx-auto max-w-7xl">
-          <div className="rounded-3xl bg-white p-10 text-center shadow-sm">
-            جاري تحميل موظفي AI...
+          <div className="rounded-3xl border bg-white p-10 text-center shadow-sm">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600" />
+            <p className="text-gray-600">
+              جاري تحميل موظفي AI...
+            </p>
           </div>
         </div>
       </main>
@@ -528,737 +454,820 @@ export default function AIEmployeesPage() {
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-green-50 p-4 md:p-6"
+      className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6"
     >
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-7xl space-y-6">
 
         {/* Header */}
-        <div className="mb-6 rounded-3xl bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-
+        <section className="rounded-3xl bg-gradient-to-l from-emerald-700 to-green-600 p-6 text-white shadow-lg">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <span className="inline-flex rounded-full bg-green-100 px-3 py-1 text-sm font-bold text-green-700">
-                الذكاء الاصطناعي
-              </span>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-2xl">
+                  🤖
+                </div>
 
-              <h1 className="mt-3 text-2xl font-bold text-gray-900 md:text-3xl">
-                موظفو AI
-              </h1>
+                <div>
+                  <p className="text-sm text-emerald-100">
+                    الإدارة الداخلية
+                  </p>
 
-              <p className="mt-2 text-gray-500">
-                إدارة الموظفين الذكاء الاصطناعي
-                وربطهم بالأقسام والـ Admins.
+                  <h1 className="text-2xl font-bold">
+                    موظفو AI
+                  </h1>
+                </div>
+              </div>
+
+              <p className="max-w-2xl text-sm leading-7 text-emerald-50">
+                إدارة موظفي الذكاء الاصطناعي وربط كل موظف بالقسم
+                والـ Admin والتخصص والصلاحيات ومتابعة أدائه.
               </p>
             </div>
 
             <button
-              onClick={openNew}
-              className="rounded-2xl bg-green-600 px-5 py-3 font-bold text-white hover:bg-green-700"
+              onClick={openCreate}
+              className="rounded-2xl bg-white px-5 py-3 font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-50"
             >
               + إضافة موظف AI
             </button>
-
           </div>
-        </div>
+        </section>
+
+        {/* Messages */}
+        {message && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+            {message}
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+            {error}
+          </div>
+        )}
 
         {/* Stats */}
-        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-6">
-
-          <Stat
+        <section className="grid grid-cols-2 gap-4 lg:grid-cols-6">
+          <StatCard
             label="الإجمالي"
             value={stats.total}
+            icon="🤖"
           />
 
-          <Stat
+          <StatCard
             label="نشط"
             value={stats.active}
-            green
+            icon="🟢"
           />
 
-          <Stat
+          <StatCard
             label="غير نشط"
             value={stats.inactive}
+            icon="⚪"
           />
 
-          <Stat
+          <StatCard
             label="موقوف"
             value={stats.suspended}
+            icon="🔴"
           />
 
-          <Stat
+          <StatCard
             label="المهام المكتملة"
             value={stats.tasks}
+            icon="✅"
           />
 
-          <Stat
+          <StatCard
             label="التكلفة"
-            value={`${stats.cost.toFixed(4)} $`}
+            value={`${formatCost(stats.cost)} $`}
+            icon="💰"
           />
+        </section>
 
-        </div>
-
-        {/* Search + Filter */}
-        <div className="mb-6 rounded-3xl bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-3">
-
+        {/* Filters */}
+        <section className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row">
             <input
               value={search}
-              onChange={(event) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="ابحث عن موظف أو تخصص أو قسم..."
-              className="rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500 md:col-span-2"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ابحث باسم الموظف أو التخصص أو القسم أو الـ Admin..."
+              className="flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none transition focus:border-emerald-500 focus:bg-white"
             />
 
             <select
               value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(
-                  event.target.value
-                )
-              }
-              className="rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none focus:border-emerald-500"
             >
-              <option value="all">
-                جميع الحالات
-              </option>
-
-              <option value="active">
-                نشط
-              </option>
-
-              <option value="inactive">
-                غير نشط
-              </option>
-
-              <option value="suspended">
-                موقوف
-              </option>
+              <option value="all">كل الحالات</option>
+              <option value="active">نشط</option>
+              <option value="inactive">غير نشط</option>
+              <option value="suspended">موقوف</option>
             </select>
-
           </div>
-        </div>
+        </section>
 
         {/* Employees */}
-        <div className="grid gap-5 md:grid-cols-2">
+        {filteredEmployees.length === 0 ? (
+          <section className="rounded-3xl border border-gray-200 bg-white p-10 text-center shadow-sm">
+            <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-50 text-4xl">
+              🤖
+            </div>
 
-          {filteredEmployees.map(
-            (employee) => (
-              <div
-                key={employee.id}
-                className="rounded-3xl bg-white p-6 shadow-sm"
-              >
+            <h2 className="text-xl font-bold text-gray-900">
+              {employees.length === 0
+                ? "لا يوجد موظفو AI حتى الآن"
+                : "لا توجد نتائج مطابقة"}
+            </h2>
 
-                <div className="flex items-start gap-4">
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-7 text-gray-500">
+              {employees.length === 0
+                ? "أضف أول موظف AI واربطه بالقسم والـ Admin المسؤول عنه."
+                : "جرّب تغيير البحث أو فلتر الحالة."}
+            </p>
 
-                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-green-100 text-3xl">
-                    {employee.avatar_url ? (
-                      <img
-                        src={
-                          employee.avatar_url
-                        }
-                        alt={
-                          employee.name
-                        }
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      "🤖"
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-
-                    <div className="flex flex-wrap items-center gap-2">
-
-                      <h2 className="text-xl font-bold text-gray-900">
-                        {employee.name}
-                      </h2>
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          employee.status ===
-                          "active"
-                            ? "bg-green-100 text-green-700"
-                            : employee.status ===
-                              "suspended"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-gray-100 text-gray-600"
-                        }`}
-                      >
-                        {employee.status ===
-                        "active"
-                          ? "نشط"
-                          : employee.status ===
-                            "suspended"
-                          ? "موقوف"
-                          : "غير نشط"}
-                      </span>
-
-                    </div>
-
-                    <p className="mt-1 font-semibold text-green-700">
-                      {
-                        employee.specialization
-                      }
-                    </p>
-
-                    <p className="mt-2 text-sm text-gray-500">
-                      القسم:{" "}
-                      {getDepartmentName(
-                        employee.department_id
-                      )}
-                    </p>
-
-                    <p className="mt-1 text-sm text-gray-500">
-                      المسؤول:{" "}
-                      {getAdminName(
-                        employee.admin_id
-                      )}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                {employee.description && (
-                  <p className="mt-4 text-sm leading-6 text-gray-500">
-                    {employee.description}
-                  </p>
-                )}
-
-                <div className="mt-4 grid grid-cols-3 gap-2">
-
-                  <MiniStat
-                    label="المستوى"
-                    value={
-                      employee.level
-                    }
-                  />
-
-                  <MiniStat
-                    label="نجاح"
-                    value={`${Number(
-                      employee.success_rate ||
-                        0
-                    ).toFixed(1)}%`}
-                  />
-
-                  <MiniStat
-                    label="تقييم"
-                    value={`${Number(
-                      employee.average_rating ||
-                        0
-                    ).toFixed(1)}/5`}
-                  />
-
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-
-                  {Object.entries(
-                    employee.permissions ||
-                      {}
-                  )
-                    .filter(
-                      ([, enabled]) =>
-                        enabled
-                    )
-                    .map(
-                      ([permission]) => (
-                        <span
-                          key={
-                            permission
-                          }
-                          className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700"
-                        >
-                          {
-                            PERMISSION_LABELS[
-                              permission
-                            ] ||
-                            permission
-                          }
-                        </span>
-                      )
-                    )}
-
-                </div>
-
-                <div className="mt-5 flex gap-2">
-
-                  <button
-                    onClick={() =>
-                      openEdit(
-                        employee
-                      )
-                    }
-                    className="flex-1 rounded-2xl bg-gray-100 px-4 py-3 font-bold text-gray-700 hover:bg-gray-200"
-                  >
-                    تعديل
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      toggleStatus(
-                        employee
-                      )
-                    }
-                    className="flex-1 rounded-2xl bg-green-600 px-4 py-3 font-bold text-white hover:bg-green-700"
-                  >
-                    {employee.status ===
-                    "active"
-                      ? "تعطيل"
-                      : "تفعيل"}
-                  </button>
-
-                </div>
-
-              </div>
-            )
-          )}
-
-          {!filteredEmployees.length && (
-            <div className="rounded-3xl bg-white p-12 text-center shadow-sm md:col-span-2">
-
-              <div className="text-5xl">
-                🤖
-              </div>
-
-              <h2 className="mt-4 text-xl font-bold text-gray-900">
-                لا يوجد موظفو AI حتى الآن
-              </h2>
-
-              <p className="mt-2 text-gray-500">
-                أضف أول موظف AI واربطه بالقسم
-                والـ Admin المسؤول عنه.
-              </p>
-
+            {employees.length === 0 && (
               <button
-                onClick={openNew}
-                className="mt-5 rounded-2xl bg-green-600 px-5 py-3 font-bold text-white hover:bg-green-700"
+                onClick={openCreate}
+                className="mt-6 rounded-2xl bg-emerald-600 px-5 py-3 font-bold text-white transition hover:bg-emerald-700"
               >
                 + إضافة أول موظف AI
               </button>
+            )}
+          </section>
+        ) : (
+          <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {filteredEmployees.map((employee) => {
+              const permissions = employee.permissions || {};
 
-            </div>
-          )}
+              return (
+                <article
+                  key={employee.id}
+                  className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  {/* Card Header */}
+                  <div className="border-b border-gray-100 p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 text-2xl">
+                          {employee.avatar_url ? (
+                            <img
+                              src={employee.avatar_url}
+                              alt={employee.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            "🤖"
+                          )}
+                        </div>
 
-        </div>
+                        <div>
+                          <h2 className="font-bold text-gray-900">
+                            {employee.name}
+                          </h2>
 
+                          <p className="mt-1 text-xs text-gray-500">
+                            {employee.specialization || "بدون تخصص محدد"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-bold ${statusClass(
+                          employee.status
+                        )}`}
+                      >
+                        {statusLabel(employee.status)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Structure */}
+                  <div className="space-y-3 p-5">
+                    <InfoRow
+                      icon="🏢"
+                      label="القسم"
+                      value={departmentName(employee.department_id)}
+                    />
+
+                    <InfoRow
+                      icon="👤"
+                      label="Admin المسؤول"
+                      value={adminName(employee.admin_id)}
+                    />
+
+                    <InfoRow
+                      icon="⭐"
+                      label="المستوى"
+                      value={levelLabel(employee.level)}
+                    />
+
+                    <InfoRow
+                      icon="🎯"
+                      label="نسبة النجاح"
+                      value={`${Number(
+                        employee.success_rate || 0
+                      ).toFixed(1)}%`}
+                    />
+
+                    <InfoRow
+                      icon="📊"
+                      label="التقييم"
+                      value={`${Number(
+                        employee.average_rating || 0
+                      ).toFixed(1)} / 5`}
+                    />
+                  </div>
+
+                  {/* Permissions */}
+                  <div className="border-t border-gray-100 p-5">
+                    <p className="mb-3 text-xs font-bold text-gray-500">
+                      الصلاحيات
+                    </p>
+
+                    <div className="flex flex-wrap gap-2">
+                      {PERMISSIONS.filter(
+                        (item) => permissions[item.key]
+                      ).map((item) => (
+                        <span
+                          key={item.key}
+                          className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"
+                        >
+                          {item.label}
+                        </span>
+                      ))}
+
+                      {!PERMISSIONS.some(
+                        (item) => permissions[item.key]
+                      ) && (
+                        <span className="text-xs text-gray-400">
+                          لم يتم تحديد صلاحيات
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Performance */}
+                  <div className="grid grid-cols-3 border-t border-gray-100">
+                    <MiniStat
+                      label="مكتملة"
+                      value={formatNumber(employee.tasks_completed)}
+                    />
+
+                    <MiniStat
+                      label="فاشلة"
+                      value={formatNumber(employee.tasks_failed)}
+                    />
+
+                    <MiniStat
+                      label="التكلفة"
+                      value={formatCost(employee.total_cost)}
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 border-t border-gray-100 p-4">
+                    <button
+                      onClick={() => openEdit(employee)}
+                      className="flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-bold text-gray-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                    >
+                      تعديل
+                    </button>
+
+                    <button
+                      onClick={() => toggleStatus(employee)}
+                      className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
+                        employee.status === "active"
+                          ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          : "bg-emerald-600 text-white hover:bg-emerald-700"
+                      }`}
+                    >
+                      {employee.status === "active"
+                        ? "إيقاف"
+                        : "تفعيل"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+        )}
       </div>
 
       {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-4">
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="my-6 w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
 
-          <div className="my-8 w-full max-w-3xl rounded-3xl bg-white p-6 shadow-xl">
+            {/* Modal Header */}
+            <div className="border-b border-gray-100 bg-gradient-to-l from-emerald-700 to-green-600 px-6 py-5 text-white">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-emerald-100">
+                    {editingId
+                      ? "تعديل موظف AI"
+                      : "إنشاء موظف AI جديد"}
+                  </p>
 
-            <div className="mb-6 flex items-center justify-between">
-
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  {editingEmployee
-                    ? "تعديل موظف AI"
-                    : "إضافة موظف AI"}
-                </h2>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  عرّف شخصية الموظف وتخصصه وصلاحياته.
-                </p>
-              </div>
-
-              <button
-                onClick={() =>
-                  setShowModal(false)
-                }
-                className="rounded-xl bg-gray-100 px-3 py-2"
-              >
-                ✕
-              </button>
-
-            </div>
-
-            <div className="space-y-4">
-
-              <input
-                value={form.name}
-                onChange={(event) =>
-                  setForm(
-                    (current) => ({
-                      ...current,
-                      name:
-                        event.target.value,
-                    })
-                  )
-                }
-                placeholder="اسم موظف AI"
-                className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-              />
-
-              <input
-                value={
-                  form.specialization
-                }
-                onChange={(event) =>
-                  setForm(
-                    (current) => ({
-                      ...current,
-                      specialization:
-                        event.target.value,
-                    })
-                  )
-                }
-                placeholder="التخصص — مثال: مساعد التسويق"
-                className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-              />
-
-              <div className="grid gap-4 md:grid-cols-2">
-
-                <select
-                  value={
-                    form.department_id
-                  }
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        department_id:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                >
-                  <option value="">
-                    اختر القسم
-                  </option>
-
-                  {departments.map(
-                    (department) => (
-                      <option
-                        key={
-                          department.id
-                        }
-                        value={
-                          department.id
-                        }
-                      >
-                        {
-                          department.name
-                        }
-                      </option>
-                    )
-                  )}
-                </select>
-
-                <select
-                  value={
-                    form.admin_id
-                  }
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        admin_id:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                >
-                  <option value="">
-                    اختر الـ Admin المسؤول
-                  </option>
-
-                  {admins.map(
-                    (admin) => (
-                      <option
-                        key={admin.id}
-                        value={admin.id}
-                      >
-                        {
-                          admin.full_name
-                        }
-                      </option>
-                    )
-                  )}
-                </select>
-
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-
-                <input
-                  value={
-                    form.personality
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        personality:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  placeholder="الشخصية — مثال: هادئ، دقيق، عملي"
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                />
-
-                <input
-                  value={form.tone}
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        tone:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  placeholder="أسلوب الكلام — مثال: إماراتي احترافي"
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                />
-
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-
-                <select
-                  value={form.level}
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        level:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                >
-                  <option value="junior">
-                    Junior
-                  </option>
-
-                  <option value="mid">
-                    Mid
-                  </option>
-
-                  <option value="senior">
-                    Senior
-                  </option>
-
-                  <option value="expert">
-                    Expert
-                  </option>
-                </select>
-
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        status:
-                          event.target
-                            .value,
-                      })
-                    )
-                  }
-                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-                >
-                  <option value="active">
-                    نشط
-                  </option>
-
-                  <option value="inactive">
-                    غير نشط
-                  </option>
-
-                  <option value="suspended">
-                    موقوف
-                  </option>
-                </select>
-
-              </div>
-
-              <input
-                value={
-                  form.avatar_url
-                }
-                onChange={(event) =>
-                  setForm(
-                    (current) => ({
-                      ...current,
-                      avatar_url:
-                        event.target
-                          .value,
-                    })
-                  )
-                }
-                placeholder="رابط صورة الموظف (اختياري)"
-                className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-              />
-
-              <textarea
-                value={
-                  form.description
-                }
-                onChange={(event) =>
-                  setForm(
-                    (current) => ({
-                      ...current,
-                      description:
-                        event.target
-                          .value,
-                    })
-                  )
-                }
-                placeholder="وصف الموظف ومسؤولياته"
-                rows={3}
-                className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-              />
-
-              <textarea
-                value={
-                  form.instructions
-                }
-                onChange={(event) =>
-                  setForm(
-                    (current) => ({
-                      ...current,
-                      instructions:
-                        event.target
-                          .value,
-                    })
-                  )
-                }
-                placeholder="تعليمات خاصة للموظف AI"
-                rows={5}
-                className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none focus:border-green-500"
-              />
-
-              {/* Permissions */}
-              <div className="rounded-3xl bg-green-50 p-5">
-
-                <h3 className="mb-4 font-bold text-gray-900">
-                  صلاحيات الموظف AI
-                </h3>
-
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-
-                  {Object.entries(
-                    PERMISSION_LABELS
-                  ).map(
-                    ([
-                      key,
-                      label,
-                    ]) => (
-                      <label
-                        key={key}
-                        className="flex cursor-pointer items-center gap-2 rounded-2xl bg-white p-3"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={Boolean(
-                            form
-                              .permissions[
-                              key
-                            ]
-                          )}
-                          onChange={(
-                            event
-                          ) =>
-                            updatePermission(
-                              key,
-                              event
-                                .target
-                                .checked
-                            )
-                          }
-                        />
-
-                        <span className="text-sm font-semibold text-gray-700">
-                          {label}
-                        </span>
-                      </label>
-                    )
-                  )}
-
+                  <h2 className="mt-1 text-xl font-bold">
+                    {editingId
+                      ? form.name || "موظف AI"
+                      : "إضافة موظف AI"}
+                  </h2>
                 </div>
 
+                <button
+                  onClick={closeModal}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xl hover:bg-white/20"
+                >
+                  ×
+                </button>
               </div>
-
-              <button
-                disabled={saving}
-                onClick={
-                  saveEmployee
-                }
-                className="w-full rounded-2xl bg-green-600 px-4 py-4 font-bold text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                {saving
-                  ? "جاري الحفظ..."
-                  : editingEmployee
-                  ? "حفظ التعديلات"
-                  : "إنشاء موظف AI"}
-              </button>
-
             </div>
+
+            <form onSubmit={saveEmployee} className="p-6">
+
+              {/* Section 1 */}
+              <FormSection
+                number="01"
+                title="البيانات الأساسية"
+                description="المعلومات الرئيسية التي تظهر في بطاقة الموظف."
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field
+                    label="اسم موظف AI"
+                    required
+                    value={form.name}
+                    onChange={(value) =>
+                      updateField("name", value)
+                    }
+                    placeholder="مثال: والم"
+                  />
+
+                  <Field
+                    label="التخصص"
+                    value={form.specialization}
+                    onChange={(value) =>
+                      updateField("specialization", value)
+                    }
+                    placeholder="مثال: مساعد إدارة وتشغيل"
+                  />
+
+                  <Field
+                    label="الصورة / Avatar"
+                    value={form.avatar_url}
+                    onChange={(value) =>
+                      updateField("avatar_url", value)
+                    }
+                    placeholder="رابط الصورة - اختياري"
+                  />
+
+                  <SelectField
+                    label="المستوى"
+                    value={form.level}
+                    onChange={(value) =>
+                      updateField("level", value)
+                    }
+                    options={LEVELS}
+                  />
+
+                  <SelectField
+                    label="الحالة"
+                    value={form.status}
+                    onChange={(value) =>
+                      updateField("status", value)
+                    }
+                    options={STATUSES}
+                  />
+                </div>
+              </FormSection>
+
+              {/* Section 2 */}
+              <FormSection
+                number="02"
+                title="الهيكل الإداري"
+                description="حدد القسم والـ Admin المسؤول عن هذا الموظف."
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SelectField
+                    label="القسم"
+                    value={form.department_id}
+                    onChange={(value) =>
+                      updateField("department_id", value)
+                    }
+                    options={[
+                      {
+                        value: "",
+                        label: "بدون قسم",
+                      },
+                      ...departments.map((department) => ({
+                        value: department.id,
+                        label: department.name,
+                      })),
+                    ]}
+                  />
+
+                  <SelectField
+                    label="Admin المسؤول"
+                    value={form.admin_id}
+                    onChange={(value) =>
+                      updateField("admin_id", value)
+                    }
+                    options={[
+                      {
+                        value: "",
+                        label: "بدون Admin",
+                      },
+                      ...admins.map((admin) => ({
+                        value: admin.id,
+                        label: getAdminName(admin, profiles),
+                      })),
+                    ]}
+                  />
+                </div>
+
+                {departments.length === 0 && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    لا توجد أقسام حالياً. أنشئ قسمًا من صفحة إدارة الشركة
+                    ثم ارجع هنا لربط الموظف به.
+                  </div>
+                )}
+
+                {admins.length === 0 && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    لا يوجد Admin حاليًا. يمكنك إنشاء الموظف الآن بدون
+                    Admin، ثم ربطه لاحقًا.
+                  </div>
+                )}
+              </FormSection>
+
+              {/* Section 3 */}
+              <FormSection
+                number="03"
+                title="الشخصية والأسلوب"
+                description="كيف يفكر الموظف وكيف يتعامل مع المستخدمين والفريق."
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextAreaField
+                    label="الشخصية"
+                    value={form.personality}
+                    onChange={(value) =>
+                      updateField("personality", value)
+                    }
+                    placeholder="مثال: دقيق، عملي، مبادر، يراجع العمل قبل اعتماده..."
+                  />
+
+                  <TextAreaField
+                    label="أسلوب الكلام"
+                    value={form.tone}
+                    onChange={(value) =>
+                      updateField("tone", value)
+                    }
+                    placeholder="مثال: إماراتية احترافية وودية..."
+                  />
+
+                  <div className="md:col-span-2">
+                    <TextAreaField
+                      label="الوصف"
+                      value={form.description}
+                      onChange={(value) =>
+                        updateField("description", value)
+                      }
+                      placeholder="اشرح وظيفة الموظف ودوره داخل سوق AI..."
+                      rows={4}
+                    />
+                  </div>
+                </div>
+              </FormSection>
+
+              {/* Section 4 */}
+              <FormSection
+                number="04"
+                title="طريقة العمل والتعليمات"
+                description="تعليمات التشغيل التي يجب على موظف AI الالتزام بها."
+              >
+                <TextAreaField
+                  label="التعليمات الأساسية"
+                  value={form.instructions}
+                  onChange={(value) =>
+                    updateField("instructions", value)
+                  }
+                  placeholder="مثال: راجع المهمة قبل تنفيذها، لا تفترض معلومات غير مؤكدة، لا تدّعي إنجاز أي عمل لم يتم فعليًا..."
+                  rows={6}
+                />
+              </FormSection>
+
+              {/* Section 5 */}
+              <FormSection
+                number="05"
+                title="الصلاحيات"
+                description="حدد المجالات التي يستطيع موظف AI العمل فيها."
+              >
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {PERMISSIONS.map((permission) => {
+                    const enabled =
+                      !!form.permissions[permission.key];
+
+                    return (
+                      <button
+                        key={permission.key}
+                        type="button"
+                        onClick={() =>
+                          togglePermission(permission.key)
+                        }
+                        className={`rounded-2xl border p-4 text-right transition ${
+                          enabled
+                            ? "border-emerald-300 bg-emerald-50"
+                            : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span
+                            className={`text-sm font-bold ${
+                              enabled
+                                ? "text-emerald-700"
+                                : "text-gray-600"
+                            }`}
+                          >
+                            {permission.label}
+                          </span>
+
+                          <span
+                            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                              enabled
+                                ? "bg-emerald-600 text-white"
+                                : "bg-gray-200 text-gray-400"
+                            }`}
+                          >
+                            {enabled ? "✓" : ""}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </FormSection>
+
+              {/* Section 6 */}
+              <FormSection
+                number="06"
+                title="الأداء"
+                description="هذه البيانات يتم تحديثها تلقائياً من نظام المهام لاحقاً."
+              >
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                  <ReadonlyMetric
+                    label="المهام المكتملة"
+                    value={
+                      editingId
+                        ? formatNumber(
+                            employees.find(
+                              (item) => item.id === editingId
+                            )?.tasks_completed
+                          )
+                        : "0"
+                    }
+                  />
+
+                  <ReadonlyMetric
+                    label="المهام الفاشلة"
+                    value={
+                      editingId
+                        ? formatNumber(
+                            employees.find(
+                              (item) => item.id === editingId
+                            )?.tasks_failed
+                          )
+                        : "0"
+                    }
+                  />
+
+                  <ReadonlyMetric
+                    label="نسبة النجاح"
+                    value={
+                      editingId
+                        ? `${Number(
+                            employees.find(
+                              (item) => item.id === editingId
+                            )?.success_rate || 0
+                          ).toFixed(1)}%`
+                        : "0%"
+                    }
+                  />
+
+                  <ReadonlyMetric
+                    label="التقييم"
+                    value={
+                      editingId
+                        ? `${Number(
+                            employees.find(
+                              (item) => item.id === editingId
+                            )?.average_rating || 0
+                          ).toFixed(1)} / 5`
+                        : "0 / 5"
+                    }
+                  />
+
+                  <ReadonlyMetric
+                    label="التكلفة"
+                    value={
+                      editingId
+                        ? `${formatCost(
+                            employees.find(
+                              (item) => item.id === editingId
+                            )?.total_cost
+                          )} $`
+                        : "0.0000 $"
+                    }
+                  />
+                </div>
+              </FormSection>
+
+              {/* Footer */}
+              <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  disabled={saving}
+                  className="rounded-2xl border border-gray-200 px-6 py-3 font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  إلغاء
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-2xl bg-emerald-600 px-7 py-3 font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving
+                    ? "جاري الحفظ..."
+                    : editingId
+                    ? "حفظ التعديلات"
+                    : "إنشاء موظف AI"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-
     </main>
   );
 }
 
-function Stat({
-  label,
-  value,
-  green = false,
-}) {
+function StatCard({ label, value, icon }) {
   return (
-    <div className="rounded-3xl bg-white p-5 shadow-sm">
-      <div className="text-sm text-gray-500">
-        {label}
-      </div>
-
-      <div
-        className={`mt-2 text-2xl font-bold ${
-          green
-            ? "text-green-600"
-            : "text-gray-900"
-        }`}
-      >
+    <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 text-xl">{icon}</div>
+      <p className="text-xs font-medium text-gray-500">{label}</p>
+      <p className="mt-1 text-xl font-bold text-gray-900">
         {value}
-      </div>
+      </p>
     </div>
   );
 }
 
-function MiniStat({
-  label,
-  value,
-}) {
+function InfoRow({ icon, label, value }) {
   return (
-    <div className="rounded-2xl bg-gray-50 p-3 text-center">
-      <div className="text-xs text-gray-500">
-        {label}
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span>{icon}</span>
+        <span>{label}</span>
       </div>
 
-      <div className="mt-1 text-sm font-bold text-gray-900">
+      <span className="max-w-[60%] truncate text-xs font-bold text-gray-800">
         {value}
+      </span>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }) {
+  return (
+    <div className="p-3 text-center">
+      <p className="text-[11px] text-gray-400">{label}</p>
+      <p className="mt-1 text-sm font-bold text-gray-800">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function FormSection({
+  number,
+  title,
+  description,
+  children,
+}) {
+  return (
+    <section className="mb-8 rounded-3xl border border-gray-200 bg-gray-50/70 p-5">
+      <div className="mb-5 flex gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-xs font-bold text-emerald-700">
+          {number}
+        </div>
+
+        <div>
+          <h3 className="font-bold text-gray-900">
+            {title}
+          </h3>
+
+          <p className="mt-1 text-xs leading-6 text-gray-500">
+            {description}
+          </p>
+        </div>
       </div>
+
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  label,
+  required,
+  value,
+  onChange,
+  placeholder,
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-bold text-gray-700">
+        {label}
+        {required && (
+          <span className="mr-1 text-red-500">*</span>
+        )}
+      </span>
+
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 5,
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-bold text-gray-700">
+        {label}
+      </span>
+
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full resize-y rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm leading-7 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-bold text-gray-700">
+        {label}
+      </span>
+
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+      >
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ReadonlyMetric({ label, value }) {
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <p className="text-[11px] text-gray-400">{label}</p>
+      <p className="mt-2 text-sm font-bold text-gray-800">
+        {value}
+      </p>
     </div>
   );
 }
