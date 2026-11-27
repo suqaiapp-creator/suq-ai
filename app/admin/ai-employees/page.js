@@ -71,7 +71,9 @@ function statusLabel(status) {
 function getAdminName(admin, profiles) {
   if (!admin) return "بدون Admin";
 
-  const profile = profiles.find((p) => p.id === admin.user_id);
+  const profile = profiles.find(
+    (item) => item.id === admin.user_id
+  );
 
   return (
     admin.full_name ||
@@ -94,16 +96,19 @@ export default function AIEmployeesPage() {
   const [saving, setSaving] = useState(false);
 
   const [user, setUser] = useState(null);
+
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [admins, setAdmins] = useState([]);
   const [profiles, setProfiles] = useState([]);
 
+  const [selectedId, setSelectedId] = useState(null);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -166,18 +171,44 @@ export default function AIEmployeesPage() {
           .select("id, full_name, role, is_super_admin"),
       ]);
 
-      if (employeesResult.error) throw employeesResult.error;
-      if (departmentsResult.error) throw departmentsResult.error;
-      if (adminsResult.error) throw adminsResult.error;
-      if (profilesResult.error) throw profilesResult.error;
+      if (employeesResult.error) {
+        throw employeesResult.error;
+      }
 
-      setEmployees(employeesResult.data || []);
+      if (departmentsResult.error) {
+        throw departmentsResult.error;
+      }
+
+      if (adminsResult.error) {
+        throw adminsResult.error;
+      }
+
+      if (profilesResult.error) {
+        throw profilesResult.error;
+      }
+
+      const employeeData = employeesResult.data || [];
+
+      setEmployees(employeeData);
       setDepartments(departmentsResult.data || []);
       setAdmins(adminsResult.data || []);
       setProfiles(profilesResult.data || []);
+
+      if (!selectedId && employeeData.length > 0) {
+        setSelectedId(employeeData[0].id);
+      }
+
+      if (
+        selectedId &&
+        !employeeData.some((item) => item.id === selectedId)
+      ) {
+        setSelectedId(employeeData[0]?.id || null);
+      }
     } catch (err) {
       console.error(err);
-      setError(err.message || "حدث خطأ أثناء تحميل البيانات");
+      setError(
+        err.message || "حدث خطأ أثناء تحميل موظفي AI"
+      );
     } finally {
       setLoading(false);
     }
@@ -190,11 +221,15 @@ export default function AIEmployeesPage() {
   const stats = useMemo(() => {
     return {
       total: employees.length,
-      active: employees.filter((x) => x.status === "active").length,
-      inactive: employees.filter((x) => x.status === "inactive")
-        .length,
-      suspended: employees.filter((x) => x.status === "suspended")
-        .length,
+      active: employees.filter(
+        (x) => x.status === "active"
+      ).length,
+      inactive: employees.filter(
+        (x) => x.status === "inactive"
+      ).length,
+      suspended: employees.filter(
+        (x) => x.status === "suspended"
+      ).length,
       tasks: employees.reduce(
         (sum, x) => sum + Number(x.tasks_completed || 0),
         0
@@ -211,11 +246,11 @@ export default function AIEmployeesPage() {
 
     return employees.filter((employee) => {
       const department = departments.find(
-        (x) => x.id === employee.department_id
+        (item) => item.id === employee.department_id
       );
 
       const admin = admins.find(
-        (x) => x.id === employee.admin_id
+        (item) => item.id === employee.admin_id
       );
 
       const adminName = getAdminName(admin, profiles);
@@ -223,8 +258,12 @@ export default function AIEmployeesPage() {
       const matchesSearch =
         !query ||
         employee.name?.toLowerCase().includes(query) ||
-        employee.specialization?.toLowerCase().includes(query) ||
-        department?.name?.toLowerCase().includes(query) ||
+        employee.specialization
+          ?.toLowerCase()
+          .includes(query) ||
+        department?.name
+          ?.toLowerCase()
+          .includes(query) ||
         adminName?.toLowerCase().includes(query);
 
       const matchesStatus =
@@ -241,6 +280,14 @@ export default function AIEmployeesPage() {
     search,
     statusFilter,
   ]);
+
+  const selectedEmployee = useMemo(() => {
+    return (
+      employees.find(
+        (employee) => employee.id === selectedId
+      ) || null
+    );
+  }, [employees, selectedId]);
 
   function openCreate() {
     setEditingId(null);
@@ -326,11 +373,14 @@ export default function AIEmployeesPage() {
         name: form.name.trim(),
         specialization:
           form.specialization.trim() || null,
-        department_id: form.department_id || null,
-        admin_id: form.admin_id || null,
+        department_id:
+          form.department_id || null,
+        admin_id:
+          form.admin_id || null,
         personality:
           form.personality.trim() || null,
-        tone: form.tone.trim() || null,
+        tone:
+          form.tone.trim() || null,
         level: form.level,
         status: form.status,
         avatar_url:
@@ -344,23 +394,31 @@ export default function AIEmployeesPage() {
       };
 
       if (editingId) {
-        const { error: updateError } = await supabase
-          .from("ai_employees")
-          .update(payload)
-          .eq("id", editingId);
+        const { error: updateError } =
+          await supabase
+            .from("ai_employees")
+            .update(payload)
+            .eq("id", editingId);
 
         if (updateError) throw updateError;
 
-        setMessage("تم تحديث موظف AI بنجاح");
+        setMessage("تم تحديث الموظف بنجاح");
       } else {
-        const { error: insertError } = await supabase
-          .from("ai_employees")
-          .insert({
-            ...payload,
-            created_by: user?.id || null,
-          });
+        const { data, error: insertError } =
+          await supabase
+            .from("ai_employees")
+            .insert({
+              ...payload,
+              created_by: user?.id || null,
+            })
+            .select()
+            .single();
 
         if (insertError) throw insertError;
+
+        if (data?.id) {
+          setSelectedId(data.id);
+        }
 
         setMessage("تم إنشاء موظف AI بنجاح");
       }
@@ -372,7 +430,9 @@ export default function AIEmployeesPage() {
       await loadData();
     } catch (err) {
       console.error(err);
-      setError(err.message || "تعذر حفظ موظف AI");
+      setError(
+        err.message || "تعذر حفظ موظف AI"
+      );
     } finally {
       setSaving(false);
     }
@@ -387,32 +447,40 @@ export default function AIEmployeesPage() {
         : "active";
 
     try {
-      const { error: updateError } = await supabase
-        .from("ai_employees")
-        .update({
-          status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", employee.id);
+      const { error: updateError } =
+        await supabase
+          .from("ai_employees")
+          .update({
+            status: nextStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", employee.id);
 
       if (updateError) throw updateError;
 
       await loadData();
     } catch (err) {
       console.error(err);
-      setError(err.message || "تعذر تغيير حالة الموظف");
+      setError(
+        err.message ||
+          "تعذر تغيير حالة الموظف"
+      );
     }
   }
 
   function departmentName(id) {
     return (
-      departments.find((x) => x.id === id)?.name ||
-      "بدون قسم"
+      departments.find(
+        (item) => item.id === id
+      )?.name || "بدون قسم"
     );
   }
 
   function adminName(id) {
-    const admin = admins.find((x) => x.id === id);
+    const admin = admins.find(
+      (item) => item.id === id
+    );
+
     return getAdminName(admin, profiles);
   }
 
@@ -420,16 +488,14 @@ export default function AIEmployeesPage() {
     return (
       <main
         dir="rtl"
-        className="min-h-screen bg-[#f6f8f7] p-6"
+        className="min-h-screen bg-[#f7f8f8]"
       >
-        <div className="mx-auto max-w-7xl">
-          <div className="flex min-h-[60vh] items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-[3px] border-emerald-100 border-t-emerald-600" />
-              <p className="text-sm text-gray-500">
-                جاري تحميل موظفي AI...
-              </p>
-            </div>
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto mb-4 h-9 w-9 animate-spin rounded-full border-[3px] border-emerald-100 border-t-emerald-600" />
+            <p className="text-sm text-gray-500">
+              جاري تحميل إدارة موظفي AI...
+            </p>
           </div>
         </div>
       </main>
@@ -439,558 +505,814 @@ export default function AIEmployeesPage() {
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-[#f6f8f7] text-gray-900"
+      className="min-h-screen bg-[#f7f8f8]"
     >
-      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">
 
-        {/* Top Header */}
-        <header className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        {/* Header */}
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-sm text-gray-500">
-              <span>الإدارة</span>
-              <span className="text-gray-300">/</span>
-              <span>الشركة</span>
-              <span className="text-gray-300">/</span>
-              <span className="font-medium text-emerald-600">
-                موظفو AI
-              </span>
+            <div className="mb-2 text-xs text-gray-400">
+              الإدارة الداخلية / موظفو AI
             </div>
 
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-[18px] border border-emerald-100 bg-white text-2xl shadow-sm">
-                🤖
-              </div>
+            <h1 className="text-2xl font-bold text-gray-950">
+              فريق الذكاء الاصطناعي
+            </h1>
 
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  موظفو AI
-                </h1>
-
-                <p className="mt-1 text-sm text-gray-500">
-                  إدارة فريق الذكاء الاصطناعي وربطه بالأقسام والـ Admins
-                  والصلاحيات.
-                </p>
-              </div>
-            </div>
+            <p className="mt-1 text-sm text-gray-500">
+              أنشئ موظفي AI واربطهم بالأقسام والـ Admins
+              وأدر صلاحياتهم وأدائهم.
+            </p>
           </div>
 
           <button
             onClick={openCreate}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
+            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
           >
             <span className="text-lg">+</span>
-            إضافة موظف AI
+            موظف AI جديد
           </button>
-        </header>
+        </div>
 
         {/* Messages */}
         {message && (
-          <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             {message}
           </div>
         )}
 
         {error && (
-          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* Stats */}
-        <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Stat
-            label="إجمالي الموظفين"
+        {/* Overview */}
+        <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Overview
+            title="الموظفون"
             value={stats.total}
-            icon="🤖"
           />
 
-          <Stat
-            label="نشط"
+          <Overview
+            title="نشط"
             value={stats.active}
-            icon="●"
             green
           />
 
-          <Stat
-            label="غير نشط"
+          <Overview
+            title="غير نشط"
             value={stats.inactive}
-            icon="○"
           />
 
-          <Stat
-            label="موقوف"
+          <Overview
+            title="موقوف"
             value={stats.suspended}
-            icon="!"
-            red
           />
 
-          <Stat
-            label="المهام المكتملة"
+          <Overview
+            title="المهام"
             value={formatNumber(stats.tasks)}
-            icon="✓"
           />
 
-          <Stat
-            label="إجمالي التكلفة"
+          <Overview
+            title="التكلفة"
             value={`${formatCost(stats.cost)} $`}
-            icon="$"
           />
         </section>
 
-        {/* Toolbar */}
-        <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
-          <div className="flex flex-col gap-3 md:flex-row">
-            <div className="relative flex-1">
-              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
-                ⌕
-              </span>
+        {/* Workspace */}
+        <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_2px_18px_rgba(0,0,0,0.035)]">
 
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="ابحث عن موظف، تخصص، قسم أو Admin..."
-                className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 pr-11 pl-4 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
-              />
+          {/* Toolbar */}
+          <div className="border-b border-gray-100 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  ⌕
+                </span>
+
+                <input
+                  value={search}
+                  onChange={(e) =>
+                    setSearch(e.target.value)
+                  }
+                  placeholder="بحث عن موظف..."
+                  className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pr-10 pl-4 text-sm outline-none focus:border-emerald-400 focus:bg-white"
+                />
+              </div>
+
+              <select
+                value={statusFilter}
+                onChange={(e) =>
+                  setStatusFilter(e.target.value)
+                }
+                className="h-11 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-emerald-400"
+              >
+                <option value="all">
+                  كل الحالات
+                </option>
+
+                <option value="active">
+                  نشط
+                </option>
+
+                <option value="inactive">
+                  غير نشط
+                </option>
+
+                <option value="suspended">
+                  موقوف
+                </option>
+              </select>
             </div>
-
-            <select
-              value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value)
-              }
-              className="h-12 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-emerald-400"
-            >
-              <option value="all">كل الحالات</option>
-              <option value="active">نشط</option>
-              <option value="inactive">غير نشط</option>
-              <option value="suspended">موقوف</option>
-            </select>
           </div>
-        </section>
 
-        {/* Employees */}
-        {filteredEmployees.length === 0 ? (
-          <EmptyState
-            hasEmployees={employees.length > 0}
-            onCreate={openCreate}
-          />
-        ) : (
-          <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filteredEmployees.map((employee) => {
-              const permissions = employee.permissions || {};
+          {filteredEmployees.length === 0 ? (
+            <EmptyState
+              hasEmployees={employees.length > 0}
+              onCreate={openCreate}
+            />
+          ) : (
+            <div className="grid min-h-[620px] lg:grid-cols-[310px_1fr]">
 
-              const enabledPermissions =
-                PERMISSIONS.filter(
-                  (item) => permissions[item.key]
-                );
+              {/* Employee list */}
+              <aside className="border-b border-gray-100 bg-[#fbfcfc] lg:border-l lg:border-b-0">
+                <div className="border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-500">
+                      الموظفون
+                    </span>
 
-              return (
-                <article
-                  key={employee.id}
-                  className="group overflow-hidden rounded-[26px] border border-gray-200 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.04)] transition duration-200 hover:-translate-y-1 hover:shadow-[0_12px_35px_rgba(0,0,0,0.08)]"
-                >
-                  {/* Employee top */}
-                  <div className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          <div className="flex h-[68px] w-[68px] items-center justify-center overflow-hidden rounded-[22px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-gray-50 text-3xl">
-                            {employee.avatar_url ? (
-                              <img
-                                src={employee.avatar_url}
-                                alt={employee.name}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              "🤖"
-                            )}
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold text-gray-500">
+                      {filteredEmployees.length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="max-h-[650px] overflow-y-auto p-2">
+                  {filteredEmployees.map(
+                    (employee) => {
+                      const active =
+                        employee.id === selectedId;
+
+                      return (
+                        <button
+                          key={employee.id}
+                          onClick={() =>
+                            setSelectedId(
+                              employee.id
+                            )
+                          }
+                          className={`mb-1 flex w-full items-center gap-3 rounded-xl p-3 text-right transition ${
+                            active
+                              ? "bg-emerald-50"
+                              : "hover:bg-gray-100"
+                          }`}
+                        >
+                          <div className="relative shrink-0">
+                            <div
+                              className={`flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl ${
+                                active
+                                  ? "bg-white"
+                                  : "bg-gray-100"
+                              }`}
+                            >
+                              {employee.avatar_url ? (
+                                <img
+                                  src={
+                                    employee.avatar_url
+                                  }
+                                  alt={
+                                    employee.name
+                                  }
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-xl">
+                                  🤖
+                                </span>
+                              )}
+                            </div>
+
+                            <span
+                              className={`absolute -bottom-0.5 -left-0.5 h-3 w-3 rounded-full border-2 border-white ${
+                                employee.status ===
+                                "active"
+                                  ? "bg-emerald-500"
+                                  : employee.status ===
+                                    "suspended"
+                                  ? "bg-red-500"
+                                  : "bg-gray-300"
+                              }`}
+                            />
                           </div>
 
-                          <span
-                            className={`absolute -bottom-1 -left-1 h-4 w-4 rounded-full border-[3px] border-white ${
-                              employee.status === "active"
-                                ? "bg-emerald-500"
-                                : employee.status ===
-                                  "suspended"
-                                ? "bg-red-500"
-                                : "bg-gray-300"
-                            }`}
-                          />
-                        </div>
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className={`truncate text-sm font-bold ${
+                                active
+                                  ? "text-emerald-800"
+                                  : "text-gray-800"
+                              }`}
+                            >
+                              {employee.name}
+                            </div>
 
-                        <div>
-                          <h2 className="text-lg font-bold">
-                            {employee.name}
-                          </h2>
+                            <div className="mt-0.5 truncate text-[11px] text-gray-400">
+                              {employee.specialization ||
+                                "موظف AI"}
+                            </div>
+                          </div>
 
-                          <p className="mt-1 text-sm text-gray-500">
-                            {employee.specialization ||
-                              "موظف AI"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
-                          employee.status === "active"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : employee.status === "suspended"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-gray-100 text-gray-500"
-                        }`}
-                      >
-                        {statusLabel(employee.status)}
-                      </span>
-                    </div>
-
-                    {/* Structure */}
-                    <div className="mt-6 space-y-3">
-                      <DataLine
-                        icon="⌂"
-                        label="القسم"
-                        value={departmentName(
-                          employee.department_id
-                        )}
-                      />
-
-                      <DataLine
-                        icon="◉"
-                        label="Admin المسؤول"
-                        value={adminName(
-                          employee.admin_id
-                        )}
-                      />
-
-                      <DataLine
-                        icon="★"
-                        label="المستوى"
-                        value={levelLabel(employee.level)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Performance */}
-                  <div className="border-y border-gray-100 bg-[#fafcfb] px-6 py-4">
-                    <div className="grid grid-cols-3 gap-3">
-                      <Performance
-                        label="النجاح"
-                        value={`${Number(
-                          employee.success_rate || 0
-                        ).toFixed(0)}%`}
-                      />
-
-                      <Performance
-                        label="التقييم"
-                        value={`${Number(
-                          employee.average_rating || 0
-                        ).toFixed(1)}`}
-                      />
-
-                      <Performance
-                        label="المهام"
-                        value={formatNumber(
-                          employee.tasks_completed
-                        )}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Permissions */}
-                  <div className="px-6 py-5">
-                    <div className="mb-3 flex items-center justify-between">
-                      <span className="text-xs font-bold text-gray-500">
-                        الصلاحيات
-                      </span>
-
-                      <span className="text-[11px] text-gray-400">
-                        {enabledPermissions.length} مفعلة
-                      </span>
-                    </div>
-
-                    <div className="flex min-h-[34px] flex-wrap gap-2">
-                      {enabledPermissions.length > 0 ? (
-                        enabledPermissions.map((permission) => (
-                          <span
-                            key={permission.key}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-medium text-gray-600"
-                          >
+                          {active && (
                             <span className="text-emerald-600">
-                              {permission.icon}
+                              ←
                             </span>
+                          )}
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              </aside>
 
-                            {permission.label}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-gray-400">
-                          لم يتم تحديد صلاحيات
-                        </span>
-                      )}
-                    </div>
+              {/* Employee profile */}
+              <div className="bg-white">
+                {selectedEmployee ? (
+                  <EmployeeProfile
+                    employee={
+                      selectedEmployee
+                    }
+                    departmentName={
+                      departmentName
+                    }
+                    adminName={adminName}
+                    openEdit={openEdit}
+                    toggleStatus={
+                      toggleStatus
+                    }
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[600px] items-center justify-center">
+                    <p className="text-sm text-gray-400">
+                      اختر موظفاً لعرض ملفه
+                    </p>
                   </div>
-
-                  {/* Footer */}
-                  <div className="flex items-center gap-2 border-t border-gray-100 p-4">
-                    <button
-                      onClick={() =>
-                        openEdit(employee)
-                      }
-                      className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
-                    >
-                      تعديل الموظف
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        toggleStatus(employee)
-                      }
-                      className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-gray-800"
-                    >
-                      {employee.status === "active"
-                        ? "إيقاف"
-                        : "تفعيل"}
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
-        )}
+                )}
+              </div>
+            </div>
+          )}
+        </section>
       </div>
 
       {/* Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-950/50 px-3 py-5 backdrop-blur-[2px] sm:px-6">
-          <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
+        <EmployeeModal
+          editingId={editingId}
+          form={form}
+          saving={saving}
+          departments={departments}
+          admins={admins}
+          profiles={profiles}
+          employees={employees}
+          updateField={updateField}
+          togglePermission={
+            togglePermission
+          }
+          closeModal={closeModal}
+          saveEmployee={saveEmployee}
+        />
+      )}
+    </main>
+  );
+}
 
-            {/* Modal Header */}
-            <div className="relative overflow-hidden bg-[#101815] px-6 py-7 text-white sm:px-8">
-              <div className="absolute -left-16 -top-20 h-52 w-52 rounded-full bg-emerald-500/10 blur-2xl" />
-              <div className="absolute -bottom-24 right-20 h-52 w-52 rounded-full bg-emerald-400/10 blur-2xl" />
+function EmployeeProfile({
+  employee,
+  departmentName,
+  adminName,
+  openEdit,
+  toggleStatus,
+}) {
+  const permissions =
+    employee.permissions || {};
 
-              <div className="relative flex items-start justify-between gap-4">
-                <div>
-                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-emerald-300">
-                    <span>🤖</span>
-                    <span>AI EMPLOYEE</span>
-                  </div>
+  const enabledPermissions =
+    PERMISSIONS.filter(
+      (item) => permissions[item.key]
+    );
 
-                  <h2 className="text-2xl font-bold">
-                    {editingId
-                      ? "تعديل موظف AI"
-                      : "إضافة موظف AI"}
-                  </h2>
-
-                  <p className="mt-2 text-sm text-gray-400">
-                    أنشئ ملف الموظف وحدد دوره وصلاحياته داخل سوق AI.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xl text-gray-300 transition hover:bg-white/15 hover:text-white"
-                >
-                  ×
-                </button>
+  return (
+    <div>
+      {/* Profile header */}
+      <div className="border-b border-gray-100 px-5 py-6 sm:px-8">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-gray-50 text-4xl">
+                {employee.avatar_url ? (
+                  <img
+                    src={employee.avatar_url}
+                    alt={employee.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  "🤖"
+                )}
               </div>
+
+              <span
+                className={`absolute -bottom-1 -left-1 h-5 w-5 rounded-full border-[3px] border-white ${
+                  employee.status === "active"
+                    ? "bg-emerald-500"
+                    : employee.status ===
+                      "suspended"
+                    ? "bg-red-500"
+                    : "bg-gray-300"
+                }`}
+              />
             </div>
 
-            <form
-              onSubmit={saveEmployee}
-              className="p-5 sm:p-8"
+            <div>
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-bold text-gray-950">
+                  {employee.name}
+                </h2>
+
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                    employee.status ===
+                    "active"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : employee.status ===
+                        "suspended"
+                      ? "bg-red-50 text-red-700"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {statusLabel(
+                    employee.status
+                  )}
+                </span>
+              </div>
+
+              <p className="text-sm text-gray-500">
+                {employee.specialization ||
+                  "موظف ذكاء اصطناعي"}
+              </p>
+
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-400">
+                <span>
+                  {departmentName(
+                    employee.department_id
+                  )}
+                </span>
+
+                <span>•</span>
+
+                <span>
+                  {levelLabel(
+                    employee.level
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() =>
+                openEdit(employee)
+              }
+              className="rounded-xl border border-gray-200 px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50"
             >
-              <FormSection
-                icon="01"
-                title="البيانات الأساسية"
-                description="اسم الموظف وتخصصه وحالته."
-              >
-                <div className="grid gap-5 md:grid-cols-2">
-                  <Field
-                    label="اسم موظف AI"
-                    required
-                    value={form.name}
-                    onChange={(value) =>
-                      updateField("name", value)
-                    }
-                    placeholder="مثال: والم"
-                  />
+              تعديل
+            </button>
 
-                  <Field
-                    label="التخصص"
-                    value={form.specialization}
-                    onChange={(value) =>
-                      updateField(
-                        "specialization",
-                        value
-                      )
-                    }
-                    placeholder="مثال: مساعد إدارة وتشغيل"
-                  />
+            <button
+              onClick={() =>
+                toggleStatus(employee)
+              }
+              className="rounded-xl bg-gray-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-gray-800"
+            >
+              {employee.status === "active"
+                ? "إيقاف"
+                : "تفعيل"}
+            </button>
+          </div>
+        </div>
+      </div>
 
-                  <Field
-                    label="رابط الصورة"
-                    value={form.avatar_url}
-                    onChange={(value) =>
-                      updateField("avatar_url", value)
-                    }
-                    placeholder="اختياري"
-                  />
+      {/* Quick stats */}
+      <div className="grid grid-cols-2 border-b border-gray-100 sm:grid-cols-4">
+        <ProfileStat
+          label="المهام المكتملة"
+          value={formatNumber(
+            employee.tasks_completed
+          )}
+        />
 
-                  <SelectField
-                    label="المستوى"
-                    value={form.level}
-                    onChange={(value) =>
-                      updateField("level", value)
-                    }
-                    options={LEVELS}
-                  />
+        <ProfileStat
+          label="نسبة النجاح"
+          value={`${Number(
+            employee.success_rate || 0
+          ).toFixed(1)}%`}
+        />
 
-                  <SelectField
-                    label="الحالة"
-                    value={form.status}
-                    onChange={(value) =>
-                      updateField("status", value)
-                    }
-                    options={STATUSES}
-                  />
-                </div>
-              </FormSection>
+        <ProfileStat
+          label="التقييم"
+          value={`${Number(
+            employee.average_rating || 0
+          ).toFixed(1)} / 5`}
+        />
 
-              <FormSection
-                icon="02"
-                title="الهيكل الإداري"
-                description="حدد القسم والـ Admin المسؤول."
-              >
-                <div className="grid gap-5 md:grid-cols-2">
-                  <SelectField
-                    label="القسم"
-                    value={form.department_id}
-                    onChange={(value) =>
-                      updateField(
-                        "department_id",
-                        value
-                      )
-                    }
-                    options={[
-                      {
-                        value: "",
-                        label: "بدون قسم",
-                      },
-                      ...departments.map((item) => ({
+        <ProfileStat
+          label="التكلفة"
+          value={`${formatCost(
+            employee.total_cost
+          )} $`}
+        />
+      </div>
+
+      {/* Details */}
+      <div className="grid gap-6 p-5 sm:p-8 xl:grid-cols-2">
+
+        <ProfileSection
+          title="الهيكل الإداري"
+          icon="⌂"
+        >
+          <Detail
+            label="القسم"
+            value={departmentName(
+              employee.department_id
+            )}
+          />
+
+          <Detail
+            label="Admin المسؤول"
+            value={adminName(
+              employee.admin_id
+            )}
+          />
+
+          <Detail
+            label="المستوى"
+            value={levelLabel(
+              employee.level
+            )}
+          />
+
+          <Detail
+            label="الحالة"
+            value={statusLabel(
+              employee.status
+            )}
+          />
+        </ProfileSection>
+
+        <ProfileSection
+          title="الشخصية والأسلوب"
+          icon="✦"
+        >
+          <Detail
+            label="الشخصية"
+            value={
+              employee.personality ||
+              "لم يتم تحديدها"
+            }
+          />
+
+          <Detail
+            label="أسلوب الكلام"
+            value={
+              employee.tone ||
+              "لم يتم تحديده"
+            }
+          />
+        </ProfileSection>
+
+        <ProfileSection
+          title="الوصف"
+          icon="i"
+        >
+          <p className="text-sm leading-7 text-gray-600">
+            {employee.description ||
+              "لا يوجد وصف لهذا الموظف حتى الآن."}
+          </p>
+        </ProfileSection>
+
+        <ProfileSection
+          title="التعليمات"
+          icon="!"
+        >
+          <p className="whitespace-pre-wrap text-sm leading-7 text-gray-600">
+            {employee.instructions ||
+              "لا توجد تعليمات مخصصة حتى الآن."}
+          </p>
+        </ProfileSection>
+
+        <div className="xl:col-span-2">
+          <ProfileSection
+            title="الصلاحيات"
+            icon="✓"
+          >
+            {enabledPermissions.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {enabledPermissions.map(
+                  (permission) => (
+                    <div
+                      key={permission.key}
+                      className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3"
+                    >
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm text-emerald-600">
+                        {permission.icon}
+                      </span>
+
+                      <span className="text-xs font-bold text-emerald-800">
+                        {permission.label}
+                      </span>
+                    </div>
+                  )
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">
+                لم يتم تحديد صلاحيات لهذا الموظف.
+              </p>
+            )}
+          </ProfileSection>
+        </div>
+
+        <div className="xl:col-span-2">
+          <ProfileSection
+            title="الأداء التشغيلي"
+            icon="⌁"
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <OperationMetric
+                label="المهام المكتملة"
+                value={formatNumber(
+                  employee.tasks_completed
+                )}
+              />
+
+              <OperationMetric
+                label="المهام الفاشلة"
+                value={formatNumber(
+                  employee.tasks_failed
+                )}
+              />
+
+              <OperationMetric
+                label="متوسط سرعة التنفيذ"
+                value={`${Number(
+                  employee.average_speed_seconds ||
+                    0
+                ).toFixed(0)} ثانية`}
+              />
+            </div>
+          </ProfileSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeModal({
+  editingId,
+  form,
+  saving,
+  departments,
+  admins,
+  profiles,
+  updateField,
+  togglePermission,
+  closeModal,
+  saveEmployee,
+}) {
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 px-3 py-5 backdrop-blur-sm">
+      <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+
+        <div className="border-b border-gray-100 px-5 py-5 sm:px-7">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-emerald-600">
+                AI EMPLOYEE
+              </p>
+
+              <h2 className="mt-1 text-xl font-bold">
+                {editingId
+                  ? "تعديل موظف AI"
+                  : "إضافة موظف AI"}
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={closeModal}
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500 hover:bg-gray-200"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <form
+          onSubmit={saveEmployee}
+          className="max-h-[75vh] overflow-y-auto p-5 sm:p-7"
+        >
+          <div className="space-y-6">
+
+            <ModalSection title="البيانات الأساسية">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="اسم الموظف"
+                  required
+                  value={form.name}
+                  onChange={(value) =>
+                    updateField(
+                      "name",
+                      value
+                    )
+                  }
+                  placeholder="مثال: والم"
+                />
+
+                <Input
+                  label="التخصص"
+                  value={
+                    form.specialization
+                  }
+                  onChange={(value) =>
+                    updateField(
+                      "specialization",
+                      value
+                    )
+                  }
+                  placeholder="مثال: مساعد إدارة وتشغيل"
+                />
+
+                <Input
+                  label="رابط الصورة"
+                  value={
+                    form.avatar_url
+                  }
+                  onChange={(value) =>
+                    updateField(
+                      "avatar_url",
+                      value
+                    )
+                  }
+                  placeholder="اختياري"
+                />
+
+                <Select
+                  label="المستوى"
+                  value={form.level}
+                  onChange={(value) =>
+                    updateField(
+                      "level",
+                      value
+                    )
+                  }
+                  options={LEVELS}
+                />
+
+                <Select
+                  label="الحالة"
+                  value={form.status}
+                  onChange={(value) =>
+                    updateField(
+                      "status",
+                      value
+                    )
+                  }
+                  options={STATUSES}
+                />
+              </div>
+            </ModalSection>
+
+            <ModalSection title="الهيكل الإداري">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Select
+                  label="القسم"
+                  value={
+                    form.department_id
+                  }
+                  onChange={(value) =>
+                    updateField(
+                      "department_id",
+                      value
+                    )
+                  }
+                  options={[
+                    {
+                      value: "",
+                      label: "بدون قسم",
+                    },
+                    ...departments.map(
+                      (item) => ({
                         value: item.id,
                         label: item.name,
-                      })),
-                    ]}
-                  />
+                      })
+                    ),
+                  ]}
+                />
 
-                  <SelectField
-                    label="Admin المسؤول"
-                    value={form.admin_id}
-                    onChange={(value) =>
-                      updateField(
-                        "admin_id",
-                        value
-                      )
-                    }
-                    options={[
-                      {
-                        value: "",
-                        label: "بدون Admin",
-                      },
-                      ...admins.map((item) => ({
+                <Select
+                  label="Admin المسؤول"
+                  value={form.admin_id}
+                  onChange={(value) =>
+                    updateField(
+                      "admin_id",
+                      value
+                    )
+                  }
+                  options={[
+                    {
+                      value: "",
+                      label: "بدون Admin",
+                    },
+                    ...admins.map(
+                      (item) => ({
                         value: item.id,
                         label: getAdminName(
                           item,
                           profiles
                         ),
-                      })),
-                    ]}
-                  />
-                </div>
+                      })
+                    ),
+                  ]}
+                />
+              </div>
+            </ModalSection>
 
-                {(departments.length === 0 ||
-                  admins.length === 0) && (
-                  <div className="mt-4 rounded-xl bg-amber-50 p-4 text-xs leading-6 text-amber-700">
-                    {departments.length === 0 &&
-                      "لا توجد أقسام حالياً. "}
-                    {admins.length === 0 &&
-                      "لا يوجد Admin حالياً."}
-                    {" يمكنك ربط الموظف لاحقاً."}
-                  </div>
-                )}
-              </FormSection>
+            <ModalSection title="الشخصية وطريقة العمل">
+              <div className="space-y-4">
+                <TextArea
+                  label="الشخصية"
+                  value={
+                    form.personality
+                  }
+                  onChange={(value) =>
+                    updateField(
+                      "personality",
+                      value
+                    )
+                  }
+                  placeholder="دقيق، عملي، مبادر..."
+                />
 
-              <FormSection
-                icon="03"
-                title="الشخصية والأسلوب"
-                description="حدد شخصية الموظف وطريقة تواصله."
-              >
-                <div className="grid gap-5 md:grid-cols-2">
-                  <TextArea
-                    label="الشخصية"
-                    value={form.personality}
-                    onChange={(value) =>
-                      updateField(
-                        "personality",
-                        value
-                      )
-                    }
-                    placeholder="دقيق، عملي، مبادر، يراجع العمل قبل اعتماده..."
-                  />
+                <TextArea
+                  label="أسلوب الكلام"
+                  value={form.tone}
+                  onChange={(value) =>
+                    updateField(
+                      "tone",
+                      value
+                    )
+                  }
+                  placeholder="إماراتية احترافية وودية..."
+                />
 
-                  <TextArea
-                    label="أسلوب الكلام"
-                    value={form.tone}
-                    onChange={(value) =>
-                      updateField("tone", value)
-                    }
-                    placeholder="إماراتية احترافية وودية..."
-                  />
+                <TextArea
+                  label="الوصف"
+                  value={
+                    form.description
+                  }
+                  onChange={(value) =>
+                    updateField(
+                      "description",
+                      value
+                    )
+                  }
+                  placeholder="ما دور الموظف داخل سوق AI؟"
+                />
 
-                  <div className="md:col-span-2">
-                    <TextArea
-                      label="الوصف"
-                      value={form.description}
-                      onChange={(value) =>
-                        updateField(
-                          "description",
-                          value
-                        )
-                      }
-                      placeholder="ما وظيفة هذا الموظف داخل سوق AI؟"
-                      rows={4}
-                    />
-                  </div>
-                </div>
-              </FormSection>
-
-              <FormSection
-                icon="04"
-                title="طريقة العمل"
-                description="تعليمات التشغيل التي يجب أن يلتزم بها الموظف."
-              >
                 <TextArea
                   label="التعليمات الأساسية"
-                  value={form.instructions}
+                  value={
+                    form.instructions
+                  }
                   onChange={(value) =>
                     updateField(
                       "instructions",
                       value
                     )
                   }
-                  placeholder="راجع المهمة قبل تنفيذها، لا تفترض معلومات غير مؤكدة، لا تدّعي إنجاز أي عمل لم يتم فعلياً..."
+                  placeholder="تعليمات يجب على الموظف الالتزام بها..."
                   rows={6}
                 />
-              </FormSection>
+              </div>
+            </ModalSection>
 
-              <FormSection
-                icon="05"
-                title="الصلاحيات"
-                description="حدد المجالات التي يستطيع الموظف العمل فيها."
-              >
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {PERMISSIONS.map((permission) => {
+            <ModalSection title="الصلاحيات">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {PERMISSIONS.map(
+                  (permission) => {
                     const enabled =
                       !!form.permissions[
                         permission.key
@@ -998,28 +1320,24 @@ export default function AIEmployeesPage() {
 
                     return (
                       <button
-                        key={permission.key}
                         type="button"
+                        key={permission.key}
                         onClick={() =>
                           togglePermission(
                             permission.key
                           )
                         }
-                        className={`rounded-2xl border p-4 text-right transition ${
+                        className={`rounded-xl border p-3 text-right transition ${
                           enabled
                             ? "border-emerald-200 bg-emerald-50"
-                            : "border-gray-200 bg-gray-50 hover:bg-white"
+                            : "border-gray-200 bg-gray-50"
                         }`}
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <span
-                            className={`text-lg ${
-                              enabled
-                                ? "text-emerald-600"
-                                : "text-gray-400"
-                            }`}
-                          >
-                            {permission.icon}
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm">
+                            {
+                              permission.icon
+                            }
                           </span>
 
                           <span
@@ -1029,270 +1347,174 @@ export default function AIEmployeesPage() {
                                 : "bg-gray-200 text-gray-400"
                             }`}
                           >
-                            {enabled ? "✓" : ""}
+                            {enabled
+                              ? "✓"
+                              : ""}
                           </span>
                         </div>
 
-                        <span
-                          className={`text-xs font-bold ${
+                        <div
+                          className={`mt-2 text-xs font-bold ${
                             enabled
                               ? "text-emerald-700"
                               : "text-gray-600"
                           }`}
                         >
-                          {permission.label}
-                        </span>
+                          {
+                            permission.label
+                          }
+                        </div>
                       </button>
                     );
-                  })}
-                </div>
-              </FormSection>
-
-              <FormSection
-                icon="06"
-                title="الأداء"
-                description="يتم تحديث هذه الأرقام تلقائياً من نظام المهام."
-              >
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                  <MetricBox
-                    label="مكتملة"
-                    value={
-                      editingId
-                        ? formatNumber(
-                            employees.find(
-                              (x) =>
-                                x.id === editingId
-                            )?.tasks_completed
-                          )
-                        : "0"
-                    }
-                  />
-
-                  <MetricBox
-                    label="فاشلة"
-                    value={
-                      editingId
-                        ? formatNumber(
-                            employees.find(
-                              (x) =>
-                                x.id === editingId
-                            )?.tasks_failed
-                          )
-                        : "0"
-                    }
-                  />
-
-                  <MetricBox
-                    label="نسبة النجاح"
-                    value={
-                      editingId
-                        ? `${Number(
-                            employees.find(
-                              (x) =>
-                                x.id === editingId
-                            )?.success_rate || 0
-                          ).toFixed(1)}%`
-                        : "0%"
-                    }
-                  />
-
-                  <MetricBox
-                    label="التقييم"
-                    value={
-                      editingId
-                        ? `${Number(
-                            employees.find(
-                              (x) =>
-                                x.id === editingId
-                            )?.average_rating || 0
-                          ).toFixed(1)} / 5`
-                        : "0 / 5"
-                    }
-                  />
-
-                  <MetricBox
-                    label="التكلفة"
-                    value={
-                      editingId
-                        ? `${formatCost(
-                            employees.find(
-                              (x) =>
-                                x.id === editingId
-                            )?.total_cost
-                          )} $`
-                        : "0.0000 $"
-                    }
-                  />
-                </div>
-              </FormSection>
-
-              <div className="flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={saving}
-                  className="rounded-xl border border-gray-200 px-6 py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
-                >
-                  إلغاء
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-xl bg-emerald-600 px-7 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {saving
-                    ? "جاري الحفظ..."
-                    : editingId
-                    ? "حفظ التعديلات"
-                    : "إنشاء موظف AI"}
-                </button>
+                  }
+                )}
               </div>
-            </form>
+            </ModalSection>
           </div>
-        </div>
-      )}
-    </main>
+
+          <div className="mt-7 flex flex-col-reverse gap-2 border-t border-gray-100 pt-5 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={closeModal}
+              disabled={saving}
+              className="rounded-xl border border-gray-200 px-5 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50"
+            >
+              إلغاء
+            </button>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving
+                ? "جاري الحفظ..."
+                : editingId
+                ? "حفظ التعديلات"
+                : "إنشاء الموظف"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
-function Stat({
-  label,
+function Overview({
+  title,
   value,
-  icon,
   green,
-  red,
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.025)]">
-      <div
-        className={`mb-3 flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold ${
-          red
-            ? "bg-red-50 text-red-500"
-            : green
-            ? "bg-emerald-50 text-emerald-600"
-            : "bg-gray-100 text-gray-500"
-        }`}
-      >
-        {icon}
-      </div>
-
-      <p className="text-xs text-gray-500">
-        {label}
+    <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.025)]">
+      <p className="text-[11px] text-gray-400">
+        {title}
       </p>
 
-      <p className="mt-1 text-xl font-bold">
+      <p
+        className={`mt-2 text-xl font-bold ${
+          green
+            ? "text-emerald-600"
+            : "text-gray-900"
+        }`}
+      >
         {value}
       </p>
     </div>
   );
 }
 
-function DataLine({
-  icon,
+function ProfileStat({
   label,
   value,
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-xl bg-gray-50 px-3 py-2.5">
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <span className="text-emerald-600">
+    <div className="border-l border-gray-100 px-5 py-5 text-center last:border-l-0">
+      <div className="text-lg font-bold text-gray-900">
+        {value}
+      </div>
+
+      <div className="mt-1 text-[10px] text-gray-400">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function ProfileSection({
+  title,
+  icon,
+  children,
+}) {
+  return (
+    <section className="rounded-2xl border border-gray-200 p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-sm text-emerald-600">
           {icon}
         </span>
 
-        <span>{label}</span>
+        <h3 className="text-sm font-bold">
+          {title}
+        </h3>
       </div>
 
-      <span className="max-w-[55%] truncate text-xs font-bold text-gray-700">
+      {children}
+    </section>
+  );
+}
+
+function Detail({
+  label,
+  value,
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-gray-100 py-3 last:border-b-0">
+      <span className="text-xs text-gray-400">
+        {label}
+      </span>
+
+      <span className="max-w-[65%] text-left text-xs font-bold leading-5 text-gray-700">
         {value}
       </span>
     </div>
   );
 }
 
-function Performance({
+function OperationMetric({
   label,
   value,
 }) {
   return (
-    <div className="text-center">
-      <p className="text-lg font-bold text-gray-900">
-        {value}
+    <div className="rounded-xl bg-gray-50 p-4">
+      <p className="text-[10px] text-gray-400">
+        {label}
       </p>
 
-      <p className="mt-1 text-[10px] text-gray-400">
-        {label}
+      <p className="mt-2 text-lg font-bold text-gray-900">
+        {value}
       </p>
     </div>
   );
 }
 
-function EmptyState({
-  hasEmployees,
-  onCreate,
-}) {
-  return (
-    <section className="rounded-[26px] border border-gray-200 bg-white px-6 py-20 text-center shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
-      <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] bg-emerald-50 text-4xl">
-        🤖
-      </div>
-
-      <h2 className="text-xl font-bold">
-        {hasEmployees
-          ? "لا توجد نتائج مطابقة"
-          : "لا يوجد موظفو AI حتى الآن"}
-      </h2>
-
-      <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-gray-500">
-        {hasEmployees
-          ? "جرّب تغيير البحث أو فلتر الحالة."
-          : "أنشئ أول موظف AI وابدأ ببناء فريق الذكاء الاصطناعي داخل سوق AI."}
-      </p>
-
-      {!hasEmployees && (
-        <button
-          onClick={onCreate}
-          className="mt-6 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-emerald-700"
-        >
-          + إضافة أول موظف AI
-        </button>
-      )}
-    </section>
-  );
-}
-
-function FormSection({
-  icon,
+function ModalSection({
   title,
-  description,
   children,
 }) {
   return (
-    <section className="mb-6">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[10px] font-bold text-emerald-600">
-          {icon}
-        </div>
+    <section>
+      <h3 className="mb-3 text-sm font-bold text-gray-900">
+        {title}
+      </h3>
 
-        <div>
-          <h3 className="text-sm font-bold text-gray-900">
-            {title}
-          </h3>
-
-          <p className="mt-1 text-xs leading-5 text-gray-400">
-            {description}
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+      <div className="rounded-xl border border-gray-200 p-4">
         {children}
       </div>
     </section>
   );
 }
 
-function Field({
+function Input({
   label,
   required,
   value,
@@ -1316,7 +1538,7 @@ function Field({
           onChange(e.target.value)
         }
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
+        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white"
       />
     </label>
   );
@@ -1327,7 +1549,7 @@ function TextArea({
   value,
   onChange,
   placeholder,
-  rows = 5,
+  rows = 4,
 }) {
   return (
     <label className="block">
@@ -1342,13 +1564,13 @@ function TextArea({
         }
         placeholder={placeholder}
         rows={rows}
-        className="w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 outline-none transition focus:border-emerald-400 focus:bg-white"
+        className="w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 outline-none focus:border-emerald-400 focus:bg-white"
       />
     </label>
   );
 }
 
-function SelectField({
+function Select({
   label,
   value,
   onChange,
@@ -1365,7 +1587,7 @@ function SelectField({
         onChange={(e) =>
           onChange(e.target.value)
         }
-        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
+        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none focus:border-emerald-400 focus:bg-white"
       >
         {options.map((option) => (
           <option
@@ -1380,19 +1602,38 @@ function SelectField({
   );
 }
 
-function MetricBox({
-  label,
-  value,
+function EmptyState({
+  hasEmployees,
+  onCreate,
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-      <p className="text-[10px] text-gray-400">
-        {label}
-      </p>
+    <div className="flex min-h-[500px] items-center justify-center p-8">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-50 text-4xl">
+          🤖
+        </div>
 
-      <p className="mt-2 text-sm font-bold text-gray-800">
-        {value}
-      </p>
+        <h2 className="text-xl font-bold">
+          {hasEmployees
+            ? "لا توجد نتائج"
+            : "لا يوجد موظفو AI حتى الآن"}
+        </h2>
+
+        <p className="mt-2 text-sm leading-7 text-gray-500">
+          {hasEmployees
+            ? "جرّب تغيير البحث أو فلتر الحالة."
+            : "أنشئ أول موظف AI وابدأ ببناء فريق الذكاء الاصطناعي داخل سوق AI."}
+        </p>
+
+        {!hasEmployees && (
+          <button
+            onClick={onCreate}
+            className="mt-5 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700"
+          >
+            + إضافة أول موظف AI
+          </button>
+        )}
+      </div>
     </div>
   );
 }
