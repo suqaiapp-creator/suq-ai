@@ -43,38 +43,15 @@ const STATUSES = [
 ];
 
 const PERMISSIONS = [
-  { key: "products", label: "المنتجات" },
-  { key: "marketing", label: "التسويق" },
-  { key: "design", label: "التصميم" },
-  { key: "video", label: "الفيديو" },
-  { key: "analytics", label: "التحليلات" },
-  { key: "moderation", label: "المراجعة" },
-  { key: "publishing", label: "النشر" },
-  { key: "tasks", label: "إدارة المهام" },
+  { key: "products", label: "المنتجات", icon: "▣" },
+  { key: "marketing", label: "التسويق", icon: "✦" },
+  { key: "design", label: "التصميم", icon: "◈" },
+  { key: "video", label: "الفيديو", icon: "▶" },
+  { key: "analytics", label: "التحليلات", icon: "⌁" },
+  { key: "moderation", label: "المراجعة", icon: "✓" },
+  { key: "publishing", label: "النشر", icon: "↗" },
+  { key: "tasks", label: "المهام", icon: "☷" },
 ];
-
-function statusLabel(status) {
-  if (status === "active") return "نشط";
-  if (status === "inactive") return "غير نشط";
-  if (status === "suspended") return "موقوف";
-  return status || "غير محدد";
-}
-
-function statusClass(status) {
-  if (status === "active") {
-    return "bg-emerald-50 text-emerald-700 border-emerald-200";
-  }
-
-  if (status === "suspended") {
-    return "bg-red-50 text-red-700 border-red-200";
-  }
-
-  return "bg-gray-50 text-gray-600 border-gray-200";
-}
-
-function levelLabel(level) {
-  return LEVELS.find((item) => item.value === level)?.label || level || "—";
-}
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-US");
@@ -82,6 +59,13 @@ function formatNumber(value) {
 
 function formatCost(value) {
   return Number(value || 0).toFixed(4);
+}
+
+function statusLabel(status) {
+  if (status === "active") return "نشط";
+  if (status === "inactive") return "غير نشط";
+  if (status === "suspended") return "موقوف";
+  return "غير محدد";
 }
 
 function getAdminName(admin, profiles) {
@@ -97,12 +81,19 @@ function getAdminName(admin, profiles) {
   );
 }
 
+function levelLabel(level) {
+  return (
+    LEVELS.find((item) => item.value === level)?.label ||
+    level ||
+    "—"
+  );
+}
+
 export default function AIEmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [user, setUser] = useState(null);
-
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [admins, setAdmins] = useState([]);
@@ -113,6 +104,7 @@ export default function AIEmployeesPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+
   const [form, setForm] = useState(EMPTY_FORM);
 
   const [message, setMessage] = useState("");
@@ -134,11 +126,12 @@ export default function AIEmployeesPage() {
 
       setUser(currentUser);
 
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, full_name, role, is_super_admin")
-        .eq("id", currentUser.id)
-        .single();
+      const { data: profile, error: profileError } =
+        await supabase
+          .from("profiles")
+          .select("id, full_name, role, is_super_admin")
+          .eq("id", currentUser.id)
+          .single();
 
       if (profileError) throw profileError;
 
@@ -195,37 +188,21 @@ export default function AIEmployeesPage() {
   }, []);
 
   const stats = useMemo(() => {
-    const total = employees.length;
-
-    const active = employees.filter(
-      (item) => item.status === "active"
-    ).length;
-
-    const inactive = employees.filter(
-      (item) => item.status === "inactive"
-    ).length;
-
-    const suspended = employees.filter(
-      (item) => item.status === "suspended"
-    ).length;
-
-    const tasks = employees.reduce(
-      (sum, item) => sum + Number(item.tasks_completed || 0),
-      0
-    );
-
-    const cost = employees.reduce(
-      (sum, item) => sum + Number(item.total_cost || 0),
-      0
-    );
-
     return {
-      total,
-      active,
-      inactive,
-      suspended,
-      tasks,
-      cost,
+      total: employees.length,
+      active: employees.filter((x) => x.status === "active").length,
+      inactive: employees.filter((x) => x.status === "inactive")
+        .length,
+      suspended: employees.filter((x) => x.status === "suspended")
+        .length,
+      tasks: employees.reduce(
+        (sum, x) => sum + Number(x.tasks_completed || 0),
+        0
+      ),
+      cost: employees.reduce(
+        (sum, x) => sum + Number(x.total_cost || 0),
+        0
+      ),
     };
   }, [employees]);
 
@@ -234,11 +211,11 @@ export default function AIEmployeesPage() {
 
     return employees.filter((employee) => {
       const department = departments.find(
-        (item) => item.id === employee.department_id
+        (x) => x.id === employee.department_id
       );
 
       const admin = admins.find(
-        (item) => item.id === employee.admin_id
+        (x) => x.id === employee.admin_id
       );
 
       const adminName = getAdminName(admin, profiles);
@@ -247,7 +224,6 @@ export default function AIEmployeesPage() {
         !query ||
         employee.name?.toLowerCase().includes(query) ||
         employee.specialization?.toLowerCase().includes(query) ||
-        employee.description?.toLowerCase().includes(query) ||
         department?.name?.toLowerCase().includes(query) ||
         adminName?.toLowerCase().includes(query);
 
@@ -276,8 +252,8 @@ export default function AIEmployeesPage() {
       },
     });
 
-    setMessage("");
     setError("");
+    setMessage("");
     setModalOpen(true);
   }
 
@@ -302,8 +278,8 @@ export default function AIEmployeesPage() {
       },
     });
 
-    setMessage("");
     setError("");
+    setMessage("");
     setModalOpen(true);
   }
 
@@ -348,16 +324,21 @@ export default function AIEmployeesPage() {
     try {
       const payload = {
         name: form.name.trim(),
-        specialization: form.specialization.trim() || null,
+        specialization:
+          form.specialization.trim() || null,
         department_id: form.department_id || null,
         admin_id: form.admin_id || null,
-        personality: form.personality.trim() || null,
+        personality:
+          form.personality.trim() || null,
         tone: form.tone.trim() || null,
         level: form.level,
         status: form.status,
-        avatar_url: form.avatar_url.trim() || null,
-        description: form.description.trim() || null,
-        instructions: form.instructions.trim() || null,
+        avatar_url:
+          form.avatar_url.trim() || null,
+        description:
+          form.description.trim() || null,
+        instructions:
+          form.instructions.trim() || null,
         permissions: form.permissions,
         updated_at: new Date().toISOString(),
       };
@@ -398,10 +379,12 @@ export default function AIEmployeesPage() {
   }
 
   async function toggleStatus(employee) {
-    const nextStatus =
-      employee.status === "active" ? "inactive" : "active";
-
     setError("");
+
+    const nextStatus =
+      employee.status === "active"
+        ? "inactive"
+        : "active";
 
     try {
       const { error: updateError } = await supabase
@@ -423,13 +406,13 @@ export default function AIEmployeesPage() {
 
   function departmentName(id) {
     return (
-      departments.find((item) => item.id === id)?.name ||
+      departments.find((x) => x.id === id)?.name ||
       "بدون قسم"
     );
   }
 
   function adminName(id) {
-    const admin = admins.find((item) => item.id === id);
+    const admin = admins.find((x) => x.id === id);
     return getAdminName(admin, profiles);
   }
 
@@ -437,14 +420,16 @@ export default function AIEmployeesPage() {
     return (
       <main
         dir="rtl"
-        className="min-h-screen bg-gray-50 p-6"
+        className="min-h-screen bg-[#f6f8f7] p-6"
       >
         <div className="mx-auto max-w-7xl">
-          <div className="rounded-3xl border bg-white p-10 text-center shadow-sm">
-            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-emerald-100 border-t-emerald-600" />
-            <p className="text-gray-600">
-              جاري تحميل موظفي AI...
-            </p>
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="text-center">
+              <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-[3px] border-emerald-100 border-t-emerald-600" />
+              <p className="text-sm text-gray-500">
+                جاري تحميل موظفي AI...
+              </p>
+            </div>
           </div>
         </div>
       </main>
@@ -454,111 +439,126 @@ export default function AIEmployeesPage() {
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-gray-50 px-4 py-6 sm:px-6"
+      className="min-h-screen bg-[#f6f8f7] text-gray-900"
     >
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8">
 
-        {/* Header */}
-        <section className="rounded-3xl bg-gradient-to-l from-emerald-700 to-green-600 p-6 text-white shadow-lg">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="mb-2 flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-2xl">
-                  🤖
-                </div>
-
-                <div>
-                  <p className="text-sm text-emerald-100">
-                    الإدارة الداخلية
-                  </p>
-
-                  <h1 className="text-2xl font-bold">
-                    موظفو AI
-                  </h1>
-                </div>
-              </div>
-
-              <p className="max-w-2xl text-sm leading-7 text-emerald-50">
-                إدارة موظفي الذكاء الاصطناعي وربط كل موظف بالقسم
-                والـ Admin والتخصص والصلاحيات ومتابعة أدائه.
-              </p>
+        {/* Top Header */}
+        <header className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="mb-3 flex items-center gap-2 text-sm text-gray-500">
+              <span>الإدارة</span>
+              <span className="text-gray-300">/</span>
+              <span>الشركة</span>
+              <span className="text-gray-300">/</span>
+              <span className="font-medium text-emerald-600">
+                موظفو AI
+              </span>
             </div>
 
-            <button
-              onClick={openCreate}
-              className="rounded-2xl bg-white px-5 py-3 font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-50"
-            >
-              + إضافة موظف AI
-            </button>
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-[18px] border border-emerald-100 bg-white text-2xl shadow-sm">
+                🤖
+              </div>
+
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                  موظفو AI
+                </h1>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  إدارة فريق الذكاء الاصطناعي وربطه بالأقسام والـ Admins
+                  والصلاحيات.
+                </p>
+              </div>
+            </div>
           </div>
-        </section>
+
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
+          >
+            <span className="text-lg">+</span>
+            إضافة موظف AI
+          </button>
+        </header>
 
         {/* Messages */}
         {message && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+          <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
             {message}
           </div>
         )}
 
         {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
             {error}
           </div>
         )}
 
         {/* Stats */}
-        <section className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-          <StatCard
-            label="الإجمالي"
+        <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Stat
+            label="إجمالي الموظفين"
             value={stats.total}
             icon="🤖"
           />
 
-          <StatCard
+          <Stat
             label="نشط"
             value={stats.active}
-            icon="🟢"
+            icon="●"
+            green
           />
 
-          <StatCard
+          <Stat
             label="غير نشط"
             value={stats.inactive}
-            icon="⚪"
+            icon="○"
           />
 
-          <StatCard
+          <Stat
             label="موقوف"
             value={stats.suspended}
-            icon="🔴"
+            icon="!"
+            red
           />
 
-          <StatCard
+          <Stat
             label="المهام المكتملة"
-            value={stats.tasks}
-            icon="✅"
+            value={formatNumber(stats.tasks)}
+            icon="✓"
           />
 
-          <StatCard
-            label="التكلفة"
+          <Stat
+            label="إجمالي التكلفة"
             value={`${formatCost(stats.cost)} $`}
-            icon="💰"
+            icon="$"
           />
         </section>
 
-        {/* Filters */}
-        <section className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ابحث باسم الموظف أو التخصص أو القسم أو الـ Admin..."
-              className="flex-1 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none transition focus:border-emerald-500 focus:bg-white"
-            />
+        {/* Toolbar */}
+        <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_2px_12px_rgba(0,0,0,0.03)]">
+          <div className="flex flex-col gap-3 md:flex-row">
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
+                ⌕
+              </span>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="ابحث عن موظف، تخصص، قسم أو Admin..."
+                className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 pr-11 pl-4 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
+              />
+            </div>
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none focus:border-emerald-500"
+              onChange={(e) =>
+                setStatusFilter(e.target.value)
+              }
+              className="h-12 rounded-xl border border-gray-200 bg-gray-50 px-4 text-sm outline-none focus:border-emerald-400"
             >
               <option value="all">كل الحالات</option>
               <option value="active">نشط</option>
@@ -570,137 +570,158 @@ export default function AIEmployeesPage() {
 
         {/* Employees */}
         {filteredEmployees.length === 0 ? (
-          <section className="rounded-3xl border border-gray-200 bg-white p-10 text-center shadow-sm">
-            <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-50 text-4xl">
-              🤖
-            </div>
-
-            <h2 className="text-xl font-bold text-gray-900">
-              {employees.length === 0
-                ? "لا يوجد موظفو AI حتى الآن"
-                : "لا توجد نتائج مطابقة"}
-            </h2>
-
-            <p className="mx-auto mt-2 max-w-xl text-sm leading-7 text-gray-500">
-              {employees.length === 0
-                ? "أضف أول موظف AI واربطه بالقسم والـ Admin المسؤول عنه."
-                : "جرّب تغيير البحث أو فلتر الحالة."}
-            </p>
-
-            {employees.length === 0 && (
-              <button
-                onClick={openCreate}
-                className="mt-6 rounded-2xl bg-emerald-600 px-5 py-3 font-bold text-white transition hover:bg-emerald-700"
-              >
-                + إضافة أول موظف AI
-              </button>
-            )}
-          </section>
+          <EmptyState
+            hasEmployees={employees.length > 0}
+            onCreate={openCreate}
+          />
         ) : (
           <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {filteredEmployees.map((employee) => {
               const permissions = employee.permissions || {};
 
+              const enabledPermissions =
+                PERMISSIONS.filter(
+                  (item) => permissions[item.key]
+                );
+
               return (
                 <article
                   key={employee.id}
-                  className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  className="group overflow-hidden rounded-[26px] border border-gray-200 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.04)] transition duration-200 hover:-translate-y-1 hover:shadow-[0_12px_35px_rgba(0,0,0,0.08)]"
                 >
-                  {/* Card Header */}
-                  <div className="border-b border-gray-100 p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-emerald-50 text-2xl">
-                          {employee.avatar_url ? (
-                            <img
-                              src={employee.avatar_url}
-                              alt={employee.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            "🤖"
-                          )}
+                  {/* Employee top */}
+                  <div className="p-6">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="relative">
+                          <div className="flex h-[68px] w-[68px] items-center justify-center overflow-hidden rounded-[22px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-gray-50 text-3xl">
+                            {employee.avatar_url ? (
+                              <img
+                                src={employee.avatar_url}
+                                alt={employee.name}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              "🤖"
+                            )}
+                          </div>
+
+                          <span
+                            className={`absolute -bottom-1 -left-1 h-4 w-4 rounded-full border-[3px] border-white ${
+                              employee.status === "active"
+                                ? "bg-emerald-500"
+                                : employee.status ===
+                                  "suspended"
+                                ? "bg-red-500"
+                                : "bg-gray-300"
+                            }`}
+                          />
                         </div>
 
                         <div>
-                          <h2 className="font-bold text-gray-900">
+                          <h2 className="text-lg font-bold">
                             {employee.name}
                           </h2>
 
-                          <p className="mt-1 text-xs text-gray-500">
-                            {employee.specialization || "بدون تخصص محدد"}
+                          <p className="mt-1 text-sm text-gray-500">
+                            {employee.specialization ||
+                              "موظف AI"}
                           </p>
                         </div>
                       </div>
 
                       <span
-                        className={`rounded-full border px-3 py-1 text-xs font-bold ${statusClass(
-                          employee.status
-                        )}`}
+                        className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
+                          employee.status === "active"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : employee.status === "suspended"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-gray-100 text-gray-500"
+                        }`}
                       >
                         {statusLabel(employee.status)}
                       </span>
                     </div>
+
+                    {/* Structure */}
+                    <div className="mt-6 space-y-3">
+                      <DataLine
+                        icon="⌂"
+                        label="القسم"
+                        value={departmentName(
+                          employee.department_id
+                        )}
+                      />
+
+                      <DataLine
+                        icon="◉"
+                        label="Admin المسؤول"
+                        value={adminName(
+                          employee.admin_id
+                        )}
+                      />
+
+                      <DataLine
+                        icon="★"
+                        label="المستوى"
+                        value={levelLabel(employee.level)}
+                      />
+                    </div>
                   </div>
 
-                  {/* Structure */}
-                  <div className="space-y-3 p-5">
-                    <InfoRow
-                      icon="🏢"
-                      label="القسم"
-                      value={departmentName(employee.department_id)}
-                    />
+                  {/* Performance */}
+                  <div className="border-y border-gray-100 bg-[#fafcfb] px-6 py-4">
+                    <div className="grid grid-cols-3 gap-3">
+                      <Performance
+                        label="النجاح"
+                        value={`${Number(
+                          employee.success_rate || 0
+                        ).toFixed(0)}%`}
+                      />
 
-                    <InfoRow
-                      icon="👤"
-                      label="Admin المسؤول"
-                      value={adminName(employee.admin_id)}
-                    />
+                      <Performance
+                        label="التقييم"
+                        value={`${Number(
+                          employee.average_rating || 0
+                        ).toFixed(1)}`}
+                      />
 
-                    <InfoRow
-                      icon="⭐"
-                      label="المستوى"
-                      value={levelLabel(employee.level)}
-                    />
-
-                    <InfoRow
-                      icon="🎯"
-                      label="نسبة النجاح"
-                      value={`${Number(
-                        employee.success_rate || 0
-                      ).toFixed(1)}%`}
-                    />
-
-                    <InfoRow
-                      icon="📊"
-                      label="التقييم"
-                      value={`${Number(
-                        employee.average_rating || 0
-                      ).toFixed(1)} / 5`}
-                    />
+                      <Performance
+                        label="المهام"
+                        value={formatNumber(
+                          employee.tasks_completed
+                        )}
+                      />
+                    </div>
                   </div>
 
                   {/* Permissions */}
-                  <div className="border-t border-gray-100 p-5">
-                    <p className="mb-3 text-xs font-bold text-gray-500">
-                      الصلاحيات
-                    </p>
+                  <div className="px-6 py-5">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-500">
+                        الصلاحيات
+                      </span>
 
-                    <div className="flex flex-wrap gap-2">
-                      {PERMISSIONS.filter(
-                        (item) => permissions[item.key]
-                      ).map((item) => (
-                        <span
-                          key={item.key}
-                          className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700"
-                        >
-                          {item.label}
-                        </span>
-                      ))}
+                      <span className="text-[11px] text-gray-400">
+                        {enabledPermissions.length} مفعلة
+                      </span>
+                    </div>
 
-                      {!PERMISSIONS.some(
-                        (item) => permissions[item.key]
-                      ) && (
+                    <div className="flex min-h-[34px] flex-wrap gap-2">
+                      {enabledPermissions.length > 0 ? (
+                        enabledPermissions.map((permission) => (
+                          <span
+                            key={permission.key}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-gray-100 px-2.5 py-1.5 text-[11px] font-medium text-gray-600"
+                          >
+                            <span className="text-emerald-600">
+                              {permission.icon}
+                            </span>
+
+                            {permission.label}
+                          </span>
+                        ))
+                      ) : (
                         <span className="text-xs text-gray-400">
                           لم يتم تحديد صلاحيات
                         </span>
@@ -708,40 +729,22 @@ export default function AIEmployeesPage() {
                     </div>
                   </div>
 
-                  {/* Performance */}
-                  <div className="grid grid-cols-3 border-t border-gray-100">
-                    <MiniStat
-                      label="مكتملة"
-                      value={formatNumber(employee.tasks_completed)}
-                    />
-
-                    <MiniStat
-                      label="فاشلة"
-                      value={formatNumber(employee.tasks_failed)}
-                    />
-
-                    <MiniStat
-                      label="التكلفة"
-                      value={formatCost(employee.total_cost)}
-                    />
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-2 border-t border-gray-100 p-4">
+                  {/* Footer */}
+                  <div className="flex items-center gap-2 border-t border-gray-100 p-4">
                     <button
-                      onClick={() => openEdit(employee)}
-                      className="flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm font-bold text-gray-700 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                      onClick={() =>
+                        openEdit(employee)
+                      }
+                      className="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
                     >
-                      تعديل
+                      تعديل الموظف
                     </button>
 
                     <button
-                      onClick={() => toggleStatus(employee)}
-                      className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-bold transition ${
-                        employee.status === "active"
-                          ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                          : "bg-emerald-600 text-white hover:bg-emerald-700"
-                      }`}
+                      onClick={() =>
+                        toggleStatus(employee)
+                      }
+                      className="rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-gray-800"
                     >
                       {employee.status === "active"
                         ? "إيقاف"
@@ -757,44 +760,52 @@ export default function AIEmployeesPage() {
 
       {/* Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
-          <div className="my-6 w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-950/50 px-3 py-5 backdrop-blur-[2px] sm:px-6">
+          <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
 
             {/* Modal Header */}
-            <div className="border-b border-gray-100 bg-gradient-to-l from-emerald-700 to-green-600 px-6 py-5 text-white">
-              <div className="flex items-center justify-between gap-4">
+            <div className="relative overflow-hidden bg-[#101815] px-6 py-7 text-white sm:px-8">
+              <div className="absolute -left-16 -top-20 h-52 w-52 rounded-full bg-emerald-500/10 blur-2xl" />
+              <div className="absolute -bottom-24 right-20 h-52 w-52 rounded-full bg-emerald-400/10 blur-2xl" />
+
+              <div className="relative flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm text-emerald-100">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-emerald-300">
+                    <span>🤖</span>
+                    <span>AI EMPLOYEE</span>
+                  </div>
+
+                  <h2 className="text-2xl font-bold">
                     {editingId
                       ? "تعديل موظف AI"
-                      : "إنشاء موظف AI جديد"}
-                  </p>
-
-                  <h2 className="mt-1 text-xl font-bold">
-                    {editingId
-                      ? form.name || "موظف AI"
                       : "إضافة موظف AI"}
                   </h2>
+
+                  <p className="mt-2 text-sm text-gray-400">
+                    أنشئ ملف الموظف وحدد دوره وصلاحياته داخل سوق AI.
+                  </p>
                 </div>
 
                 <button
+                  type="button"
                   onClick={closeModal}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xl hover:bg-white/20"
+                  className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xl text-gray-300 transition hover:bg-white/15 hover:text-white"
                 >
                   ×
                 </button>
               </div>
             </div>
 
-            <form onSubmit={saveEmployee} className="p-6">
-
-              {/* Section 1 */}
+            <form
+              onSubmit={saveEmployee}
+              className="p-5 sm:p-8"
+            >
               <FormSection
-                number="01"
+                icon="01"
                 title="البيانات الأساسية"
-                description="المعلومات الرئيسية التي تظهر في بطاقة الموظف."
+                description="اسم الموظف وتخصصه وحالته."
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-5 md:grid-cols-2">
                   <Field
                     label="اسم موظف AI"
                     required
@@ -809,18 +820,21 @@ export default function AIEmployeesPage() {
                     label="التخصص"
                     value={form.specialization}
                     onChange={(value) =>
-                      updateField("specialization", value)
+                      updateField(
+                        "specialization",
+                        value
+                      )
                     }
                     placeholder="مثال: مساعد إدارة وتشغيل"
                   />
 
                   <Field
-                    label="الصورة / Avatar"
+                    label="رابط الصورة"
                     value={form.avatar_url}
                     onChange={(value) =>
                       updateField("avatar_url", value)
                     }
-                    placeholder="رابط الصورة - اختياري"
+                    placeholder="اختياري"
                   />
 
                   <SelectField
@@ -843,27 +857,29 @@ export default function AIEmployeesPage() {
                 </div>
               </FormSection>
 
-              {/* Section 2 */}
               <FormSection
-                number="02"
+                icon="02"
                 title="الهيكل الإداري"
-                description="حدد القسم والـ Admin المسؤول عن هذا الموظف."
+                description="حدد القسم والـ Admin المسؤول."
               >
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-5 md:grid-cols-2">
                   <SelectField
                     label="القسم"
                     value={form.department_id}
                     onChange={(value) =>
-                      updateField("department_id", value)
+                      updateField(
+                        "department_id",
+                        value
+                      )
                     }
                     options={[
                       {
                         value: "",
                         label: "بدون قسم",
                       },
-                      ...departments.map((department) => ({
-                        value: department.id,
-                        label: department.name,
+                      ...departments.map((item) => ({
+                        value: item.id,
+                        label: item.name,
                       })),
                     ]}
                   />
@@ -872,129 +888,142 @@ export default function AIEmployeesPage() {
                     label="Admin المسؤول"
                     value={form.admin_id}
                     onChange={(value) =>
-                      updateField("admin_id", value)
+                      updateField(
+                        "admin_id",
+                        value
+                      )
                     }
                     options={[
                       {
                         value: "",
                         label: "بدون Admin",
                       },
-                      ...admins.map((admin) => ({
-                        value: admin.id,
-                        label: getAdminName(admin, profiles),
+                      ...admins.map((item) => ({
+                        value: item.id,
+                        label: getAdminName(
+                          item,
+                          profiles
+                        ),
                       })),
                     ]}
                   />
                 </div>
 
-                {departments.length === 0 && (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                    لا توجد أقسام حالياً. أنشئ قسمًا من صفحة إدارة الشركة
-                    ثم ارجع هنا لربط الموظف به.
-                  </div>
-                )}
-
-                {admins.length === 0 && (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                    لا يوجد Admin حاليًا. يمكنك إنشاء الموظف الآن بدون
-                    Admin، ثم ربطه لاحقًا.
+                {(departments.length === 0 ||
+                  admins.length === 0) && (
+                  <div className="mt-4 rounded-xl bg-amber-50 p-4 text-xs leading-6 text-amber-700">
+                    {departments.length === 0 &&
+                      "لا توجد أقسام حالياً. "}
+                    {admins.length === 0 &&
+                      "لا يوجد Admin حالياً."}
+                    {" يمكنك ربط الموظف لاحقاً."}
                   </div>
                 )}
               </FormSection>
 
-              {/* Section 3 */}
               <FormSection
-                number="03"
+                icon="03"
                 title="الشخصية والأسلوب"
-                description="كيف يفكر الموظف وكيف يتعامل مع المستخدمين والفريق."
+                description="حدد شخصية الموظف وطريقة تواصله."
               >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <TextAreaField
+                <div className="grid gap-5 md:grid-cols-2">
+                  <TextArea
                     label="الشخصية"
                     value={form.personality}
                     onChange={(value) =>
-                      updateField("personality", value)
+                      updateField(
+                        "personality",
+                        value
+                      )
                     }
-                    placeholder="مثال: دقيق، عملي، مبادر، يراجع العمل قبل اعتماده..."
+                    placeholder="دقيق، عملي، مبادر، يراجع العمل قبل اعتماده..."
                   />
 
-                  <TextAreaField
+                  <TextArea
                     label="أسلوب الكلام"
                     value={form.tone}
                     onChange={(value) =>
                       updateField("tone", value)
                     }
-                    placeholder="مثال: إماراتية احترافية وودية..."
+                    placeholder="إماراتية احترافية وودية..."
                   />
 
                   <div className="md:col-span-2">
-                    <TextAreaField
+                    <TextArea
                       label="الوصف"
                       value={form.description}
                       onChange={(value) =>
-                        updateField("description", value)
+                        updateField(
+                          "description",
+                          value
+                        )
                       }
-                      placeholder="اشرح وظيفة الموظف ودوره داخل سوق AI..."
+                      placeholder="ما وظيفة هذا الموظف داخل سوق AI؟"
                       rows={4}
                     />
                   </div>
                 </div>
               </FormSection>
 
-              {/* Section 4 */}
               <FormSection
-                number="04"
-                title="طريقة العمل والتعليمات"
-                description="تعليمات التشغيل التي يجب على موظف AI الالتزام بها."
+                icon="04"
+                title="طريقة العمل"
+                description="تعليمات التشغيل التي يجب أن يلتزم بها الموظف."
               >
-                <TextAreaField
+                <TextArea
                   label="التعليمات الأساسية"
                   value={form.instructions}
                   onChange={(value) =>
-                    updateField("instructions", value)
+                    updateField(
+                      "instructions",
+                      value
+                    )
                   }
-                  placeholder="مثال: راجع المهمة قبل تنفيذها، لا تفترض معلومات غير مؤكدة، لا تدّعي إنجاز أي عمل لم يتم فعليًا..."
+                  placeholder="راجع المهمة قبل تنفيذها، لا تفترض معلومات غير مؤكدة، لا تدّعي إنجاز أي عمل لم يتم فعلياً..."
                   rows={6}
                 />
               </FormSection>
 
-              {/* Section 5 */}
               <FormSection
-                number="05"
+                icon="05"
                 title="الصلاحيات"
-                description="حدد المجالات التي يستطيع موظف AI العمل فيها."
+                description="حدد المجالات التي يستطيع الموظف العمل فيها."
               >
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {PERMISSIONS.map((permission) => {
                     const enabled =
-                      !!form.permissions[permission.key];
+                      !!form.permissions[
+                        permission.key
+                      ];
 
                     return (
                       <button
                         key={permission.key}
                         type="button"
                         onClick={() =>
-                          togglePermission(permission.key)
+                          togglePermission(
+                            permission.key
+                          )
                         }
                         className={`rounded-2xl border p-4 text-right transition ${
                           enabled
-                            ? "border-emerald-300 bg-emerald-50"
-                            : "border-gray-200 bg-gray-50 hover:border-gray-300"
+                            ? "border-emerald-200 bg-emerald-50"
+                            : "border-gray-200 bg-gray-50 hover:bg-white"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="mb-3 flex items-center justify-between">
                           <span
-                            className={`text-sm font-bold ${
+                            className={`text-lg ${
                               enabled
-                                ? "text-emerald-700"
-                                : "text-gray-600"
+                                ? "text-emerald-600"
+                                : "text-gray-400"
                             }`}
                           >
-                            {permission.label}
+                            {permission.icon}
                           </span>
 
                           <span
-                            className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                            className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
                               enabled
                                 ? "bg-emerald-600 text-white"
                                 : "bg-gray-200 text-gray-400"
@@ -1003,78 +1032,92 @@ export default function AIEmployeesPage() {
                             {enabled ? "✓" : ""}
                           </span>
                         </div>
+
+                        <span
+                          className={`text-xs font-bold ${
+                            enabled
+                              ? "text-emerald-700"
+                              : "text-gray-600"
+                          }`}
+                        >
+                          {permission.label}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
               </FormSection>
 
-              {/* Section 6 */}
               <FormSection
-                number="06"
+                icon="06"
                 title="الأداء"
-                description="هذه البيانات يتم تحديثها تلقائياً من نظام المهام لاحقاً."
+                description="يتم تحديث هذه الأرقام تلقائياً من نظام المهام."
               >
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-                  <ReadonlyMetric
-                    label="المهام المكتملة"
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  <MetricBox
+                    label="مكتملة"
                     value={
                       editingId
                         ? formatNumber(
                             employees.find(
-                              (item) => item.id === editingId
+                              (x) =>
+                                x.id === editingId
                             )?.tasks_completed
                           )
                         : "0"
                     }
                   />
 
-                  <ReadonlyMetric
-                    label="المهام الفاشلة"
+                  <MetricBox
+                    label="فاشلة"
                     value={
                       editingId
                         ? formatNumber(
                             employees.find(
-                              (item) => item.id === editingId
+                              (x) =>
+                                x.id === editingId
                             )?.tasks_failed
                           )
                         : "0"
                     }
                   />
 
-                  <ReadonlyMetric
+                  <MetricBox
                     label="نسبة النجاح"
                     value={
                       editingId
                         ? `${Number(
                             employees.find(
-                              (item) => item.id === editingId
+                              (x) =>
+                                x.id === editingId
                             )?.success_rate || 0
                           ).toFixed(1)}%`
                         : "0%"
                     }
                   />
 
-                  <ReadonlyMetric
+                  <MetricBox
                     label="التقييم"
                     value={
                       editingId
                         ? `${Number(
                             employees.find(
-                              (item) => item.id === editingId
+                              (x) =>
+                                x.id === editingId
                             )?.average_rating || 0
                           ).toFixed(1)} / 5`
                         : "0 / 5"
                     }
                   />
 
-                  <ReadonlyMetric
+                  <MetricBox
                     label="التكلفة"
                     value={
                       editingId
                         ? `${formatCost(
                             employees.find(
-                              (item) => item.id === editingId
+                              (x) =>
+                                x.id === editingId
                             )?.total_cost
                           )} $`
                         : "0.0000 $"
@@ -1083,13 +1126,12 @@ export default function AIEmployeesPage() {
                 </div>
               </FormSection>
 
-              {/* Footer */}
-              <div className="mt-8 flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-end">
+              <div className="flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-2xl border border-gray-200 px-6 py-3 font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="rounded-xl border border-gray-200 px-6 py-3 text-sm font-bold text-gray-600 transition hover:bg-gray-50 disabled:opacity-50"
                 >
                   إلغاء
                 </button>
@@ -1097,7 +1139,7 @@ export default function AIEmployeesPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="rounded-2xl bg-emerald-600 px-7 py-3 font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-xl bg-emerald-600 px-7 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {saving
                     ? "جاري الحفظ..."
@@ -1114,69 +1156,138 @@ export default function AIEmployeesPage() {
   );
 }
 
-function StatCard({ label, value, icon }) {
+function Stat({
+  label,
+  value,
+  icon,
+  green,
+  red,
+}) {
   return (
-    <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 text-xl">{icon}</div>
-      <p className="text-xs font-medium text-gray-500">{label}</p>
-      <p className="mt-1 text-xl font-bold text-gray-900">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.025)]">
+      <div
+        className={`mb-3 flex h-9 w-9 items-center justify-center rounded-xl text-sm font-bold ${
+          red
+            ? "bg-red-50 text-red-500"
+            : green
+            ? "bg-emerald-50 text-emerald-600"
+            : "bg-gray-100 text-gray-500"
+        }`}
+      >
+        {icon}
+      </div>
+
+      <p className="text-xs text-gray-500">
+        {label}
+      </p>
+
+      <p className="mt-1 text-xl font-bold">
         {value}
       </p>
     </div>
   );
 }
 
-function InfoRow({ icon, label, value }) {
+function DataLine({
+  icon,
+  label,
+  value,
+}) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-gray-50 px-3 py-2.5">
       <div className="flex items-center gap-2 text-xs text-gray-500">
-        <span>{icon}</span>
+        <span className="text-emerald-600">
+          {icon}
+        </span>
+
         <span>{label}</span>
       </div>
 
-      <span className="max-w-[60%] truncate text-xs font-bold text-gray-800">
+      <span className="max-w-[55%] truncate text-xs font-bold text-gray-700">
         {value}
       </span>
     </div>
   );
 }
 
-function MiniStat({ label, value }) {
+function Performance({
+  label,
+  value,
+}) {
   return (
-    <div className="p-3 text-center">
-      <p className="text-[11px] text-gray-400">{label}</p>
-      <p className="mt-1 text-sm font-bold text-gray-800">
+    <div className="text-center">
+      <p className="text-lg font-bold text-gray-900">
         {value}
+      </p>
+
+      <p className="mt-1 text-[10px] text-gray-400">
+        {label}
       </p>
     </div>
   );
 }
 
+function EmptyState({
+  hasEmployees,
+  onCreate,
+}) {
+  return (
+    <section className="rounded-[26px] border border-gray-200 bg-white px-6 py-20 text-center shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
+      <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] bg-emerald-50 text-4xl">
+        🤖
+      </div>
+
+      <h2 className="text-xl font-bold">
+        {hasEmployees
+          ? "لا توجد نتائج مطابقة"
+          : "لا يوجد موظفو AI حتى الآن"}
+      </h2>
+
+      <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-gray-500">
+        {hasEmployees
+          ? "جرّب تغيير البحث أو فلتر الحالة."
+          : "أنشئ أول موظف AI وابدأ ببناء فريق الذكاء الاصطناعي داخل سوق AI."}
+      </p>
+
+      {!hasEmployees && (
+        <button
+          onClick={onCreate}
+          className="mt-6 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-emerald-700"
+        >
+          + إضافة أول موظف AI
+        </button>
+      )}
+    </section>
+  );
+}
+
 function FormSection({
-  number,
+  icon,
   title,
   description,
   children,
 }) {
   return (
-    <section className="mb-8 rounded-3xl border border-gray-200 bg-gray-50/70 p-5">
-      <div className="mb-5 flex gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-xs font-bold text-emerald-700">
-          {number}
+    <section className="mb-6">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-[10px] font-bold text-emerald-600">
+          {icon}
         </div>
 
         <div>
-          <h3 className="font-bold text-gray-900">
+          <h3 className="text-sm font-bold text-gray-900">
             {title}
           </h3>
 
-          <p className="mt-1 text-xs leading-6 text-gray-500">
+          <p className="mt-1 text-xs leading-5 text-gray-400">
             {description}
           </p>
         </div>
       </div>
 
-      {children}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+        {children}
+      </div>
     </section>
   );
 }
@@ -1190,24 +1301,28 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-bold text-gray-700">
+      <span className="mb-2 block text-xs font-bold text-gray-700">
         {label}
         {required && (
-          <span className="mr-1 text-red-500">*</span>
+          <span className="mr-1 text-red-500">
+            *
+          </span>
         )}
       </span>
 
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) =>
+          onChange(e.target.value)
+        }
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
       />
     </label>
   );
 }
 
-function TextAreaField({
+function TextArea({
   label,
   value,
   onChange,
@@ -1216,16 +1331,18 @@ function TextAreaField({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-bold text-gray-700">
+      <span className="mb-2 block text-xs font-bold text-gray-700">
         {label}
       </span>
 
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) =>
+          onChange(e.target.value)
+        }
         placeholder={placeholder}
         rows={rows}
-        className="w-full resize-y rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm leading-7 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+        className="w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm leading-6 outline-none transition focus:border-emerald-400 focus:bg-white"
       />
     </label>
   );
@@ -1239,14 +1356,16 @@ function SelectField({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-bold text-gray-700">
+      <span className="mb-2 block text-xs font-bold text-gray-700">
         {label}
       </span>
 
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10"
+        onChange={(e) =>
+          onChange(e.target.value)
+        }
+        className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm outline-none transition focus:border-emerald-400 focus:bg-white"
       >
         {options.map((option) => (
           <option
@@ -1261,10 +1380,16 @@ function SelectField({
   );
 }
 
-function ReadonlyMetric({ label, value }) {
+function MetricBox({
+  label,
+  value,
+}) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4">
-      <p className="text-[11px] text-gray-400">{label}</p>
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <p className="text-[10px] text-gray-400">
+        {label}
+      </p>
+
       <p className="mt-2 text-sm font-bold text-gray-800">
         {value}
       </p>
