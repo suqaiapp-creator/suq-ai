@@ -19,7 +19,7 @@ const STATUS = {
     className: "completed",
   },
   failed: {
-    label: "فاشلة",
+    label: "فشل التنفيذ",
     className: "failed",
   },
   cancelled: {
@@ -35,45 +35,67 @@ const PRIORITIES = {
   urgent: "عاجلة",
 };
 
-const emptyForm = {
-  title: "",
-  description: "",
-  task_type: "",
-  ai_employee_id: "",
-  department_id: "",
-  admin_id: "",
-  priority: "normal",
-  points_cost: 0,
-  estimated_cost: 0,
+const REVIEW_STATUS = {
+  not_reviewed: "لم تتم المراجعة",
+  pending: "بانتظار المراجعة",
+  approved: "مقبولة",
+  rejected: "مرفوضة",
+};
+
+const APPROVAL_STATUS = {
+  not_approved: "غير معتمدة",
+  pending: "بانتظار الاعتماد",
+  approved: "معتمدة",
+  rejected: "مرفوضة",
 };
 
 function formatDate(value) {
   if (!value) return "—";
 
   try {
-    return new Intl.DateTimeFormat("ar-AE", {
+    return new Date(value).toLocaleString("ar-AE", {
       dateStyle: "medium",
       timeStyle: "short",
-    }).format(new Date(value));
+    });
   } catch {
-    return value;
+    return "—";
   }
 }
 
 function money(value) {
-  return `$${Number(value || 0).toFixed(4)}`;
+  const number = Number(value || 0);
+
+  return `$${number.toFixed(4)}`;
 }
 
-function getStatus(status) {
+function statusInfo(status) {
   return STATUS[status] || {
     label: status || "غير معروف",
-    className: "unknown",
+    className: "pending",
+  };
+}
+
+function getReviewLabel(status) {
+  return REVIEW_STATUS[status] || "غير معروف";
+}
+
+function getApprovalLabel(status) {
+  return APPROVAL_STATUS[status] || "غير معروف";
+}
+
+function makeLog(type, description, userId = null) {
+  return {
+    type,
+    description,
+    user_id: userId,
+    created_at: new Date().toISOString(),
   };
 }
 
 export default function AITasksPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const [user, setUser] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -81,16 +103,29 @@ export default function AITasksPage() {
   const [departments, setDepartments] = useState([]);
   const [admins, setAdmins] = useState([]);
 
-  const [selectedTask, setSelectedTask] = useState(null);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
 
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState(emptyForm);
+  const [showReview, setShowReview] = useState(false);
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [resultText, setResultText] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
+
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    task_type: "مراجعة",
+    ai_employee_id: "",
+    department_id: "",
+    admin_id: "",
+    priority: "normal",
+    points_cost: "0",
+    estimated_cost: "0",
+  });
 
   async function loadData() {
     setLoading(true);
@@ -99,29 +134,24 @@ export default function AITasksPage() {
     try {
       const {
         data: { user: currentUser },
-        error: authError,
       } = await supabase.auth.getUser();
 
-      if (authError) throw authError;
-
       if (!currentUser) {
-        window.location.href = "/login";
-        return;
+        throw new Error("يجب تسجيل الدخول.");
       }
 
       setUser(currentUser);
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("id, is_super_admin")
+        .select("id,is_super_admin")
         .eq("id", currentUser.id)
         .maybeSingle();
 
       if (profileError) throw profileError;
 
       if (!profile?.is_super_admin) {
-        window.location.href = "/dashboard";
-        return;
+        throw new Error("غير مصرح لك بالدخول إلى هذه الصفحة.");
       }
 
       const [
@@ -137,22 +167,18 @@ export default function AITasksPage() {
 
         supabase
           .from("ai_employees")
-          .select(
-            "id, name, specialization, department_id, admin_id, status, level"
-          )
-          .order("name"),
+          .select("*")
+          .order("created_at", { ascending: false }),
 
         supabase
           .from("departments")
-          .select("id, name, status")
-          .order("name"),
+          .select("*")
+          .order("name", { ascending: true }),
 
         supabase
           .from("admins")
-          .select(
-            "id, user_id, department_id, full_name, title, specialization, status"
-          )
-          .order("full_name"),
+          .select("*")
+          .order("full_name", { ascending: true }),
       ]);
 
       if (tasksResult.error) throw tasksResult.error;
@@ -165,18 +191,11 @@ export default function AITasksPage() {
       setDepartments(departmentsResult.data || []);
       setAdmins(adminsResult.data || []);
 
-      if (selectedTask) {
-        const freshSelected = (tasksResult.data || []).find(
-          (task) => task.id === selectedTask.id
-        );
-
-        if (freshSelected) {
-          setSelectedTask(freshSelected);
-        }
+      if (!selectedTaskId && tasksResult.data?.length) {
+        setSelectedTaskId(tasksResult.data[0].id);
       }
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "تعذر تحميل بيانات المهام.");
+      setError(err.message || "حدث خطأ أثناء تحميل البيانات.");
     } finally {
       setLoading(false);
     }
@@ -186,92 +205,129 @@ export default function AITasksPage() {
     loadData();
   }, []);
 
-  const stats = useMemo(() => {
-    const total = tasks.length;
+  const selectedTask = useMemo(() => {
+    return tasks.find((task) => task.id === selectedTaskId) || null;
+  }, [tasks, selectedTaskId]);
 
-    const pending = tasks.filter((t) => t.status === "pending").length;
-    const processing = tasks.filter((t) => t.status === "processing").length;
-    const completed = tasks.filter((t) => t.status === "completed").length;
-    const failed = tasks.filter((t) => t.status === "failed").length;
-
-    const totalCost = tasks.reduce(
-      (sum, task) => sum + Number(task.actual_cost || task.estimated_cost || 0),
-      0
-    );
-
-    return {
-      total,
-      pending,
-      processing,
-      completed,
-      failed,
-      totalCost,
-    };
-  }, [tasks]);
+  useEffect(() => {
+    if (selectedTask) {
+      setResultText(selectedTask.result || "");
+      setReviewNotes(selectedTask.review_notes || "");
+    }
+  }, [selectedTask]);
 
   const filteredTasks = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return tasks.filter((task) => {
       const employee = employees.find(
-        (employeeItem) => employeeItem.id === task.ai_employee_id
+        (item) => item.id === task.ai_employee_id
       );
 
       const department = departments.find(
-        (departmentItem) => departmentItem.id === task.department_id
+        (item) => item.id === task.department_id
       );
 
       const matchesSearch =
         !query ||
         String(task.title || "").toLowerCase().includes(query) ||
         String(task.description || "").toLowerCase().includes(query) ||
+        String(task.task_type || "").toLowerCase().includes(query) ||
         String(employee?.name || "").toLowerCase().includes(query) ||
         String(department?.name || "").toLowerCase().includes(query);
 
       const matchesStatus =
         statusFilter === "all" || task.status === statusFilter;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [tasks, employees, departments, search, statusFilter]);
+      const matchesPriority =
+        priorityFilter === "all" || task.priority === priorityFilter;
 
-  function updateForm(field, value) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+      return matchesSearch && matchesStatus && matchesPriority;
+    });
+  }, [
+    tasks,
+    employees,
+    departments,
+    search,
+    statusFilter,
+    priorityFilter,
+  ]);
+
+  const stats = useMemo(() => {
+    return {
+      total: tasks.length,
+      pending: tasks.filter((x) => x.status === "pending").length,
+      processing: tasks.filter((x) => x.status === "processing").length,
+      completed: tasks.filter((x) => x.status === "completed").length,
+      failed: tasks.filter((x) => x.status === "failed").length,
+      review: tasks.filter(
+        (x) =>
+          x.review_status === "pending" ||
+          (x.status === "completed" &&
+            x.review_status !== "approved")
+      ).length,
+      approved: tasks.filter((x) => x.approval_status === "approved").length,
+      cost: tasks.reduce(
+        (sum, x) => sum + Number(x.actual_cost || x.estimated_cost || 0),
+        0
+      ),
+    };
+  }, [tasks]);
+
+  function employeeName(id) {
+    return (
+      employees.find((item) => item.id === id)?.name ||
+      "غير محدد"
+    );
   }
 
-  function handleEmployeeChange(employeeId) {
-    const employee = employees.find((item) => item.id === employeeId);
+  function departmentName(id) {
+    return (
+      departments.find((item) => item.id === id)?.name ||
+      "غير محدد"
+    );
+  }
 
-    setForm((current) => ({
-      ...current,
-      ai_employee_id: employeeId,
-      department_id: employee?.department_id || current.department_id || "",
-      admin_id: employee?.admin_id || current.admin_id || "",
-    }));
+  function adminName(id) {
+    return (
+      admins.find((item) => item.id === id)?.full_name ||
+      "غير محدد"
+    );
   }
 
   async function createTask(event) {
     event.preventDefault();
 
     if (!form.title.trim()) {
-      setError("اسم المهمة مطلوب.");
+      setError("اكتب عنوان المهمة.");
       return;
     }
 
     setSaving(true);
     setError("");
-    setMessage("");
 
     try {
+      const employee = employees.find(
+        (item) => item.id === form.ai_employee_id
+      );
+
+      const departmentId =
+        form.department_id || employee?.department_id || null;
+
+      const executionLog = [
+        makeLog(
+          "created",
+          "تم إنشاء المهمة.",
+          user?.id || null
+        ),
+      ];
+
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
-        task_type: form.task_type.trim() || null,
+        task_type: form.task_type || null,
         ai_employee_id: form.ai_employee_id || null,
-        department_id: form.department_id || null,
+        department_id: departmentId,
         admin_id: form.admin_id || null,
         created_by: user?.id || null,
         priority: form.priority,
@@ -283,122 +339,278 @@ export default function AITasksPage() {
         points_cost: Number(form.points_cost || 0),
         estimated_cost: Number(form.estimated_cost || 0),
         actual_cost: 0,
-        started_at: null,
-        completed_at: null,
+        review_status: "not_reviewed",
+        approval_status: "not_approved",
+        execution_log: executionLog,
       };
 
       const { data, error: insertError } = await supabase
         .from("ai_tasks")
         .insert(payload)
-        .select("*")
+        .select()
         .single();
 
       if (insertError) throw insertError;
 
       setTasks((current) => [data, ...current]);
-      setSelectedTask(data);
+      setSelectedTaskId(data.id);
 
-      setForm(emptyForm);
+      setForm({
+        title: "",
+        description: "",
+        task_type: "مراجعة",
+        ai_employee_id: "",
+        department_id: "",
+        admin_id: "",
+        priority: "normal",
+        points_cost: "0",
+        estimated_cost: "0",
+      });
+
       setShowCreate(false);
-      setMessage("تم إنشاء المهمة بنجاح.");
-
-      setTimeout(() => setMessage(""), 3000);
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "تعذر إنشاء المهمة.");
+      setError(err.message || "تعذر إنشاء المهمة.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function updateTaskStatus(nextStatus) {
-    if (!selectedTask) return;
-
-    const allowedTransitions = {
-      pending: ["processing", "cancelled"],
-      processing: ["completed", "failed"],
-      completed: [],
-      failed: [],
-      cancelled: [],
-    };
-
-    const allowed = allowedTransitions[selectedTask.status] || [];
-
-    if (!allowed.includes(nextStatus)) {
-      setError("لا يمكن تنفيذ هذه الخطوة من حالة المهمة الحالية.");
-      return;
-    }
-
+  async function updateTask(taskId, updates, logEntry = null) {
     setSaving(true);
     setError("");
-    setMessage("");
 
     try {
-      const updates = {
-        status: nextStatus,
+      const current = tasks.find((item) => item.id === taskId);
+
+      const currentLog = Array.isArray(current?.execution_log)
+        ? current.execution_log
+        : [];
+
+      const nextLog = logEntry
+        ? [...currentLog, logEntry]
+        : currentLog;
+
+      const payload = {
+        ...updates,
         updated_at: new Date().toISOString(),
+        execution_log: nextLog,
       };
-
-      if (nextStatus === "processing") {
-        updates.started_at =
-          selectedTask.started_at || new Date().toISOString();
-      }
-
-      if (nextStatus === "completed") {
-        updates.completed_at = new Date().toISOString();
-
-        if (!selectedTask.result) {
-          updates.result =
-            "تم إنهاء المهمة بنجاح. التنفيذ الذكي سيتم ربطه لاحقًا.";
-        }
-
-        updates.actual_cost = Number(selectedTask.actual_cost || 0);
-      }
-
-      if (nextStatus === "failed") {
-        updates.result = "تم تسجيل المهمة كفاشلة يدويًا.";
-      }
-
-      if (nextStatus === "cancelled") {
-        updates.result = "تم إلغاء المهمة.";
-      }
 
       const { data, error: updateError } = await supabase
         .from("ai_tasks")
-        .update(updates)
-        .eq("id", selectedTask.id)
-        .select("*")
+        .update(payload)
+        .eq("id", taskId)
+        .select()
         .single();
 
       if (updateError) throw updateError;
 
-      setTasks((current) =>
-        current.map((task) => (task.id === data.id ? data : task))
+      setTasks((currentTasks) =>
+        currentTasks.map((item) =>
+          item.id === taskId ? data : item
+        )
       );
-
-      setSelectedTask(data);
-
-      setMessage(
-        nextStatus === "processing"
-          ? "تم بدء المهمة."
-          : nextStatus === "completed"
-          ? "تم إنهاء المهمة بنجاح."
-          : nextStatus === "cancelled"
-          ? "تم إلغاء المهمة."
-          : "تم تحديث حالة المهمة."
-      );
-
-      setTimeout(() => setMessage(""), 3000);
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "تعذر تحديث حالة المهمة.");
+      setError(err.message || "تعذر تحديث المهمة.");
     } finally {
       setSaving(false);
     }
   }
 
+  async function startTask() {
+    if (!selectedTask) return;
+
+    if (
+      selectedTask.status !== "pending" &&
+      selectedTask.status !== "failed"
+    ) {
+      return;
+    }
+
+    await updateTask(
+      selectedTask.id,
+      {
+        status: "processing",
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        error_message: null,
+      },
+      makeLog(
+        "started",
+        "تم بدء تنفيذ المهمة.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function completeTask() {
+    if (!selectedTask) return;
+
+    if (selectedTask.status !== "processing") return;
+
+    const defaultResult =
+      selectedTask.result ||
+      "تم إنهاء المهمة بنجاح. التنفيذ الذكي سيتم ربطه لاحقًا.";
+
+    await updateTask(
+      selectedTask.id,
+      {
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        result: defaultResult,
+        result_data: {
+          message: defaultResult,
+        },
+        review_status: "pending",
+        approval_status: "pending",
+        error_message: null,
+      },
+      makeLog(
+        "completed",
+        "تم إنهاء تنفيذ المهمة وأصبحت بانتظار المراجعة.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function failTask() {
+    if (!selectedTask) return;
+
+    await updateTask(
+      selectedTask.id,
+      {
+        status: "failed",
+        error_message: "تم وضع المهمة كفاشلة بواسطة Super Admin.",
+      },
+      makeLog(
+        "failed",
+        "تم وضع المهمة كفاشلة.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function cancelTask() {
+    if (!selectedTask) return;
+
+    if (
+      selectedTask.status !== "pending" &&
+      selectedTask.status !== "processing"
+    ) {
+      return;
+    }
+
+    await updateTask(
+      selectedTask.id,
+      {
+        status: "cancelled",
+        completed_at: new Date().toISOString(),
+      },
+      makeLog(
+        "cancelled",
+        "تم إلغاء المهمة.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function saveReview() {
+    if (!selectedTask) return;
+
+    const trimmedResult = resultText.trim();
+    const trimmedNotes = reviewNotes.trim();
+
+    await updateTask(
+      selectedTask.id,
+      {
+        result: trimmedResult || null,
+        result_data: trimmedResult
+          ? { message: trimmedResult }
+          : {},
+        review_notes: trimmedNotes || null,
+        review_status: "pending",
+      },
+      makeLog(
+        "review_updated",
+        "تم تحديث نتيجة وملاحظات المهمة.",
+        user?.id || null
+      )
+    );
+
+    setShowReview(false);
+  }
+
+  async function approveReview() {
+    if (!selectedTask) return;
+
+    await updateTask(
+      selectedTask.id,
+      {
+        review_status: "approved",
+        reviewed_by: user?.id || null,
+        reviewed_at: new Date().toISOString(),
+        approval_status: "approved",
+        approved_by: user?.id || null,
+        approved_at: new Date().toISOString(),
+      },
+      makeLog(
+        "approved",
+        "تمت مراجعة المهمة واعتماد نتيجتها.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function rejectReview() {
+    if (!selectedTask) return;
+
+    await updateTask(
+      selectedTask.id,
+      {
+        review_status: "rejected",
+        reviewed_by: user?.id || null,
+        reviewed_at: new Date().toISOString(),
+        approval_status: "rejected",
+      },
+      makeLog(
+        "rejected",
+        "تم رفض نتيجة المهمة أثناء المراجعة.",
+        user?.id || null
+      )
+    );
+  }
+
+  async function approveOnly() {
+    if (!selectedTask) return;
+
+    await updateTask(
+      selectedTask.id,
+      {
+        approval_status: "approved",
+        approved_by: user?.id || null,
+        approved_at: new Date().toISOString(),
+      },
+      makeLog(
+        "final_approved",
+        "تم اعتماد المهمة بشكل نهائي.",
+        user?.id || null
+      )
+    );
+  }
+
   async function deleteTask() {
     if (!selectedTask) return;
+
+    const allowed = [
+      "completed",
+      "failed",
+      "cancelled",
+    ].includes(selectedTask.status);
+
+    if (!allowed) {
+      setError("لا يمكن حذف مهمة قيد التنفيذ.");
+      return;
+    }
 
     const confirmed = window.confirm(
       "هل أنت متأكد من حذف هذه المهمة؟"
@@ -417,67 +629,50 @@ export default function AITasksPage() {
 
       if (deleteError) throw deleteError;
 
-      setTasks((current) =>
-        current.filter((task) => task.id !== selectedTask.id)
+      const remaining = tasks.filter(
+        (item) => item.id !== selectedTask.id
       );
 
-      setSelectedTask(null);
-      setMessage("تم حذف المهمة.");
+      setTasks(remaining);
+      setSelectedTaskId(remaining[0]?.id || null);
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "تعذر حذف المهمة.");
+      setError(err.message || "تعذر حذف المهمة.");
     } finally {
       setSaving(false);
     }
   }
 
-  function employeeName(id) {
-    return (
-      employees.find((employee) => employee.id === id)?.name || "غير محدد"
-    );
-  }
+  function openReview() {
+    if (!selectedTask) return;
 
-  function employeeDetails(id) {
-    return employees.find((employee) => employee.id === id) || null;
-  }
-
-  function departmentName(id) {
-    return (
-      departments.find((department) => department.id === id)?.name ||
-      "غير محدد"
-    );
-  }
-
-  function adminName(id) {
-    return admins.find((admin) => admin.id === id)?.full_name || "غير محدد";
-  }
-
-  function openCreate() {
-    setError("");
-    setMessage("");
-    setForm(emptyForm);
-    setShowCreate(true);
+    setResultText(selectedTask.result || "");
+    setReviewNotes(selectedTask.review_notes || "");
+    setShowReview(true);
   }
 
   if (loading) {
     return (
-      <main dir="rtl" className="page">
-        <div className="loading">جاري تحميل مهام موظفي AI...</div>
+      <main className="page">
+        <div className="loading">جاري تحميل نظام المهام...</div>
 
         <style jsx>{`
           .page {
             min-height: 100vh;
-            background: #f5f7f6;
-            padding: 32px;
+            background: #f6f8f7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            direction: rtl;
             font-family: Arial, sans-serif;
           }
 
           .loading {
-            max-width: 1100px;
-            margin: 80px auto;
-            text-align: center;
-            color: #64748b;
-            font-size: 16px;
+            background: white;
+            border: 1px solid #e5ebe7;
+            border-radius: 18px;
+            padding: 28px 34px;
+            color: #37443d;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
           }
         `}</style>
       </main>
@@ -485,131 +680,154 @@ export default function AITasksPage() {
   }
 
   return (
-    <main dir="rtl" className="page">
+    <main className="page">
       <div className="shell">
         <header className="header">
           <div>
             <div className="eyebrow">الإدارة الداخلية</div>
             <h1>مهام موظفي AI</h1>
             <p>
-              إدارة وتوزيع ومتابعة المهام الخاصة بموظفي الذكاء الاصطناعي.
+              إدارة المهام والتنفيذ والمراجعة والاعتماد والتكلفة.
             </p>
           </div>
 
-          <button className="primaryButton" onClick={openCreate}>
-            <span>＋</span>
-            إنشاء مهمة
+          <button
+            className="primaryButton"
+            onClick={() => setShowCreate(true)}
+          >
+            + مهمة جديدة
           </button>
         </header>
 
-        {message && <div className="message success">{message}</div>}
-        {error && <div className="message error">{error}</div>}
+        {error && (
+          <div className="errorBox">
+            <span>⚠️</span>
+            <span>{error}</span>
+            <button onClick={() => setError("")}>إغلاق</button>
+          </div>
+        )}
 
         <section className="stats">
-          <div className="stat">
-            <span>إجمالي المهام</span>
-            <strong>{stats.total}</strong>
-          </div>
-
-          <div className="stat">
-            <span>معلقة</span>
-            <strong>{stats.pending}</strong>
-          </div>
-
-          <div className="stat">
-            <span>قيد التنفيذ</span>
-            <strong>{stats.processing}</strong>
-          </div>
-
-          <div className="stat">
-            <span>مكتملة</span>
-            <strong>{stats.completed}</strong>
-          </div>
-
-          <div className="stat">
-            <span>فاشلة</span>
-            <strong>{stats.failed}</strong>
-          </div>
-
-          <div className="stat">
-            <span>التكلفة</span>
-            <strong>{money(stats.totalCost)}</strong>
-          </div>
+          <Stat
+            title="إجمالي المهام"
+            value={stats.total}
+            icon="📋"
+          />
+          <Stat
+            title="معلقة"
+            value={stats.pending}
+            icon="⏳"
+          />
+          <Stat
+            title="قيد التنفيذ"
+            value={stats.processing}
+            icon="⚙️"
+          />
+          <Stat
+            title="مكتملة"
+            value={stats.completed}
+            icon="✓"
+          />
+          <Stat
+            title="بانتظار المراجعة"
+            value={stats.review}
+            icon="👁️"
+          />
+          <Stat
+            title="معتمدة"
+            value={stats.approved}
+            icon="✅"
+          />
+          <Stat
+            title="التكلفة"
+            value={money(stats.cost)}
+            icon="💰"
+          />
         </section>
 
-        <section className="toolbar">
-          <div className="search">
-            <span>⌕</span>
+        <section className="filters">
+          <div className="searchBox">
+            🔎
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="ابحث عن مهمة أو موظف أو قسم..."
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ابحث عن مهمة، موظف AI، قسم..."
             />
           </div>
 
           <select
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="all">كل الحالات</option>
             <option value="pending">معلقة</option>
             <option value="processing">قيد التنفيذ</option>
             <option value="completed">مكتملة</option>
-            <option value="failed">فاشلة</option>
+            <option value="failed">فشل التنفيذ</option>
             <option value="cancelled">ملغاة</option>
+          </select>
+
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+          >
+            <option value="all">كل الأولويات</option>
+            <option value="low">منخفضة</option>
+            <option value="normal">عادية</option>
+            <option value="high">عالية</option>
+            <option value="urgent">عاجلة</option>
           </select>
         </section>
 
         <section className="workspace">
           <div className="taskList">
             <div className="listHeader">
-              <strong>قائمة المهام</strong>
+              <strong>المهام</strong>
               <span>{filteredTasks.length}</span>
             </div>
 
             {filteredTasks.length === 0 ? (
               <div className="empty">
-                <div className="emptyIcon">✓</div>
+                <div className="emptyIcon">📋</div>
                 <strong>لا توجد مهام</strong>
                 <p>أنشئ أول مهمة لموظف AI.</p>
-                <button className="secondaryButton" onClick={openCreate}>
-                  إنشاء مهمة
-                </button>
               </div>
             ) : (
               filteredTasks.map((task) => {
-                const status = getStatus(task.status);
-                const employee = employeeDetails(task.ai_employee_id);
+                const status = statusInfo(task.status);
+                const selected = task.id === selectedTaskId;
 
                 return (
                   <button
                     key={task.id}
                     className={`taskItem ${
-                      selectedTask?.id === task.id ? "selected" : ""
+                      selected ? "selected" : ""
                     }`}
-                    onClick={() => {
-                      setSelectedTask(task);
-                      setError("");
-                      setMessage("");
-                    }}
+                    onClick={() => setSelectedTaskId(task.id)}
                   >
-                    <div className="taskTop">
+                    <div className="taskItemTop">
                       <strong>{task.title}</strong>
-                      <span className={`badge ${status.className}`}>
+
+                      <span
+                        className={`status ${status.className}`}
+                      >
                         {status.label}
                       </span>
                     </div>
 
-                    <p>
-                      {task.description ||
-                        "لا يوجد وصف لهذه المهمة."}
-                    </p>
-
-                    <div className="taskMeta">
-                      <span>🤖 {employee?.name || "غير محدد"}</span>
+                    <div className="taskItemMeta">
                       <span>
-                        {PRIORITIES[task.priority] || "عادية"}
+                        🤖 {employeeName(task.ai_employee_id)}
                       </span>
+
+                      <span>
+                        {PRIORITIES[task.priority] ||
+                          task.priority}
+                      </span>
+                    </div>
+
+                    <div className="taskItemDate">
+                      {formatDate(task.created_at)}
                     </div>
                   </button>
                 );
@@ -620,281 +838,380 @@ export default function AITasksPage() {
           <div className="details">
             {!selectedTask ? (
               <div className="detailsEmpty">
-                <div className="detailsIcon">🤖</div>
+                <div>📋</div>
                 <h2>اختر مهمة</h2>
                 <p>
-                  اختر مهمة من القائمة لعرض تفاصيلها وإدارتها.
+                  اختر مهمة من القائمة لعرض تفاصيلها.
                 </p>
               </div>
             ) : (
               <>
-                {(() => {
-                  const status = getStatus(selectedTask.status);
-                  const employee = employeeDetails(
-                    selectedTask.ai_employee_id
-                  );
+                <div className="detailsHeader">
+                  <div>
+                    <div className="detailsTitleRow">
+                      <h2>{selectedTask.title}</h2>
 
-                  return (
+                      <span
+                        className={`status ${statusInfo(
+                          selectedTask.status
+                        ).className}`}
+                      >
+                        {
+                          statusInfo(
+                            selectedTask.status
+                          ).label
+                        }
+                      </span>
+                    </div>
+
+                    <p>
+                      {selectedTask.description ||
+                        "لا يوجد وصف للمهمة."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="infoGrid">
+                  <Info
+                    label="موظف AI"
+                    value={employeeName(
+                      selectedTask.ai_employee_id
+                    )}
+                  />
+
+                  <Info
+                    label="القسم"
+                    value={departmentName(
+                      selectedTask.department_id
+                    )}
+                  />
+
+                  <Info
+                    label="Admin"
+                    value={adminName(
+                      selectedTask.admin_id
+                    )}
+                  />
+
+                  <Info
+                    label="نوع المهمة"
+                    value={selectedTask.task_type || "—"}
+                  />
+
+                  <Info
+                    label="الأولوية"
+                    value={
+                      PRIORITIES[selectedTask.priority] ||
+                      selectedTask.priority
+                    }
+                  />
+
+                  <Info
+                    label="النقاط"
+                    value={selectedTask.points_cost ?? 0}
+                  />
+
+                  <Info
+                    label="التكلفة التقديرية"
+                    value={money(
+                      selectedTask.estimated_cost
+                    )}
+                  />
+
+                  <Info
+                    label="التكلفة الفعلية"
+                    value={money(
+                      selectedTask.actual_cost
+                    )}
+                  />
+                </div>
+
+                <div className="workflow">
+                  <div className="workflowTitle">
+                    حالة العمل
+                  </div>
+
+                  <div className="workflowSteps">
+                    <WorkflowStep
+                      active
+                      title="إنشاء"
+                      date={selectedTask.created_at}
+                    />
+
+                    <WorkflowStep
+                      active={
+                        !!selectedTask.started_at
+                      }
+                      title="بدء التنفيذ"
+                      date={selectedTask.started_at}
+                    />
+
+                    <WorkflowStep
+                      active={
+                        !!selectedTask.completed_at
+                      }
+                      title="الانتهاء"
+                      date={selectedTask.completed_at}
+                    />
+
+                    <WorkflowStep
+                      active={
+                        selectedTask.review_status ===
+                        "approved"
+                      }
+                      title="المراجعة"
+                      date={selectedTask.reviewed_at}
+                    />
+
+                    <WorkflowStep
+                      active={
+                        selectedTask.approval_status ===
+                        "approved"
+                      }
+                      title="الاعتماد"
+                      date={selectedTask.approved_at}
+                    />
+                  </div>
+                </div>
+
+                <div className="reviewCards">
+                  <div className="reviewCard">
+                    <span>👁️ المراجعة</span>
+                    <strong>
+                      {getReviewLabel(
+                        selectedTask.review_status
+                      )}
+                    </strong>
+                  </div>
+
+                  <div className="reviewCard">
+                    <span>✅ الاعتماد</span>
+                    <strong>
+                      {getApprovalLabel(
+                        selectedTask.approval_status
+                      )}
+                    </strong>
+                  </div>
+                </div>
+
+                {selectedTask.result && (
+                  <div className="resultBox">
+                    <div className="sectionTitle">
+                      📤 نتيجة المهمة
+                    </div>
+
+                    <div className="resultText">
+                      {selectedTask.result}
+                    </div>
+                  </div>
+                )}
+
+                {selectedTask.review_notes && (
+                  <div className="notesBox">
+                    <div className="sectionTitle">
+                      📝 ملاحظات المراجعة
+                    </div>
+
+                    <div className="resultText">
+                      {selectedTask.review_notes}
+                    </div>
+                  </div>
+                )}
+
+                {selectedTask.error_message && (
+                  <div className="failureBox">
+                    <div className="sectionTitle">
+                      ⚠️ سبب الفشل
+                    </div>
+
+                    <div>
+                      {selectedTask.error_message}
+                    </div>
+                  </div>
+                )}
+
+                <div className="actions">
+                  {selectedTask.status === "pending" && (
+                    <button
+                      className="primaryButton"
+                      disabled={saving}
+                      onClick={startTask}
+                    >
+                      ▶ بدء المهمة
+                    </button>
+                  )}
+
+                  {selectedTask.status ===
+                    "processing" && (
                     <>
-                      <div className="detailsHeader">
-                        <div>
-                          <div className="detailsEyebrow">
-                            تفاصيل المهمة
-                          </div>
+                      <button
+                        className="successButton"
+                        disabled={saving}
+                        onClick={completeTask}
+                      >
+                        ✓ إنهاء المهمة
+                      </button>
 
-                          <h2>{selectedTask.title}</h2>
-
-                          <div className="created">
-                            أنشئت في{" "}
-                            {formatDate(selectedTask.created_at)}
-                          </div>
-                        </div>
-
-                        <span className={`bigBadge ${status.className}`}>
-                          {status.label}
-                        </span>
-                      </div>
-
-                      <div className="actions">
-                        {selectedTask.status === "pending" && (
-                          <>
-                            <button
-                              className="startButton"
-                              disabled={saving}
-                              onClick={() =>
-                                updateTaskStatus("processing")
-                              }
-                            >
-                              ▶ بدء المهمة
-                            </button>
-
-                            <button
-                              className="cancelButton"
-                              disabled={saving}
-                              onClick={() =>
-                                updateTaskStatus("cancelled")
-                              }
-                            >
-                              إلغاء
-                            </button>
-                          </>
-                        )}
-
-                        {selectedTask.status === "processing" && (
-                          <button
-                            className="completeButton"
-                            disabled={saving}
-                            onClick={() =>
-                              updateTaskStatus("completed")
-                            }
-                          >
-                            ✓ إنهاء المهمة
-                          </button>
-                        )}
-
-                        {(selectedTask.status === "completed" ||
-                          selectedTask.status === "failed" ||
-                          selectedTask.status === "cancelled") && (
-                          <button
-                            className="deleteButton"
-                            disabled={saving}
-                            onClick={deleteTask}
-                          >
-                            حذف المهمة
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="infoGrid">
-                        <div className="infoCard">
-                          <span>🤖</span>
-                          <div>
-                            <small>موظف AI</small>
-                            <strong>
-                              {employee?.name || "غير محدد"}
-                            </strong>
-                            {employee?.specialization && (
-                              <em>{employee.specialization}</em>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="infoCard">
-                          <span>🏢</span>
-                          <div>
-                            <small>القسم</small>
-                            <strong>
-                              {departmentName(
-                                selectedTask.department_id
-                              )}
-                            </strong>
-                          </div>
-                        </div>
-
-                        <div className="infoCard">
-                          <span>👤</span>
-                          <div>
-                            <small>Admin المسؤول</small>
-                            <strong>
-                              {adminName(selectedTask.admin_id)}
-                            </strong>
-                          </div>
-                        </div>
-
-                        <div className="infoCard">
-                          <span>⚡</span>
-                          <div>
-                            <small>الأولوية</small>
-                            <strong>
-                              {PRIORITIES[selectedTask.priority] ||
-                                "عادية"}
-                            </strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      <section className="section">
-                        <h3>الوصف</h3>
-                        <div className="description">
-                          {selectedTask.description ||
-                            "لا يوجد وصف لهذه المهمة."}
-                        </div>
-                      </section>
-
-                      <section className="section">
-                        <h3>حالة التنفيذ</h3>
-
-                        <div className="timeline">
-                          <div
-                            className={
-                              selectedTask.created_at
-                                ? "timelineItem done"
-                                : "timelineItem"
-                            }
-                          >
-                            <div className="dot" />
-                            <div>
-                              <strong>إنشاء المهمة</strong>
-                              <span>
-                                {formatDate(
-                                  selectedTask.created_at
-                                )}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div
-                            className={
-                              selectedTask.started_at
-                                ? "timelineItem done"
-                                : "timelineItem"
-                            }
-                          >
-                            <div className="dot" />
-                            <div>
-                              <strong>بدء التنفيذ</strong>
-                              <span>
-                                {selectedTask.started_at
-                                  ? formatDate(
-                                      selectedTask.started_at
-                                    )
-                                  : "لم تبدأ بعد"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div
-                            className={
-                              selectedTask.completed_at
-                                ? "timelineItem done"
-                                : "timelineItem"
-                            }
-                          >
-                            <div className="dot" />
-                            <div>
-                              <strong>اكتمال المهمة</strong>
-                              <span>
-                                {selectedTask.completed_at
-                                  ? formatDate(
-                                      selectedTask.completed_at
-                                    )
-                                  : "لم تبدأ بعد"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="costGrid">
-                        <div>
-                          <span>النقاط</span>
-                          <strong>
-                            {Number(
-                              selectedTask.points_cost || 0
-                            ).toFixed(0)}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>التكلفة المتوقعة</span>
-                          <strong>
-                            {money(
-                              selectedTask.estimated_cost
-                            )}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <span>التكلفة الفعلية</span>
-                          <strong>
-                            {money(selectedTask.actual_cost)}
-                          </strong>
-                        </div>
-                      </section>
-
-                      <section className="section">
-                        <h3>النتيجة</h3>
-
-                        <div className="resultBox">
-                          {selectedTask.result ||
-                            "لم يتم تنفيذ المهمة بعد."}
-                        </div>
-                      </section>
-
-                      <section className="section">
-                        <h3>بيانات المهمة الداخلية</h3>
-
-                        <details className="internalData">
-                          <summary>عرض البيانات</summary>
-
-                          <pre>
-                            {JSON.stringify(
-                              {
-                                id: selectedTask.id,
-                                task_type:
-                                  selectedTask.task_type,
-                                input_data:
-                                  selectedTask.input_data,
-                                output_data:
-                                  selectedTask.output_data,
-                                created_by:
-                                  selectedTask.created_by,
-                                ai_employee_id:
-                                  selectedTask.ai_employee_id,
-                                department_id:
-                                  selectedTask.department_id,
-                                admin_id:
-                                  selectedTask.admin_id,
-                              },
-                              null,
-                              2
-                            )}
-                          </pre>
-                        </details>
-                      </section>
+                      <button
+                        className="dangerOutlineButton"
+                        disabled={saving}
+                        onClick={failTask}
+                      >
+                        فشل التنفيذ
+                      </button>
                     </>
-                  );
-                })()}
+                  )}
+
+                  {selectedTask.status === "completed" && (
+                    <button
+                      className="secondaryButton"
+                      disabled={saving}
+                      onClick={openReview}
+                    >
+                      👁️ مراجعة النتيجة
+                    </button>
+                  )}
+
+                  {(selectedTask.status === "pending" ||
+                    selectedTask.status ===
+                      "processing") && (
+                    <button
+                      className="dangerOutlineButton"
+                      disabled={saving}
+                      onClick={cancelTask}
+                    >
+                      إلغاء المهمة
+                    </button>
+                  )}
+
+                  {selectedTask.review_status === "pending" &&
+                    selectedTask.status === "completed" && (
+                      <>
+                        <button
+                          className="successButton"
+                          disabled={saving}
+                          onClick={approveReview}
+                        >
+                          ✓ اعتماد النتيجة
+                        </button>
+
+                        <button
+                          className="dangerOutlineButton"
+                          disabled={saving}
+                          onClick={rejectReview}
+                        >
+                          ✕ رفض النتيجة
+                        </button>
+                      </>
+                    )}
+
+                  {selectedTask.review_status ===
+                    "approved" &&
+                    selectedTask.approval_status !==
+                      "approved" && (
+                      <button
+                        className="successButton"
+                        disabled={saving}
+                        onClick={approveOnly}
+                      >
+                        ✓ اعتماد نهائي
+                      </button>
+                    )}
+
+                  {[
+                    "completed",
+                    "failed",
+                    "cancelled",
+                  ].includes(selectedTask.status) && (
+                    <button
+                      className="deleteButton"
+                      disabled={saving}
+                      onClick={deleteTask}
+                    >
+                      🗑 حذف
+                    </button>
+                  )}
+                </div>
+
+                <div className="timeline">
+                  <div className="sectionTitle">
+                    📜 سجل المهمة
+                  </div>
+
+                  {Array.isArray(
+                    selectedTask.execution_log
+                  ) &&
+                  selectedTask.execution_log.length > 0 ? (
+                    <div className="timelineList">
+                      {[
+                        ...selectedTask.execution_log,
+                      ]
+                        .reverse()
+                        .map((entry, index) => (
+                          <div
+                            className="timelineItem"
+                            key={`${entry.created_at}-${index}`}
+                          >
+                            <div className="timelineDot" />
+
+                            <div>
+                              <strong>
+                                {entry.description ||
+                                  "تحديث على المهمة"}
+                              </strong>
+
+                              <small>
+                                {formatDate(
+                                  entry.created_at
+                                )}
+                              </small>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="muted">
+                      لا يوجد سجل حتى الآن.
+                    </div>
+                  )}
+                </div>
+
+                <div className="dates">
+                  <Info
+                    label="أنشئت"
+                    value={formatDate(
+                      selectedTask.created_at
+                    )}
+                  />
+
+                  <Info
+                    label="بدأت"
+                    value={formatDate(
+                      selectedTask.started_at
+                    )}
+                  />
+
+                  <Info
+                    label="اكتملت"
+                    value={formatDate(
+                      selectedTask.completed_at
+                    )}
+                  />
+
+                  <Info
+                    label="تمت المراجعة"
+                    value={formatDate(
+                      selectedTask.reviewed_at
+                    )}
+                  />
+
+                  <Info
+                    label="تم الاعتماد"
+                    value={formatDate(
+                      selectedTask.approved_at
+                    )}
+                  />
+                </div>
               </>
             )}
           </div>
@@ -904,20 +1221,19 @@ export default function AITasksPage() {
       {showCreate && (
         <div
           className="overlay"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
               setShowCreate(false);
             }
           }}
         >
-          <aside className="drawer">
+          <div className="drawer">
             <div className="drawerHeader">
               <div>
-                <span>مهام AI</span>
-                <h2>إنشاء مهمة موظف AI</h2>
-                <p>
-                  أنشئ المهمة الآن. التنفيذ الذكي سيتم ربطه لاحقًا.
-                </p>
+                <div className="eyebrow">
+                  إدارة المهام
+                </div>
+                <h2>إنشاء مهمة جديدة</h2>
               </div>
 
               <button
@@ -930,226 +1246,294 @@ export default function AITasksPage() {
 
             <form onSubmit={createTask}>
               <div className="formSection">
-                <div className="sectionNumber">01</div>
+                <h3>بيانات المهمة</h3>
 
-                <div className="formContent">
-                  <h3>البيانات الأساسية</h3>
+                <label>
+                  عنوان المهمة
+                  <input
+                    value={form.title}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        title: e.target.value,
+                      })
+                    }
+                    placeholder="مثال: مراجعة بيانات المنتج"
+                  />
+                </label>
 
-                  <label>
-                    اسم المهمة *
-                    <input
-                      value={form.title}
-                      onChange={(event) =>
-                        updateForm("title", event.target.value)
-                      }
-                      placeholder="مثال: مراجعة بيانات المنتج"
-                      required
-                    />
-                  </label>
+                <label>
+                  الوصف
+                  <textarea
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder="اكتب المطلوب من المهمة..."
+                    rows={4}
+                  />
+                </label>
 
-                  <label>
-                    وصف المهمة
-                    <textarea
-                      value={form.description}
-                      onChange={(event) =>
-                        updateForm(
-                          "description",
-                          event.target.value
-                        )
-                      }
-                      placeholder="اكتب المطلوب من موظف AI..."
-                      rows={4}
-                    />
-                  </label>
-
+                <div className="twoColumns">
                   <label>
                     نوع المهمة
                     <input
                       value={form.task_type}
-                      onChange={(event) =>
-                        updateForm(
-                          "task_type",
-                          event.target.value
-                        )
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          task_type: e.target.value,
+                        })
                       }
-                      placeholder="مثال: مراجعة"
                     />
                   </label>
-                </div>
-              </div>
-
-              <div className="formSection">
-                <div className="sectionNumber">02</div>
-
-                <div className="formContent">
-                  <h3>التوزيع الإداري</h3>
-
-                  <label>
-                    موظف AI
-                    <select
-                      value={form.ai_employee_id}
-                      onChange={(event) =>
-                        handleEmployeeChange(event.target.value)
-                      }
-                    >
-                      <option value="">غير محدد</option>
-
-                      {employees
-                        .filter(
-                          (employee) =>
-                            employee.status === "active"
-                        )
-                        .map((employee) => (
-                          <option
-                            key={employee.id}
-                            value={employee.id}
-                          >
-                            {employee.name}
-                            {employee.specialization
-                              ? ` — ${employee.specialization}`
-                              : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    القسم
-                    <select
-                      value={form.department_id}
-                      onChange={(event) =>
-                        updateForm(
-                          "department_id",
-                          event.target.value
-                        )
-                      }
-                    >
-                      <option value="">غير محدد</option>
-
-                      {departments.map((department) => (
-                        <option
-                          key={department.id}
-                          value={department.id}
-                        >
-                          {department.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    Admin المسؤول
-                    <select
-                      value={form.admin_id}
-                      onChange={(event) =>
-                        updateForm(
-                          "admin_id",
-                          event.target.value
-                        )
-                      }
-                    >
-                      <option value="">غير محدد</option>
-
-                      {admins
-                        .filter(
-                          (admin) => admin.status === "active"
-                        )
-                        .map((admin) => (
-                          <option
-                            key={admin.id}
-                            value={admin.id}
-                          >
-                            {admin.full_name}
-                            {admin.title
-                              ? ` — ${admin.title}`
-                              : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              <div className="formSection">
-                <div className="sectionNumber">03</div>
-
-                <div className="formContent">
-                  <h3>الأولوية والتكلفة</h3>
 
                   <label>
                     الأولوية
                     <select
                       value={form.priority}
-                      onChange={(event) =>
-                        updateForm(
-                          "priority",
-                          event.target.value
-                        )
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          priority: e.target.value,
+                        })
                       }
                     >
-                      <option value="low">منخفضة</option>
-                      <option value="normal">عادية</option>
-                      <option value="high">عالية</option>
-                      <option value="urgent">عاجلة</option>
+                      <option value="low">
+                        منخفضة
+                      </option>
+                      <option value="normal">
+                        عادية
+                      </option>
+                      <option value="high">
+                        عالية
+                      </option>
+                      <option value="urgent">
+                        عاجلة
+                      </option>
                     </select>
                   </label>
-
-                  <div className="twoColumns">
-                    <label>
-                      النقاط
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={form.points_cost}
-                        onChange={(event) =>
-                          updateForm(
-                            "points_cost",
-                            event.target.value
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      التكلفة المتوقعة $
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.0001"
-                        value={form.estimated_cost}
-                        onChange={(event) =>
-                          updateForm(
-                            "estimated_cost",
-                            event.target.value
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
                 </div>
               </div>
 
-              <div className="drawerFooter">
-                <button
-                  type="button"
-                  className="secondaryButton"
-                  onClick={() => setShowCreate(false)}
-                  disabled={saving}
-                >
-                  إلغاء
-                </button>
+              <div className="formSection">
+                <h3>التعيين</h3>
 
-                <button
-                  type="submit"
-                  className="primaryButton"
-                  disabled={saving}
-                >
-                  {saving ? "جاري الحفظ..." : "إنشاء المهمة"}
-                </button>
+                <label>
+                  موظف AI
+                  <select
+                    value={form.ai_employee_id}
+                    onChange={(e) => {
+                      const employee =
+                        employees.find(
+                          (item) =>
+                            item.id === e.target.value
+                        );
+
+                      setForm({
+                        ...form,
+                        ai_employee_id:
+                          e.target.value,
+                        department_id:
+                          employee?.department_id ||
+                          form.department_id,
+                      });
+                    }}
+                  >
+                    <option value="">
+                      اختر موظف AI
+                    </option>
+
+                    {employees.map((employee) => (
+                      <option
+                        key={employee.id}
+                        value={employee.id}
+                      >
+                        {employee.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  القسم
+                  <select
+                    value={form.department_id}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        department_id: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">
+                      اختر القسم
+                    </option>
+
+                    {departments.map((department) => (
+                      <option
+                        key={department.id}
+                        value={department.id}
+                      >
+                        {department.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Admin المسؤول
+                  <select
+                    value={form.admin_id}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        admin_id: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">
+                      غير محدد
+                    </option>
+
+                    {admins.map((admin) => (
+                      <option
+                        key={admin.id}
+                        value={admin.id}
+                      >
+                        {admin.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
+
+              <div className="formSection">
+                <h3>التكلفة</h3>
+
+                <div className="twoColumns">
+                  <label>
+                    النقاط
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.points_cost}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          points_cost: e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    التكلفة التقديرية
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={form.estimated_cost}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          estimated_cost:
+                            e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="formNotice">
+                ℹ️ إنشاء المهمة هنا لا يشغّل OpenAI أو Runway.
+                التنفيذ الذكي سيتم ربطه لاحقًا.
+              </div>
+
+              <button
+                className="primaryButton full"
+                disabled={saving}
+                type="submit"
+              >
+                {saving
+                  ? "جاري الحفظ..."
+                  : "إنشاء المهمة"}
+              </button>
             </form>
-          </aside>
+          </div>
+        </div>
+      )}
+
+      {showReview && selectedTask && (
+        <div
+          className="overlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowReview(false);
+            }
+          }}
+        >
+          <div className="reviewDrawer">
+            <div className="drawerHeader">
+              <div>
+                <div className="eyebrow">
+                  مراجعة المهمة
+                </div>
+                <h2>{selectedTask.title}</h2>
+              </div>
+
+              <button
+                className="closeButton"
+                onClick={() => setShowReview(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <label>
+              نتيجة المهمة
+              <textarea
+                value={resultText}
+                onChange={(e) =>
+                  setResultText(e.target.value)
+                }
+                rows={7}
+                placeholder="اكتب نتيجة المهمة..."
+              />
+            </label>
+
+            <label>
+              ملاحظات المراجعة
+              <textarea
+                value={reviewNotes}
+                onChange={(e) =>
+                  setReviewNotes(e.target.value)
+                }
+                rows={5}
+                placeholder="اكتب ملاحظات المراجعة..."
+              />
+            </label>
+
+            <div className="formNotice">
+              بعد الحفظ تصبح المهمة بانتظار المراجعة
+              والاعتماد.
+            </div>
+
+            <button
+              className="primaryButton full"
+              disabled={saving}
+              onClick={saveReview}
+            >
+              {saving
+                ? "جاري الحفظ..."
+                : "حفظ المراجعة"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -1160,703 +1544,632 @@ export default function AITasksPage() {
 
         .page {
           min-height: 100vh;
-          background: #f5f7f6;
-          color: #17231f;
+          background: #f6f8f7;
+          direction: rtl;
+          color: #17211c;
           font-family:
             Arial,
-            "Tahoma",
+            "Noto Sans Arabic",
             sans-serif;
         }
 
         .shell {
-          width: min(1500px, calc(100% - 40px));
+          max-width: 1500px;
           margin: 0 auto;
-          padding: 34px 0 60px;
+          padding: 34px;
         }
 
         .header {
           display: flex;
-          justify-content: space-between;
           align-items: flex-end;
+          justify-content: space-between;
           gap: 20px;
           margin-bottom: 24px;
         }
 
-        .eyebrow,
-        .detailsEyebrow {
-          color: #15805d;
+        .eyebrow {
+          color: #218c68;
           font-size: 13px;
-          font-weight: 700;
+          font-weight: 800;
           margin-bottom: 7px;
         }
 
-        h1 {
+        h1,
+        h2,
+        h3,
+        p {
           margin: 0;
-          font-size: clamp(28px, 4vw, 42px);
-          letter-spacing: -0.8px;
+        }
+
+        .header h1 {
+          font-size: 32px;
+          letter-spacing: -0.7px;
         }
 
         .header p {
-          margin: 9px 0 0;
-          color: #718078;
+          margin-top: 8px;
+          color: #748078;
           font-size: 14px;
         }
 
         .primaryButton,
+        .successButton,
         .secondaryButton,
-        .startButton,
-        .completeButton,
-        .cancelButton,
+        .dangerOutlineButton,
         .deleteButton {
           border: 0;
           border-radius: 12px;
-          padding: 12px 17px;
-          font-size: 14px;
-          font-weight: 700;
+          padding: 11px 16px;
+          font-weight: 800;
           cursor: pointer;
           transition: 0.18s ease;
+          font-size: 13px;
         }
 
         .primaryButton {
-          background: #16805c;
+          background: #218c68;
           color: white;
-          box-shadow: 0 8px 20px rgba(22, 128, 92, 0.15);
         }
 
         .primaryButton:hover {
-          background: #116b4d;
-          transform: translateY(-1px);
+          background: #197455;
+        }
+
+        .successButton {
+          background: #16845d;
+          color: white;
         }
 
         .secondaryButton {
-          background: #eef3f0;
-          color: #315047;
+          background: #eaf4ef;
+          color: #17694e;
         }
 
-        .secondaryButton:hover {
-          background: #e1e9e5;
+        .dangerOutlineButton {
+          background: white;
+          border: 1px solid #efb9b9;
+          color: #b33b3b;
+        }
+
+        .deleteButton {
+          background: #fff1f1;
+          color: #b33b3b;
         }
 
         button:disabled {
           opacity: 0.55;
           cursor: not-allowed;
-          transform: none !important;
         }
 
-        .message {
-          border-radius: 12px;
-          padding: 12px 15px;
-          margin-bottom: 16px;
-          font-size: 14px;
+        .full {
+          width: 100%;
+          margin-top: 8px;
         }
 
-        .message.success {
-          background: #e9f8f1;
-          color: #08734e;
-          border: 1px solid #c9eddd;
+        .errorBox {
+          background: #fff3f3;
+          border: 1px solid #f0c4c4;
+          color: #a93636;
+          padding: 13px 15px;
+          border-radius: 13px;
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          margin-bottom: 18px;
         }
 
-        .message.error {
-          background: #fff0f0;
-          color: #b42318;
-          border: 1px solid #ffd4d1;
+        .errorBox button {
+          margin-right: auto;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
         }
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(6, 1fr);
+          grid-template-columns: repeat(7, 1fr);
           gap: 12px;
-          margin-bottom: 16px;
+          margin-bottom: 18px;
         }
 
         .stat {
           background: white;
-          border: 1px solid #e5ebe8;
-          border-radius: 16px;
-          padding: 17px;
-          box-shadow: 0 5px 20px rgba(20, 40, 32, 0.035);
+          border: 1px solid #e3eae6;
+          border-radius: 15px;
+          padding: 15px;
+          min-width: 0;
         }
 
-        .stat span {
-          display: block;
-          color: #7a8983;
-          font-size: 12px;
-          margin-bottom: 8px;
+        .statIcon {
+          font-size: 18px;
         }
 
-        .stat strong {
+        .statValue {
           font-size: 24px;
+          font-weight: 900;
+          margin-top: 8px;
         }
 
-        .toolbar {
+        .statTitle {
+          color: #7a857f;
+          font-size: 12px;
+          margin-top: 4px;
+        }
+
+        .filters {
           background: white;
-          border: 1px solid #e5ebe8;
+          border: 1px solid #e3eae6;
           border-radius: 16px;
           padding: 12px;
-          display: flex;
+          display: grid;
+          grid-template-columns: 1fr 190px 190px;
           gap: 10px;
-          margin-bottom: 16px;
+          margin-bottom: 18px;
         }
 
-        .search {
-          flex: 1;
+        .searchBox {
           display: flex;
           align-items: center;
           gap: 9px;
-          background: #f6f8f7;
+          border: 1px solid #e0e7e3;
           border-radius: 11px;
-          padding: 0 13px;
+          padding: 0 12px;
+          background: #fbfcfb;
         }
 
-        .search span {
-          color: #7d8a85;
-          font-size: 21px;
-        }
-
-        .search input {
-          width: 100%;
+        .searchBox input {
           border: 0;
           outline: 0;
           background: transparent;
+          width: 100%;
           padding: 12px 0;
-          font-size: 14px;
+          direction: rtl;
         }
 
         select,
         input,
         textarea {
+          width: 100%;
+          border: 1px solid #dfe7e2;
+          background: white;
+          border-radius: 11px;
+          padding: 11px 12px;
+          outline: none;
           font: inherit;
+          color: #17211c;
         }
 
-        .toolbar select {
-          min-width: 160px;
-          border: 1px solid #dde5e1;
-          border-radius: 11px;
-          background: white;
-          padding: 0 12px;
-          outline: 0;
+        textarea {
+          resize: vertical;
+          line-height: 1.7;
+        }
+
+        select:focus,
+        input:focus,
+        textarea:focus {
+          border-color: #65ad91;
+          box-shadow: 0 0 0 3px rgba(33, 140, 104, 0.08);
         }
 
         .workspace {
           display: grid;
-          grid-template-columns: 430px minmax(0, 1fr);
-          min-height: 680px;
-          background: white;
-          border: 1px solid #e5ebe8;
-          border-radius: 20px;
-          overflow: hidden;
-          box-shadow: 0 8px 30px rgba(20, 40, 32, 0.04);
+          grid-template-columns: 390px minmax(0, 1fr);
+          direction: ltr;
+          gap: 18px;
         }
 
-        .taskList {
-          border-left: 1px solid #e8eeeb;
-          background: #fbfcfb;
+        .taskList,
+        .details {
+          direction: rtl;
+          background: white;
+          border: 1px solid #e3eae6;
+          border-radius: 18px;
+          overflow: hidden;
+          min-height: 650px;
         }
 
         .listHeader {
-          height: 62px;
+          padding: 16px 18px;
+          border-bottom: 1px solid #edf1ef;
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          padding: 0 18px;
-          border-bottom: 1px solid #e8eeeb;
         }
 
         .listHeader span {
-          min-width: 28px;
-          height: 28px;
-          border-radius: 9px;
-          background: #e8f5ef;
-          color: #147b59;
-          display: grid;
-          place-items: center;
+          background: #edf7f2;
+          color: #218c68;
+          padding: 3px 9px;
+          border-radius: 20px;
           font-size: 12px;
-          font-weight: 700;
+          font-weight: 800;
         }
 
         .taskItem {
+          display: block;
           width: 100%;
           text-align: right;
-          background: transparent;
           border: 0;
           border-bottom: 1px solid #edf1ef;
-          padding: 16px 18px;
+          background: white;
+          padding: 16px;
           cursor: pointer;
-          color: inherit;
         }
 
         .taskItem:hover {
-          background: #f3f8f5;
+          background: #fafcfb;
         }
 
         .taskItem.selected {
-          background: #eaf7f1;
-          box-shadow: inset -3px 0 #16805c;
+          background: #f0f8f4;
+          box-shadow: inset -3px 0 0 #218c68;
         }
 
-        .taskTop {
+        .taskItemTop {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
           gap: 10px;
         }
 
-        .taskTop strong {
-          font-size: 14px;
+        .taskItemTop strong {
           line-height: 1.5;
+          font-size: 14px;
         }
 
-        .taskItem p {
-          margin: 8px 0;
-          color: #74817c;
-          font-size: 12px;
-          line-height: 1.7;
-        }
-
-        .taskMeta {
+        .taskItemMeta {
           display: flex;
           gap: 12px;
-          color: #81908a;
+          margin-top: 10px;
+          color: #65716a;
           font-size: 11px;
         }
 
-        .badge,
-        .bigBadge {
-          white-space: nowrap;
-          border-radius: 999px;
-          font-weight: 700;
-        }
-
-        .badge {
-          padding: 5px 8px;
+        .taskItemDate {
+          color: #9aa39e;
           font-size: 10px;
+          margin-top: 9px;
         }
 
-        .bigBadge {
-          padding: 8px 12px;
-          font-size: 12px;
+        .status {
+          white-space: nowrap;
+          display: inline-flex;
+          align-items: center;
+          border-radius: 30px;
+          padding: 5px 9px;
+          font-size: 10px;
+          font-weight: 800;
         }
 
-        .pending {
-          background: #fff5dc;
-          color: #9a6900;
+        .status.pending {
+          background: #fff7df;
+          color: #9b7215;
         }
 
-        .processing {
+        .status.processing {
           background: #e9f2ff;
-          color: #2563a8;
+          color: #28639a;
         }
 
-        .completed {
-          background: #e8f8f0;
-          color: #08734e;
+        .status.completed {
+          background: #e9f8ef;
+          color: #16804f;
         }
 
-        .failed {
+        .status.failed {
           background: #fff0f0;
-          color: #b42318;
+          color: #b83b3b;
         }
 
-        .cancelled,
-        .unknown {
-          background: #edf0ef;
-          color: #68756f;
+        .status.cancelled {
+          background: #f0f1f1;
+          color: #68716d;
         }
 
-        .empty {
+        .empty,
+        .detailsEmpty {
+          min-height: 500px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          color: #7c8781;
           text-align: center;
-          padding: 70px 25px;
-          color: #73817b;
+          padding: 30px;
         }
 
-        .emptyIcon,
-        .detailsIcon {
-          width: 58px;
-          height: 58px;
-          border-radius: 18px;
-          display: grid;
-          place-items: center;
-          margin: 0 auto 14px;
-          background: #eaf7f1;
-          color: #16805c;
-          font-size: 25px;
+        .emptyIcon {
+          font-size: 42px;
+          margin-bottom: 12px;
         }
 
-        .empty strong {
-          display: block;
-          color: #26342f;
-          margin-bottom: 6px;
-        }
-
-        .empty p {
+        .empty p,
+        .detailsEmpty p {
+          margin-top: 7px;
           font-size: 13px;
-          margin-bottom: 18px;
         }
 
         .details {
-          padding: 28px;
+          padding: 25px;
           overflow: auto;
         }
 
-        .detailsEmpty {
-          min-height: 620px;
-          display: grid;
-          place-content: center;
-          text-align: center;
-          color: #7a8983;
-        }
-
-        .detailsEmpty h2 {
-          color: #26342f;
-          margin: 0 0 8px;
-        }
-
-        .detailsEmpty p {
-          margin: 0;
-          font-size: 13px;
-        }
-
         .detailsHeader {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 20px;
           padding-bottom: 20px;
-          border-bottom: 1px solid #e9eeec;
+          border-bottom: 1px solid #edf1ef;
         }
 
-        .detailsHeader h2 {
-          margin: 0;
-          font-size: 25px;
-        }
-
-        .created {
-          color: #87938e;
-          font-size: 12px;
-          margin-top: 8px;
-        }
-
-        .actions {
+        .detailsTitleRow {
           display: flex;
-          gap: 8px;
-          margin: 18px 0;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
         }
 
-        .startButton {
-          background: #16805c;
-          color: white;
+        .detailsTitleRow h2 {
+          font-size: 22px;
         }
 
-        .completeButton {
-          background: #16805c;
-          color: white;
-        }
-
-        .cancelButton {
-          background: #f1f3f2;
-          color: #53615b;
-        }
-
-        .deleteButton {
-          background: #fff0f0;
-          color: #b42318;
+        .detailsHeader p {
+          color: #6f7b74;
+          font-size: 13px;
+          line-height: 1.8;
+          margin-top: 9px;
         }
 
         .infoGrid {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
           gap: 10px;
-          margin-bottom: 25px;
+          margin: 20px 0;
         }
 
-        .infoCard {
-          border: 1px solid #e5ebe8;
-          border-radius: 14px;
-          padding: 14px;
-          display: flex;
-          gap: 11px;
-          background: #fcfdfc;
+        .info {
+          background: #f8faf9;
+          border: 1px solid #e8eeeb;
+          border-radius: 12px;
+          padding: 12px;
         }
 
-        .infoCard > span {
-          font-size: 19px;
-        }
-
-        .infoCard small,
-        .infoCard strong,
-        .infoCard em {
-          display: block;
-        }
-
-        .infoCard small {
-          color: #89958f;
+        .infoLabel {
+          color: #89938e;
           font-size: 10px;
           margin-bottom: 5px;
         }
 
-        .infoCard strong {
+        .infoValue {
+          font-weight: 800;
+          font-size: 12px;
+          word-break: break-word;
+        }
+
+        .workflow {
+          border-top: 1px solid #edf1ef;
+          padding-top: 20px;
+        }
+
+        .workflowTitle,
+        .sectionTitle {
           font-size: 13px;
+          font-weight: 900;
+          margin-bottom: 13px;
         }
 
-        .infoCard em {
-          color: #7a8983;
-          font-size: 10px;
-          font-style: normal;
-          margin-top: 4px;
-          line-height: 1.5;
-        }
-
-        .section {
-          margin-top: 25px;
-        }
-
-        .section h3 {
-          font-size: 14px;
-          margin: 0 0 10px;
-        }
-
-        .description,
-        .resultBox {
-          background: #f7f9f8;
-          border: 1px solid #e7ece9;
-          border-radius: 12px;
-          padding: 15px;
-          color: #52615a;
-          font-size: 13px;
-          line-height: 1.8;
-        }
-
-        .timeline {
+        .workflowSteps {
           display: grid;
-          gap: 0;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 8px;
         }
 
-        .timelineItem {
-          display: flex;
-          gap: 12px;
-          min-height: 58px;
+        .workflowStep {
+          border: 1px solid #e7ece9;
+          background: #fafbfa;
+          border-radius: 12px;
+          padding: 11px;
           position: relative;
         }
 
-        .timelineItem:not(:last-child)::after {
-          content: "";
-          position: absolute;
-          right: 6px;
-          top: 14px;
-          width: 1px;
-          height: 48px;
-          background: #dfe6e2;
+        .workflowStep.active {
+          background: #eff8f4;
+          border-color: #cce8db;
         }
 
-        .dot {
-          width: 13px;
-          height: 13px;
-          border-radius: 50%;
-          background: #dbe2df;
-          margin-top: 3px;
-          z-index: 1;
+        .workflowStepTitle {
+          font-size: 11px;
+          font-weight: 800;
         }
 
-        .timelineItem.done .dot {
-          background: #16805c;
-          box-shadow: 0 0 0 4px #e5f5ee;
-        }
-
-        .timelineItem strong,
-        .timelineItem span {
+        .workflowStepDate {
           display: block;
+          color: #89938e;
+          font-size: 9px;
+          margin-top: 6px;
+          line-height: 1.5;
+        }
+
+        .reviewCards {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin: 18px 0;
+        }
+
+        .reviewCard {
+          border: 1px solid #e4ebe7;
+          border-radius: 12px;
+          padding: 13px;
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          background: white;
+        }
+
+        .reviewCard span {
+          color: #7c8781;
+          font-size: 12px;
+        }
+
+        .reviewCard strong {
+          font-size: 12px;
+        }
+
+        .resultBox,
+        .notesBox,
+        .failureBox {
+          border-radius: 13px;
+          padding: 15px;
+          margin-top: 12px;
+        }
+
+        .resultBox {
+          background: #f3faf6;
+          border: 1px solid #d9eee3;
+        }
+
+        .notesBox {
+          background: #f7f8ff;
+          border: 1px solid #e4e5f4;
+        }
+
+        .failureBox {
+          background: #fff4f4;
+          border: 1px solid #efcccc;
+          color: #9d3939;
+        }
+
+        .resultText {
+          white-space: pre-wrap;
+          line-height: 1.8;
+          font-size: 13px;
+        }
+
+        .actions {
+          display: flex;
+          gap: 9px;
+          flex-wrap: wrap;
+          padding: 20px 0;
+          border-bottom: 1px solid #edf1ef;
+        }
+
+        .timeline {
+          padding-top: 20px;
+        }
+
+        .timelineList {
+          border-right: 2px solid #dce9e3;
+          padding-right: 15px;
+        }
+
+        .timelineItem {
+          position: relative;
+          display: flex;
+          gap: 10px;
+          margin-bottom: 15px;
+        }
+
+        .timelineDot {
+          width: 9px;
+          height: 9px;
+          background: #218c68;
+          border-radius: 50%;
+          position: absolute;
+          right: -20px;
+          top: 5px;
         }
 
         .timelineItem strong {
-          font-size: 12px;
-        }
-
-        .timelineItem span {
-          margin-top: 4px;
-          color: #8a9691;
-          font-size: 11px;
-        }
-
-        .costGrid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 10px;
-          margin-top: 22px;
-        }
-
-        .costGrid > div {
-          background: #f8faf9;
-          border: 1px solid #e6ece9;
-          border-radius: 13px;
-          padding: 14px;
-        }
-
-        .costGrid span,
-        .costGrid strong {
           display: block;
-        }
-
-        .costGrid span {
-          color: #89958f;
-          font-size: 10px;
-          margin-bottom: 7px;
-        }
-
-        .costGrid strong {
-          font-size: 17px;
-        }
-
-        .internalData {
-          background: #17231f;
-          color: #d7e5df;
-          border-radius: 12px;
-          overflow: hidden;
-        }
-
-        .internalData summary {
-          cursor: pointer;
-          padding: 12px 14px;
           font-size: 12px;
         }
 
-        .internalData pre {
-          margin: 0;
-          padding: 15px;
-          overflow: auto;
-          direction: ltr;
-          text-align: left;
-          font-size: 11px;
-          line-height: 1.6;
+        .timelineItem small {
+          display: block;
+          color: #919a95;
+          font-size: 10px;
+          margin-top: 4px;
+        }
+
+        .muted {
+          color: #8a938e;
+          font-size: 12px;
+        }
+
+        .dates {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 8px;
+          margin-top: 20px;
         }
 
         .overlay {
           position: fixed;
           inset: 0;
-          background: rgba(16, 28, 23, 0.32);
+          background: rgba(20, 28, 24, 0.32);
           z-index: 100;
           display: flex;
           justify-content: flex-start;
+          align-items: stretch;
         }
 
-        .drawer {
-          width: min(560px, 100%);
-          height: 100%;
+        .drawer,
+        .reviewDrawer {
+          width: min(500px, 100%);
           background: white;
+          height: 100%;
           overflow-y: auto;
-          box-shadow: 20px 0 60px rgba(0, 0, 0, 0.12);
-          animation: slideIn 0.2s ease;
+          padding: 28px;
+          box-shadow: -10px 0 35px rgba(0, 0, 0, 0.08);
         }
 
-        @keyframes slideIn {
-          from {
-            transform: translateX(-30px);
-            opacity: 0.6;
-          }
-          to {
-            transform: translateX(0);
-            opacity: 1;
-          }
+        .reviewDrawer {
+          width: min(560px, 100%);
         }
 
         .drawerHeader {
           display: flex;
           justify-content: space-between;
-          gap: 20px;
-          padding: 25px;
-          border-bottom: 1px solid #e8eeeb;
-          position: sticky;
-          top: 0;
-          background: rgba(255, 255, 255, 0.96);
-          backdrop-filter: blur(10px);
-          z-index: 2;
-        }
-
-        .drawerHeader > div > span {
-          color: #16805c;
-          font-size: 11px;
-          font-weight: 700;
+          gap: 15px;
+          margin-bottom: 25px;
         }
 
         .drawerHeader h2 {
-          margin: 5px 0;
           font-size: 22px;
-        }
-
-        .drawerHeader p {
-          margin: 0;
-          color: #7d8a85;
-          font-size: 12px;
         }
 
         .closeButton {
-          width: 34px;
-          height: 34px;
-          border: 0;
+          width: 36px;
+          height: 36px;
+          border: 1px solid #e2e8e4;
+          background: white;
           border-radius: 10px;
-          background: #f1f4f2;
-          color: #52615a;
-          font-size: 22px;
+          font-size: 24px;
           cursor: pointer;
-          flex: 0 0 auto;
+          color: #66716b;
         }
 
         .formSection {
-          display: grid;
-          grid-template-columns: 42px 1fr;
-          gap: 12px;
-          padding: 23px 25px;
+          padding: 18px 0;
           border-bottom: 1px solid #edf1ef;
         }
 
-        .sectionNumber {
-          width: 32px;
-          height: 32px;
-          border-radius: 10px;
-          display: grid;
-          place-items: center;
-          background: #eaf7f1;
-          color: #16805c;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .formContent h3 {
-          margin: 2px 0 17px;
+        .formSection h3 {
           font-size: 14px;
+          margin-bottom: 15px;
         }
 
         label {
           display: block;
-          margin-bottom: 14px;
-          color: #4d5c55;
-          font-size: 11px;
+          color: #4c5851;
+          font-size: 12px;
           font-weight: 700;
+          margin-bottom: 14px;
         }
 
-        input,
-        textarea,
-        .formContent select {
-          display: block;
-          width: 100%;
+        label input,
+        label textarea,
+        label select {
           margin-top: 7px;
-          border: 1px solid #dce5e1;
-          border-radius: 11px;
-          background: white;
-          outline: 0;
-          padding: 12px;
-          color: #26342f;
-          font-size: 13px;
-        }
-
-        textarea {
-          resize: vertical;
-        }
-
-        input:focus,
-        textarea:focus,
-        select:focus {
-          border-color: #73b69e;
-          box-shadow: 0 0 0 3px #eaf7f1;
+          font-weight: 400;
         }
 
         .twoColumns {
@@ -1865,56 +2178,47 @@ export default function AITasksPage() {
           gap: 10px;
         }
 
-        .drawerFooter {
-          position: sticky;
-          bottom: 0;
-          display: flex;
-          justify-content: flex-start;
-          gap: 8px;
-          padding: 16px 25px;
-          background: rgba(255, 255, 255, 0.97);
-          border-top: 1px solid #e8eeeb;
+        .formNotice {
+          background: #f0f7f4;
+          border: 1px solid #dcece5;
+          color: #4d665b;
+          padding: 12px;
+          border-radius: 11px;
+          font-size: 11px;
+          line-height: 1.7;
+          margin: 15px 0;
         }
 
-        @media (max-width: 1100px) {
+        @media (max-width: 1200px) {
           .stats {
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr);
           }
 
           .workspace {
-            grid-template-columns: 350px minmax(0, 1fr);
+            grid-template-columns: 330px minmax(0, 1fr);
           }
 
           .infoGrid {
             grid-template-columns: repeat(2, 1fr);
           }
+
+          .dates {
+            grid-template-columns: repeat(3, 1fr);
+          }
         }
 
-        @media (max-width: 800px) {
+        @media (max-width: 900px) {
           .shell {
-            width: min(100% - 24px, 700px);
-            padding-top: 22px;
+            padding: 20px;
           }
 
           .header {
-            align-items: flex-start;
+            align-items: stretch;
             flex-direction: column;
           }
 
-          .header .primaryButton {
-            width: 100%;
-          }
-
-          .stats {
-            grid-template-columns: repeat(2, 1fr);
-          }
-
-          .toolbar {
-            flex-direction: column;
-          }
-
-          .toolbar select {
-            min-height: 44px;
+          .filters {
+            grid-template-columns: 1fr;
           }
 
           .workspace {
@@ -1922,60 +2226,160 @@ export default function AITasksPage() {
           }
 
           .taskList {
-            border-left: 0;
-            border-bottom: 1px solid #e8eeeb;
-            max-height: 420px;
-            overflow: auto;
+            min-height: auto;
           }
 
           .details {
-            padding: 20px;
+            min-height: auto;
           }
 
-          .detailsHeader {
-            flex-direction: column;
-          }
-
-          .infoGrid {
-            grid-template-columns: 1fr 1fr;
+          .workflowSteps {
+            grid-template-columns: repeat(2, 1fr);
           }
         }
 
-        @media (max-width: 520px) {
-          .stats {
-            grid-template-columns: 1fr 1fr;
+        @media (max-width: 600px) {
+          .shell {
+            padding: 13px;
           }
 
-          .stat strong {
-            font-size: 20px;
+          .header h1 {
+            font-size: 25px;
+          }
+
+          .stats {
+            grid-template-columns: repeat(2, 1fr);
           }
 
           .infoGrid,
-          .costGrid,
+          .dates,
+          .reviewCards,
           .twoColumns {
             grid-template-columns: 1fr;
           }
 
-          .detailsHeader h2 {
-            font-size: 21px;
+          .details {
+            padding: 17px;
           }
 
-          .formSection {
+          .workflowSteps {
             grid-template-columns: 1fr;
           }
 
-          .sectionNumber {
-            display: none;
-          }
-
-          .drawerHeader,
-          .formSection,
-          .drawerFooter {
-            padding-right: 18px;
-            padding-left: 18px;
+          .drawer,
+          .reviewDrawer {
+            padding: 20px;
           }
         }
       `}</style>
     </main>
+  );
+}
+
+function Stat({ title, value, icon }) {
+  return (
+    <div className="stat">
+      <div className="statIcon">{icon}</div>
+      <div className="statValue">{value}</div>
+      <div className="statTitle">{title}</div>
+
+      <style jsx>{`
+        .stat {
+          background: white;
+          border: 1px solid #e3eae6;
+          border-radius: 15px;
+          padding: 15px;
+          min-width: 0;
+        }
+
+        .statIcon {
+          font-size: 18px;
+        }
+
+        .statValue {
+          font-size: 24px;
+          font-weight: 900;
+          margin-top: 8px;
+        }
+
+        .statTitle {
+          color: #7a857f;
+          font-size: 12px;
+          margin-top: 4px;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function Info({ label, value }) {
+  return (
+    <div className="info">
+      <div className="infoLabel">{label}</div>
+      <div className="infoValue">{value}</div>
+
+      <style jsx>{`
+        .info {
+          background: #f8faf9;
+          border: 1px solid #e8eeeb;
+          border-radius: 12px;
+          padding: 12px;
+        }
+
+        .infoLabel {
+          color: #89938e;
+          font-size: 10px;
+          margin-bottom: 5px;
+        }
+
+        .infoValue {
+          font-weight: 800;
+          font-size: 12px;
+          word-break: break-word;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function WorkflowStep({ active, title, date }) {
+  return (
+    <div className={`workflowStep ${active ? "active" : ""}`}>
+      <div className="workflowStepTitle">
+        {active ? "✓ " : "○ "}
+        {title}
+      </div>
+
+      <small className="workflowStepDate">
+        {date ? formatDate(date) : "لم تبدأ بعد"}
+      </small>
+
+      <style jsx>{`
+        .workflowStep {
+          border: 1px solid #e7ece9;
+          background: #fafbfa;
+          border-radius: 12px;
+          padding: 11px;
+        }
+
+        .workflowStep.active {
+          background: #eff8f4;
+          border-color: #cce8db;
+        }
+
+        .workflowStepTitle {
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .workflowStepDate {
+          display: block;
+          color: #89938e;
+          font-size: 9px;
+          margin-top: 6px;
+          line-height: 1.5;
+        }
+      `}</style>
+    </div>
   );
 }
