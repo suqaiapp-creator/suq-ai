@@ -30,27 +30,26 @@ const riskLabels = {
 };
 
 const commandTypeLabels = {
-  read_project_files: "قراءة الملفات",
+  read_project_files: "قراءة ملفات المشروع",
   analyze_code: "تحليل الكود",
   suggest_changes: "اقتراح تعديلات",
-  create_files: "إنشاء ملفات",
   edit_files: "تعديل الملفات",
-  run_build: "تشغيل Build",
-  run_tests: "تشغيل الاختبارات",
-  database_review: "مراجعة قاعدة البيانات",
-  database_modify: "تعديل قاعدة البيانات",
-  prepare_git_commit: "تجهيز Git Commit",
-  deploy_vercel: "النشر إلى Vercel",
-  rollback: "Rollback",
 };
 
 const statusLabels = {
-  pending: "معلق",
+  pending: "بانتظار التنفيذ",
   running: "قيد التنفيذ",
   completed: "مكتملة",
   failed: "فشلت",
   cancelled: "ملغاة",
 };
+
+const supportedCommandTypes = [
+  "read_project_files",
+  "analyze_code",
+  "suggest_changes",
+  "edit_files",
+];
 
 function formatDate(value) {
   if (!value) return "—";
@@ -66,114 +65,55 @@ function formatDate(value) {
 }
 
 function formatDuration(seconds) {
-  const value = Number(seconds || 0);
+  if (!seconds && seconds !== 0) return "—";
 
-  if (!value) return "0ث";
+  const total = Number(seconds);
 
-  if (value < 60) {
-    return `${Math.round(value)}ث`;
+  if (total < 60) {
+    return `${Math.round(total)}ث`;
   }
 
-  const minutes = Math.floor(value / 60);
-  const remainingSeconds = Math.round(value % 60);
+  const minutes = Math.floor(total / 60);
+  const secs = Math.round(total % 60);
 
-  if (minutes < 60) {
-    return `${minutes}د ${remainingSeconds}ث`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-
-  return `${hours}س ${remainingMinutes}د`;
+  return `${minutes}د ${secs}ث`;
 }
 
-function statusClass(status) {
-  if (status === "completed") {
-    return {
-      background: "#dcfce7",
-      color: "#166534",
-    };
-  }
-
-  if (status === "running") {
-    return {
-      background: "#ecfdf5",
-      color: "#047857",
-    };
-  }
-
-  if (status === "failed") {
-    return {
-      background: "#fee2e2",
-      color: "#b91c1c",
-    };
-  }
-
-  if (status === "cancelled") {
-    return {
-      background: "#f3f4f6",
-      color: "#4b5563",
-    };
-  }
-
-  return {
-    background: "#fef3c7",
-    color: "#92400e",
-  };
+function statusColor(status) {
+  if (status === "completed") return "#16a34a";
+  if (status === "failed") return "#dc2626";
+  if (status === "running") return "#2563eb";
+  if (status === "cancelled") return "#6b7280";
+  return "#d97706";
 }
 
-function riskClass(risk) {
-  if (risk === "critical") {
-    return {
-      background: "#fee2e2",
-      color: "#991b1b",
-    };
-  }
-
-  if (risk === "high") {
-    return {
-      background: "#ffedd5",
-      color: "#9a3412",
-    };
-  }
-
-  if (risk === "medium") {
-    return {
-      background: "#fef3c7",
-      color: "#92400e",
-    };
-  }
-
-  return {
-    background: "#dcfce7",
-    color: "#166534",
-  };
+function riskColor(risk) {
+  if (risk === "critical") return "#dc2626";
+  if (risk === "high") return "#ea580c";
+  if (risk === "medium") return "#d97706";
+  return "#16a34a";
 }
 
 function getExecutionButton(command) {
   if (!command) return null;
 
-  if (command.status !== "running") {
-    return null;
-  }
-
   if (command.command_type === "read_project_files") {
     return {
       label: "📂 تنفيذ القراءة",
-      loadingLabel: "📂 جارٍ قراءة المشروع...",
+      loadingLabel: "📂 جارٍ قراءة الملفات...",
     };
   }
 
   if (command.command_type === "analyze_code") {
     return {
-      label: "🔍 تنفيذ التحليل",
-      loadingLabel: "🔍 جارٍ تحليل الكود...",
+      label: "🔎 تحليل الكود",
+      loadingLabel: "🔎 جارٍ تحليل الكود...",
     };
   }
 
   if (command.command_type === "suggest_changes") {
     return {
-      label: "💡 تنفيذ الاقتراحات",
+      label: "💡 إعداد الاقتراحات",
       loadingLabel: "💡 جارٍ إعداد الاقتراحات...",
     };
   }
@@ -188,209 +128,40 @@ function getExecutionButton(command) {
   return null;
 }
 
-export default function SuperAdminAIEmployeePage() {
+export default function AIEmployeePage() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [executingCommandId, setExecutingCommandId] = useState(null);
+  const [savingCommand, setSavingCommand] = useState(false);
+  const [executingId, setExecutingId] = useState(null);
+
+  const [activeTab, setActiveTab] = useState("commands");
 
   const [employee, setEmployee] = useState(null);
   const [capabilities, setCapabilities] = useState([]);
   const [commands, setCommands] = useState([]);
   const [approvals, setApprovals] = useState([]);
 
-  const [activeTab, setActiveTab] = useState("overview");
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const [commandSearch, setCommandSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [approvalModal, setApprovalModal] = useState(null);
+  const [approvalReason, setApprovalReason] = useState("");
 
-  const [decisionModal, setDecisionModal] = useState(null);
-  const [decisionReason, setDecisionReason] = useState("");
-
-  /*
-   * ---------------------------------------------------------
-   * NEW COMMAND FORM
-   * ---------------------------------------------------------
-   */
-
-  const [newCommandModal, setNewCommandModal] = useState(false);
+  const [createCommandModal, setCreateCommandModal] = useState(false);
 
   const [newCommand, setNewCommand] = useState({
     command: "",
     command_type: "read_project_files",
-    risk_level: "low",
     path: "",
-    content: "",
+    new_content: "",
+    notes: "",
+    dry_run: true,
   });
 
-  function resetNewCommandForm() {
-    setNewCommand({
-      command: "",
-      command_type: "read_project_files",
-      risk_level: "low",
-      path: "",
-      content: "",
-    });
-  }
+  const [expandedCommand, setExpandedCommand] = useState(null);
 
-  function openNewCommandModal() {
-    setMessage("");
-    setError("");
-    resetNewCommandForm();
-    setNewCommandModal(true);
-  }
-
-  function closeNewCommandModal() {
-    if (saving) return;
-
-    setNewCommandModal(false);
-    resetNewCommandForm();
-  }
-
-  function getCommandCapability(commandType) {
-    return commandType;
-  }
-
-  function commandNeedsApproval(commandType, riskLevel) {
-    const approvalCapabilities = [
-      "create_files",
-      "edit_files",
-      "run_build",
-      "run_tests",
-      "database_modify",
-      "prepare_git_commit",
-      "deploy_vercel",
-      "rollback",
-    ];
-
-    return (
-      approvalCapabilities.includes(commandType) ||
-      riskLevel === "critical"
-    );
-  }
-
-  async function createCommand() {
-    setSaving(true);
-    setMessage("");
-    setError("");
-
-    try {
-      const commandText =
-        newCommand.command.trim();
-
-      const path = newCommand.path.trim();
-
-      if (!commandText) {
-        throw new Error("اكتب وصف الأمر أولاً.");
-      }
-
-      if (
-        [
-          "read_project_files",
-          "analyze_code",
-          "suggest_changes",
-          "edit_files",
-        ].includes(newCommand.command_type) &&
-        !path
-      ) {
-        throw new Error(
-          "يجب تحديد مسار الملف المطلوب."
-        );
-      }
-
-      const capability =
-        getCommandCapability(
-          newCommand.command_type
-        );
-
-      const needsApproval =
-        commandNeedsApproval(
-          newCommand.command_type,
-          newCommand.risk_level
-        );
-
-      let inputData = {};
-
-      if (path) {
-        inputData.path = path;
-      }
-
-      /*
-       * التعديل الآمن حالياً Dry Run فقط.
-       */
-      if (
-        newCommand.command_type ===
-        "edit_files"
-      ) {
-        if (!newCommand.content.trim()) {
-          throw new Error(
-            "في أمر تعديل الملفات يجب إدخال المحتوى المقترح."
-          );
-        }
-
-        inputData.dry_run = true;
-        inputData.new_content =
-          newCommand.content;
-      }
-
-      const response = await fetch(
-        "/api/admin/ai-employee/create-command",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            command: commandText,
-            command_type:
-              newCommand.command_type,
-            risk_level:
-              newCommand.risk_level,
-            requires_approval: needsApproval,
-            requested_capabilities: [
-              capability,
-            ],
-            input_data: inputData,
-            points_cost: 0,
-            estimated_cost: 0,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data?.success) {
-        throw new Error(
-          data?.error ||
-            "تعذر إنشاء الأمر."
-        );
-      }
-
-      setNewCommandModal(false);
-      resetNewCommandForm();
-
-      setMessage(
-        data.requires_approval
-          ? "🟢 تم إنشاء الأمر وإنشاء طلب الموافقة تلقائياً."
-          : "🟢 تم إنشاء الأمر بنجاح."
-      );
-
-      setActiveTab("commands");
-
-      await loadData();
-    } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر إنشاء الأمر."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function loadData() {
+  const loadData = async () => {
     setLoading(true);
     setError("");
 
@@ -400,570 +171,500 @@ export default function SuperAdminAIEmployeePage() {
         error: userError,
       } = await supabase.auth.getUser();
 
-      if (userError || !user) {
-        throw new Error("يجب تسجيل الدخول أولاً");
+      if (userError) throw userError;
+
+      if (!user) {
+        throw new Error("لم يتم العثور على المستخدم الحالي.");
       }
 
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
+      setCurrentUserId(user.id);
+
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select(
-          "id, is_super_admin, account_status"
-        )
+        .select("*")
         .eq("id", user.id)
-        .maybeSingle();
+        .single();
 
-      if (profileError) {
-        throw profileError;
-      }
+      if (profileError) throw profileError;
 
       if (!profile?.is_super_admin) {
-        throw new Error(
-          "هذه الصفحة متاحة للـ Super Admin فقط"
-        );
+        throw new Error("هذه الصفحة متاحة للـ Super Admin فقط.");
       }
 
-      const {
-        data: employeeData,
-        error: employeeError,
-      } = await supabase
+      const { data: employeeData, error: employeeError } = await supabase
         .from("ai_employees")
         .select("*")
         .eq("name", "والم")
         .maybeSingle();
 
-      if (employeeError) {
-        throw employeeError;
-      }
+      if (employeeError) throw employeeError;
 
       if (!employeeData) {
-        throw new Error("موظف والم غير موجود");
+        throw new Error("لم يتم العثور على موظف AI باسم والم.");
       }
 
       setEmployee(employeeData);
 
       const [
-        capabilitiesResult,
-        commandsResult,
-        approvalsResult,
+        capabilitiesResponse,
+        commandsResponse,
+        approvalsResponse,
       ] = await Promise.all([
         supabase
           .from("ai_employee_capabilities")
           .select("*")
-          .eq(
-            "ai_employee_id",
-            employeeData.id
-          )
-          .order("risk_level", {
-            ascending: true,
-          }),
+          .eq("ai_employee_id", employeeData.id)
+          .order("created_at", { ascending: true }),
 
         supabase
           .from("ai_employee_commands")
           .select("*")
-          .eq(
-            "ai_employee_id",
-            employeeData.id
-          )
-          .order("created_at", {
-            ascending: false,
-          }),
+          .eq("ai_employee_id", employeeData.id)
+          .order("created_at", { ascending: false }),
 
         supabase
           .from("ai_employee_approvals")
           .select("*")
-          .eq(
-            "ai_employee_id",
-            employeeData.id
-          )
-          .order("created_at", {
-            ascending: false,
-          }),
+          .eq("ai_employee_id", employeeData.id)
+          .order("created_at", { ascending: false }),
       ]);
 
-      if (capabilitiesResult.error) {
-        throw capabilitiesResult.error;
+      if (capabilitiesResponse.error) {
+        throw capabilitiesResponse.error;
       }
 
-      if (commandsResult.error) {
-        throw commandsResult.error;
+      if (commandsResponse.error) {
+        throw commandsResponse.error;
       }
 
-      if (approvalsResult.error) {
-        throw approvalsResult.error;
+      if (approvalsResponse.error) {
+        throw approvalsResponse.error;
       }
 
-      setCapabilities(
-        capabilitiesResult.data || []
-      );
-
-      setCommands(
-        commandsResult.data || []
-      );
-
-      setApprovals(
-        approvalsResult.data || []
-      );
+      setCapabilities(capabilitiesResponse.data || []);
+      setCommands(commandsResponse.data || []);
+      setApprovals(approvalsResponse.data || []);
     } catch (err) {
-      setError(
-        err?.message ||
-          "حدث خطأ أثناء تحميل البيانات"
-      );
+      console.error(err);
+      setError(err?.message || "حدث خطأ أثناء تحميل بيانات والم.");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     loadData();
   }, []);
 
-  async function toggleEmployeeStatus() {
-    if (!employee) return;
+  const capabilityMap = useMemo(() => {
+    const map = {};
 
-    setSaving(true);
+    for (const capability of capabilities) {
+      map[capability.capability_key] = capability;
+    }
+
+    return map;
+  }, [capabilities]);
+
+  const commandMap = useMemo(() => {
+    const map = {};
+
+    for (const command of commands) {
+      map[command.id] = command;
+    }
+
+    return map;
+  }, [commands]);
+
+  const selectedCapability = capabilityMap[newCommand.command_type];
+
+  const pendingApprovals = useMemo(() => {
+    return approvals.filter((approval) => approval.status === "pending");
+  }, [approvals]);
+
+  const resetCreateForm = () => {
+    setNewCommand({
+      command: "",
+      command_type: "read_project_files",
+      path: "",
+      new_content: "",
+      notes: "",
+      dry_run: true,
+    });
+  };
+
+  const openCreateCommand = () => {
     setMessage("");
     setError("");
+    resetCreateForm();
+    setCreateCommandModal(true);
+  };
+
+  const closeCreateCommand = () => {
+    if (savingCommand) return;
+
+    setCreateCommandModal(false);
+    resetCreateForm();
+  };
+
+  const createCommand = async () => {
+    setSavingCommand(true);
+    setError("");
+    setMessage("");
 
     try {
-      const nextStatus =
-        employee.status === "active"
-          ? "inactive"
-          : "active";
-
-      const {
-        error: updateError,
-      } = await supabase
-        .from("ai_employees")
-        .update({
-          status: nextStatus,
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq("id", employee.id);
-
-      if (updateError) {
-        throw updateError;
+      if (!employee) {
+        throw new Error("لم يتم تحميل بيانات والم.");
       }
 
-      setEmployee({
-        ...employee,
-        status: nextStatus,
-      });
-
-      setMessage(
-        nextStatus === "active"
-          ? "🟢 تم تفعيل والم"
-          : "🟠 تم إيقاف والم"
-      );
-    } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر تغيير حالة الموظف"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleCapability(capability) {
-    setSaving(true);
-    setMessage("");
-    setError("");
-
-    try {
-      const {
-        error: updateError,
-      } = await supabase
-        .from("ai_employee_capabilities")
-        .update({
-          enabled: !capability.enabled,
-          updated_at:
-            new Date().toISOString(),
-        })
-        .eq("id", capability.id);
-
-      if (updateError) {
-        throw updateError;
+      if (!currentUserId) {
+        throw new Error("لم يتم تحديد المستخدم الحالي.");
       }
 
-      setCapabilities((current) =>
-        current.map((item) =>
-          item.id === capability.id
-            ? {
-                ...item,
-                enabled:
-                  !item.enabled,
-              }
-            : item
-        )
-      );
+      const commandName = newCommand.command.trim();
+
+      if (!commandName) {
+        throw new Error("اكتب اسم الأمر أولاً.");
+      }
+
+      const capability = capabilityMap[newCommand.command_type];
+
+      if (!capability) {
+        throw new Error("صلاحية الأمر غير موجودة.");
+      }
+
+      if (!capability.enabled) {
+        throw new Error("هذه الصلاحية غير مفعّلة لوالم.");
+      }
+
+      if (!supportedCommandTypes.includes(newCommand.command_type)) {
+        throw new Error("نوع الأمر غير مدعوم للتنفيذ في هذه المرحلة.");
+      }
+
+      if (
+        newCommand.command_type === "edit_files" &&
+        !newCommand.path.trim()
+      ) {
+        throw new Error("اكتب مسار الملف المراد تعديله.");
+      }
+
+      if (
+        newCommand.command_type === "edit_files" &&
+        !newCommand.new_content
+      ) {
+        throw new Error("اكتب المحتوى الجديد المطلوب في التعديل الآمن.");
+      }
+
+      const requiresApproval =
+        Boolean(capability.requires_approval) ||
+        capability.risk_level === "critical";
+
+      const inputData = {
+        path: newCommand.path.trim() || null,
+        notes: newCommand.notes.trim() || null,
+      };
+
+      if (newCommand.command_type === "edit_files") {
+        inputData.dry_run = true;
+        inputData.new_content = newCommand.new_content;
+      }
+
+      const { data: insertedCommand, error: commandError } = await supabase
+        .from("ai_employee_commands")
+        .insert({
+          ai_employee_id: employee.id,
+          created_by: currentUserId,
+          command: commandName,
+          command_type: newCommand.command_type,
+          status: "pending",
+          risk_level: capability.risk_level || "low",
+          requires_approval: requiresApproval,
+          approval_status: requiresApproval ? "pending" : "approved",
+          requested_capabilities: [newCommand.command_type],
+          input_data: inputData,
+          output_data: {},
+          execution_log: [],
+          points_cost: 0,
+          estimated_cost: 0,
+          actual_cost: 0,
+        })
+        .select("*")
+        .single();
+
+      if (commandError) {
+        throw commandError;
+      }
+
+      if (!insertedCommand) {
+        throw new Error("لم يتم إنشاء الأمر.");
+      }
+
+      if (requiresApproval) {
+        const { error: approvalError } = await supabase
+          .from("ai_employee_approvals")
+          .insert({
+            command_id: insertedCommand.id,
+            ai_employee_id: employee.id,
+            requested_by: currentUserId,
+            status: "pending",
+            decision: null,
+            reason: null,
+            requested_capabilities: [newCommand.command_type],
+            risk_level: capability.risk_level || "medium",
+          });
+
+        if (approvalError) {
+          await supabase
+            .from("ai_employee_commands")
+            .delete()
+            .eq("id", insertedCommand.id);
+
+          throw new Error(
+            `تم إلغاء إنشاء الأمر لأن طلب الموافقة لم يُنشأ: ${approvalError.message}`
+          );
+        }
+      }
+
+      setCreateCommandModal(false);
+      resetCreateForm();
 
       setMessage(
-        `تم تحديث صلاحية ${capability.capability_name}`
+        requiresApproval
+          ? "🟢 تم إنشاء الأمر وإرسال طلب الموافقة إلى تبويب الموافقات."
+          : "🟢 تم إنشاء الأمر وهو جاهز للتنفيذ."
       );
+
+      await loadData();
     } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر تحديث الصلاحية"
-      );
+      console.error(err);
+      setError(err?.message || "تعذر إنشاء الأمر.");
     } finally {
-      setSaving(false);
+      setSavingCommand(false);
     }
-  }
+  };
 
-  async function startCommand(command) {
-    if (
-      !command ||
-      command.status !== "pending"
-    ) {
-      return;
-    }
+  const approveCommand = async () => {
+    if (!approvalModal?.command_id) return;
 
-    if (
-      command.requires_approval === true &&
-      command.approval_status !== "approved"
-    ) {
-      setError(
-        "هذا الأمر يحتاج موافقة Super Admin قبل بدء التنفيذ."
-      );
-      return;
-    }
-
-    setSaving(true);
-    setMessage("");
     setError("");
+    setMessage("");
 
     try {
-      const {
-        data,
-        error: rpcError,
-      } = await supabase.rpc(
+      const { data, error: rpcError } = await supabase.rpc(
+        "approve_ai_employee_command",
+        {
+          p_command_id: approvalModal.command_id,
+          p_reason: approvalReason.trim() || null,
+        }
+      );
+
+      if (rpcError) throw rpcError;
+
+      if (!data?.success) {
+        throw new Error(data?.reason || "تعذر اعتماد الأمر.");
+      }
+
+      setApprovalModal(null);
+      setApprovalReason("");
+
+      setMessage("🟢 تمت الموافقة على الأمر بنجاح.");
+
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "تعذر اعتماد الأمر.");
+    }
+  };
+
+  const rejectCommand = async () => {
+    if (!approvalModal?.command_id) return;
+
+    setError("");
+    setMessage("");
+
+    try {
+      const { data, error: rpcError } = await supabase.rpc(
+        "reject_ai_employee_command",
+        {
+          p_command_id: approvalModal.command_id,
+          p_reason: approvalReason.trim() || "تم رفض الأمر من Super Admin.",
+        }
+      );
+
+      if (rpcError) throw rpcError;
+
+      if (!data?.success) {
+        throw new Error(data?.reason || "تعذر رفض الأمر.");
+      }
+
+      setApprovalModal(null);
+      setApprovalReason("");
+
+      setMessage("🟢 تم رفض الأمر.");
+
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || "تعذر رفض الأمر.");
+    }
+  };
+
+  const startCommand = async (command) => {
+    setError("");
+    setMessage("");
+
+    try {
+      if (command.status !== "pending") {
+        throw new Error("هذا الأمر ليس في حالة تسمح ببدء التنفيذ.");
+      }
+
+      if (
+        command.requires_approval &&
+        command.approval_status !== "approved"
+      ) {
+        throw new Error("يجب اعتماد الأمر أولاً من تبويب الموافقات.");
+      }
+
+      const { data, error: rpcError } = await supabase.rpc(
         "start_ai_employee_command",
         {
           p_command_id: command.id,
         }
       );
 
-      if (rpcError) {
-        throw rpcError;
-      }
+      if (rpcError) throw rpcError;
 
       if (!data?.success) {
-        throw new Error(
-          data?.message ||
-            "تعذر بدء الأمر"
-        );
+        throw new Error(data?.reason || "تعذر بدء الأمر.");
       }
 
-      setCommands((current) =>
-        current.map((item) =>
-          item.id === command.id
-            ? {
-                ...item,
-                status: "running",
-                started_at:
-                  new Date().toISOString(),
-                execution_log: [
-                  ...(Array.isArray(
-                    item.execution_log
-                  )
-                    ? item.execution_log
-                    : []),
-                  {
-                    event:
-                      "execution_started",
-                    at:
-                      new Date().toISOString(),
-                  },
-                ],
-              }
-            : item
-        )
-      );
+      setMessage("🟢 تم بدء تنفيذ الأمر.");
 
-      setMessage(
-        "🟢 تم اجتياز بوابة الأمان وبدأت مرحلة التنفيذ."
-      );
+      await loadData();
     } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر بدء الأمر"
-      );
-    } finally {
-      setSaving(false);
+      console.error(err);
+      setError(err?.message || "تعذر بدء تنفيذ الأمر.");
     }
-  }
+  };
 
-  async function executeCommand(command) {
-    if (!command) return;
-
-    const executionButton =
-      getExecutionButton(command);
+  const executeCommand = async (command) => {
+    const executionButton = getExecutionButton(command);
 
     if (!executionButton) {
+      setError("هذا النوع من الأوامر غير مدعوم للتنفيذ حالياً.");
       return;
     }
 
-    if (executingCommandId) {
+    if (command.status !== "running") {
+      setError("يجب أن يكون الأمر في حالة قيد التنفيذ قبل تشغيله.");
       return;
     }
 
-    setExecutingCommandId(command.id);
-
-    setMessage("");
+    setExecutingId(command.id);
     setError("");
+    setMessage("");
 
     try {
-      const response = await fetch(
-        "/api/admin/ai-employee/execute",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            command_id: command.id,
-          }),
-        }
-      );
+      const response = await fetch("/api/admin/ai-employee/execute", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          commandId: command.id,
+        }),
+      });
 
       const data = await response.json();
 
-      if (
-        !response.ok ||
-        !data?.success
-      ) {
+      if (!response.ok || !data?.success) {
         throw new Error(
           data?.error ||
-            "فشل تنفيذ الأمر"
+            data?.message ||
+            "تعذر تنفيذ الأمر."
         );
       }
 
-      if (
-        command.command_type ===
-        "analyze_code"
-      ) {
-        setMessage(
-          "🟢 تم تحليل كود مشروع سوق AI بنجاح."
-        );
-      } else if (
-        command.command_type ===
-        "suggest_changes"
-      ) {
+      if (command.command_type === "analyze_code") {
+        setMessage("🟢 تم تحليل كود مشروع سوق AI بنجاح.");
+      } else if (command.command_type === "suggest_changes") {
         setMessage(
           "🟢 تم إعداد اقتراحات تحسين كود مشروع سوق AI بدون تعديل الملفات."
         );
-      } else if (
-        command.command_type ===
-        "edit_files"
-      ) {
+      } else if (command.command_type === "edit_files") {
         setMessage(
           "🟢 تم تنفيذ التعديل الآمن بنجاح. لم يتم تعديل أي ملف فعلياً."
         );
       } else {
-        setMessage(
-          "🟢 تمت قراءة هيكل مشروع سوق AI بنجاح."
-        );
+        setMessage("🟢 تمت قراءة هيكل مشروع سوق AI بنجاح.");
       }
 
       await loadData();
     } catch (err) {
-      setError(
-        err?.message ||
-          "فشل تنفيذ الأمر"
-      );
-
+      console.error(err);
+      setError(err?.message || "تعذر تنفيذ الأمر.");
       await loadData();
     } finally {
-      setExecutingCommandId(null);
+      setExecutingId(null);
     }
-  }
-
-  async function decideApproval(decision) {
-    if (!decisionModal?.approval) {
-      return;
-    }
-
-    setSaving(true);
-    setMessage("");
-    setError("");
-
-    try {
-      const rpcName =
-        decision === "approve"
-          ? "approve_ai_employee_command"
-          : "reject_ai_employee_command";
-
-      const {
-        data,
-        error: rpcError,
-      } = await supabase.rpc(
-        rpcName,
-        {
-          p_approval_id:
-            decisionModal.approval.id,
-          p_reason:
-            decisionReason.trim() ||
-            null,
-        }
-      );
-
-      if (rpcError) {
-        throw rpcError;
-      }
-
-      if (
-        data &&
-        data.success === false
-      ) {
-        throw new Error(
-          data.message ||
-            "تعذر تنفيذ القرار"
-        );
-      }
-
-      setDecisionModal(null);
-      setDecisionReason("");
-
-      setMessage(
-        decision === "approve"
-          ? "🟢 تمت الموافقة على الأمر."
-          : "🟠 تم رفض الأمر."
-      );
-
-      await loadData();
-    } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر حفظ القرار"
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const enabledCapabilities =
-    useMemo(
-      () =>
-        capabilities.filter(
-          (item) => item.enabled
-        ).length,
-      [capabilities]
-    );
-
-  const pendingApprovals =
-    useMemo(
-      () =>
-        approvals.filter(
-          (item) =>
-            item.status ===
-            "pending"
-        ).length,
-      [approvals]
-    );
-
-  const filteredCommands =
-    useMemo(() => {
-      const query =
-        commandSearch
-          .trim()
-          .toLowerCase();
-
-      return commands.filter(
-        (command) => {
-          const matchesSearch =
-            !query ||
-            String(
-              command.command || ""
-            )
-              .toLowerCase()
-              .includes(query) ||
-            String(
-              command.command_type ||
-                ""
-            )
-              .toLowerCase()
-              .includes(query);
-
-          const matchesStatus =
-            statusFilter === "all" ||
-            command.status ===
-              statusFilter;
-
-          return (
-            matchesSearch &&
-            matchesStatus
-          );
-        }
-      );
-    }, [
-      commands,
-      commandSearch,
-      statusFilter,
-    ]);
+  };
 
   if (loading) {
     return (
-      <main
+      <div
         dir="rtl"
         style={{
           minHeight: "100vh",
-          background: "#f7faf8",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily:
-            "Arial, sans-serif",
-          color: "#166534",
+          padding: 24,
+          background: "#f8fafc",
+          fontFamily: "Arial, sans-serif",
         }}
       >
-        جاري تحميل ملف والم...
-      </main>
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 16,
+            padding: 24,
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          جارٍ تحميل والم...
+        </div>
+      </div>
     );
   }
 
   return (
-    <main
+    <div
       dir="rtl"
       style={{
         minHeight: "100vh",
-        background: "#f7faf8",
-        color: "#17221b",
-        fontFamily:
-          "Arial, sans-serif",
-        padding: "24px",
+        background: "#f8fafc",
+        padding: 20,
+        fontFamily: "Arial, sans-serif",
       }}
     >
       <div
         style={{
-          maxWidth: "1400px",
+          maxWidth: 1400,
           margin: "0 auto",
         }}
       >
-        <section
+        <div
           style={{
-            background: "#ffffff",
-            border:
-              "1px solid #e5ebe7",
-            borderRadius: "24px",
-            padding: "24px",
-            marginBottom: "18px",
-            boxShadow:
-              "0 8px 30px rgba(0,0,0,.04)",
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 18,
+            padding: 22,
+            marginBottom: 18,
           }}
         >
           <div
             style={{
               display: "flex",
-              justifyContent:
-                "space-between",
-              alignItems:
-                "flex-start",
-              gap: "20px",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
               flexWrap: "wrap",
             }}
           >
@@ -971,147 +672,88 @@ export default function SuperAdminAIEmployeePage() {
               <div
                 style={{
                   display: "flex",
-                  alignItems:
-                    "center",
-                  gap: "10px",
-                  marginBottom:
-                    "8px",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 8,
                 }}
               >
-                <span
+                <div
                   style={{
-                    width: "12px",
-                    height: "12px",
-                    borderRadius:
-                      "50%",
-                    background: GREEN,
-                    display:
-                      "inline-block",
-                  }}
-                />
-
-                <span
-                  style={{
-                    color:
-                      "#64748b",
-                    fontSize:
-                      "14px",
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    background: "#dcfce7",
+                    color: GREEN,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    fontWeight: 800,
                   }}
                 >
-                  Super Admin AI Employee
-                </span>
+                  و
+                </div>
+
+                <div>
+                  <h1
+                    style={{
+                      margin: 0,
+                      fontSize: 25,
+                      color: "#111827",
+                    }}
+                  >
+                    والم
+                  </h1>
+
+                  <div
+                    style={{
+                      color: "#6b7280",
+                      marginTop: 3,
+                      fontSize: 14,
+                    }}
+                  >
+                    مساعد إدارة وتشغيل سوق AI
+                  </div>
+                </div>
               </div>
-
-              <h1
-                style={{
-                  margin:
-                    "0 0 8px",
-                  fontSize:
-                    "34px",
-                  lineHeight:
-                    1.2,
-                }}
-              >
-                والم
-              </h1>
-
-              <p
-                style={{
-                  margin: 0,
-                  color:
-                    "#64748b",
-                  fontSize:
-                    "16px",
-                }}
-              >
-                الموظف الذكي المسؤول عن مساعدة إدارة وتشغيل سوق AI.
-              </p>
             </div>
 
             <div
               style={{
                 display: "flex",
-                alignItems:
-                  "center",
-                gap: "10px",
-                flexWrap:
-                  "wrap",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 12px",
+                borderRadius: 999,
+                background: "#dcfce7",
+                color: "#166534",
+                fontWeight: 700,
+                fontSize: 13,
               }}
             >
               <span
                 style={{
-                  background:
-                    employee?.status ===
-                    "active"
-                      ? "#dcfce7"
-                      : "#f3f4f6",
-                  color:
-                    employee?.status ===
-                    "active"
-                      ? "#166534"
-                      : "#475569",
-                  padding:
-                    "8px 14px",
-                  borderRadius:
-                    "999px",
-                  fontWeight: 700,
-                  fontSize:
-                    "13px",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: GREEN,
                 }}
-              >
-                {employee?.status ===
-                "active"
-                  ? "نشط"
-                  : "متوقف"}
-              </span>
-
-              <button
-                onClick={
-                  toggleEmployeeStatus
-                }
-                disabled={saving}
-                style={{
-                  border:
-                    "1px solid #dbe5de",
-                  background:
-                    "#fff",
-                  color:
-                    "#166534",
-                  borderRadius:
-                    "12px",
-                  padding:
-                    "10px 14px",
-                  cursor: saving
-                    ? "not-allowed"
-                    : "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                {employee?.status ===
-                "active"
-                  ? "إيقاف الموظف"
-                  : "تفعيل الموظف"}
-              </button>
+              />
+              نشط
             </div>
           </div>
-        </section>
+        </div>
 
         {message && (
           <div
             style={{
-              background:
-                "#ecfdf5",
-              border:
-                "1px solid #bbf7d0",
-              color:
-                "#166534",
-              borderRadius:
-                "14px",
-              padding:
-                "13px 16px",
-              marginBottom:
-                "14px",
-              fontWeight: 700,
+              background: "#ecfdf5",
+              color: "#166534",
+              border: "1px solid #bbf7d0",
+              borderRadius: 12,
+              padding: 13,
+              marginBottom: 14,
+              fontWeight: 600,
             }}
           >
             {message}
@@ -1121,2775 +763,1324 @@ export default function SuperAdminAIEmployeePage() {
         {error && (
           <div
             style={{
-              background:
-                "#fef2f2",
-              border:
-                "1px solid #fecaca",
-              color:
-                "#991b1b",
-              borderRadius:
-                "14px",
-              padding:
-                "13px 16px",
-              marginBottom:
-                "14px",
-              fontWeight: 700,
+              background: "#fef2f2",
+              color: "#991b1b",
+              border: "1px solid #fecaca",
+              borderRadius: 12,
+              padding: 13,
+              marginBottom: 14,
+              fontWeight: 600,
+              whiteSpace: "pre-wrap",
             }}
           >
             {error}
           </div>
         )}
 
-        <section
+        <div
           style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(4, minmax(0, 1fr))",
-            gap: "12px",
-            marginBottom:
-              "18px",
-          }}
-        >
-          {[
-            [
-              "الصلاحيات المفعلة",
-              enabledCapabilities,
-            ],
-            ["الأوامر", commands.length],
-            [
-              "مكتملة",
-              commands.filter(
-                (c) =>
-                  c.status ===
-                  "completed"
-              ).length,
-            ],
-            [
-              "قيد التنفيذ",
-              commands.filter(
-                (c) =>
-                  c.status ===
-                  "running"
-              ).length,
-            ],
-          ].map(
-            ([label, value]) => (
-              <div
-                key={label}
-                style={{
-                  background:
-                    "#fff",
-                  border:
-                    "1px solid #e5ebe7",
-                  borderRadius:
-                    "18px",
-                  padding:
-                    "18px",
-                }}
-              >
-                <div
-                  style={{
-                    color:
-                      "#64748b",
-                    fontSize:
-                      "13px",
-                    marginBottom:
-                      "7px",
-                  }}
-                >
-                  {label}
-                </div>
-
-                <strong
-                  style={{
-                    fontSize:
-                      "27px",
-                  }}
-                >
-                  {value}
-                </strong>
-              </div>
-            )
-          )}
-        </section>
-
-        <section
-          style={{
-            background:
-              "#fff",
-            border:
-              "1px solid #e5ebe7",
-            borderRadius:
-              "20px",
-            padding: "8px",
-            marginBottom:
-              "18px",
             display: "flex",
-            gap: "6px",
-            overflowX:
-              "auto",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 16,
           }}
         >
           {[
-            ["overview", "نظرة عامة"],
-            [
-              "capabilities",
-              "الصلاحيات",
-            ],
             ["commands", "الأوامر"],
-            [
-              "approvals",
-              "الموافقات",
-            ],
-            [
-              "instructions",
-              "الشخصية والتعليمات",
-            ],
-          ].map(
-            ([key, label]) => (
-              <button
-                key={key}
-                onClick={() =>
-                  setActiveTab(key)
-                }
-                style={{
-                  border: "none",
-                  background:
-                    activeTab ===
-                    key
-                      ? "#dcfce7"
-                      : "transparent",
-                  color:
-                    activeTab ===
-                    key
-                      ? "#166534"
-                      : "#64748b",
-                  padding:
-                    "11px 16px",
-                  borderRadius:
-                    "12px",
-                  cursor:
-                    "pointer",
-                  fontWeight: 700,
-                  whiteSpace:
-                    "nowrap",
-                }}
-              >
-                {label}
-              </button>
-            )
-          )}
-        </section>
+            ["approvals", `الموافقات (${pendingApprovals.length})`],
+            ["capabilities", "الصلاحيات"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              style={{
+                border: "1px solid #d1d5db",
+                background: activeTab === key ? GREEN : "#fff",
+                color: activeTab === key ? "#fff" : "#374151",
+                borderRadius: 10,
+                padding: "10px 15px",
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
-        {activeTab ===
-          "overview" && (
-          <section
+        {activeTab === "commands" && (
+          <div
             style={{
-              display: "grid",
-              gridTemplateColumns:
-                "minmax(0, 1.4fr) minmax(300px, .6fr)",
-              gap: "18px",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              overflow: "hidden",
             }}
           >
             <div
               style={{
-                background:
-                  "#fff",
-                border:
-                  "1px solid #e5ebe7",
-                borderRadius:
-                  "20px",
-                padding:
-                  "22px",
-              }}
-            >
-              <h2
-                style={{
-                  margin:
-                    "0 0 18px",
-                  fontSize:
-                    "21px",
-                }}
-              >
-                ملف الموظف
-              </h2>
-
-              <div
-                style={{
-                  display:
-                    "grid",
-                  gridTemplateColumns:
-                    "repeat(2, minmax(0, 1fr))",
-                  gap:
-                    "14px",
-                }}
-              >
-                {[
-                  [
-                    "الاسم",
-                    employee?.name ||
-                      "والم",
-                  ],
-                  [
-                    "التخصص",
-                    employee?.specialization ||
-                      "مساعد إدارة وتشغيل سوق AI",
-                  ],
-                  [
-                    "المستوى",
-                    employee?.level ||
-                      "lead",
-                  ],
-                  [
-                    "النبرة",
-                    employee?.tone ||
-                      "إماراتية احترافية وودية",
-                  ],
-                  [
-                    "آخر نشاط",
-                    formatDate(
-                      employee?.last_active_at
-                    ),
-                  ],
-                  [
-                    "المهام المكتملة",
-                    employee?.tasks_completed ||
-                      0,
-                  ],
-                ].map(
-                  ([
-                    label,
-                    value,
-                  ]) => (
-                    <div
-                      key={
-                        label
-                      }
-                      style={{
-                        border:
-                          "1px solid #edf1ee",
-                        borderRadius:
-                          "14px",
-                        padding:
-                          "14px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          color:
-                            "#64748b",
-                          fontSize:
-                            "12px",
-                          marginBottom:
-                            "6px",
-                        }}
-                      >
-                        {label}
-                      </div>
-
-                      <div
-                        style={{
-                          fontWeight:
-                            700,
-                        }}
-                      >
-                        {value}
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-
-              <div
-                style={{
-                  marginTop:
-                    "16px",
-                  padding:
-                    "16px",
-                  background:
-                    "#f8faf9",
-                  borderRadius:
-                    "14px",
-                  lineHeight:
-                    1.8,
-                  color:
-                    "#475569",
-                }}
-              >
-                {employee?.description ||
-                  "مساعد AI داخلي لسوق AI، يساعد في إدارة وتشغيل المنصة ومتابعة المهام والأقسام وتحليل العمل."}
-              </div>
-            </div>
-
-            <div
-              style={{
-                background:
-                  "#fff",
-                border:
-                  "1px solid #e5ebe7",
-                borderRadius:
-                  "20px",
-                padding:
-                  "22px",
-              }}
-            >
-              <h2
-                style={{
-                  margin:
-                    "0 0 18px",
-                  fontSize:
-                    "21px",
-                }}
-              >
-                حالة الأمان
-              </h2>
-
-              <div
-                style={{
-                  background:
-                    "#ecfdf5",
-                  border:
-                    "1px solid #bbf7d0",
-                  borderRadius:
-                    "16px",
-                  padding:
-                    "18px",
-                  color:
-                    "#166534",
-                  lineHeight:
-                    1.8,
-                }}
-              >
-                <strong>
-                  ✓ بوابة التنفيذ مفعلة
-                </strong>
-
-                <div
-                  style={{
-                    marginTop:
-                      "8px",
-                    fontSize:
-                      "14px",
-                  }}
-                >
-                  كل أمر يمر عبر الصلاحيات والموافقة قبل الوصول إلى طبقة التنفيذ.
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop:
-                    "14px",
-                  display:
-                    "grid",
-                  gap: "8px",
-                }}
-              >
-                {[
-                  [
-                    "قراءة الملفات",
-                    true,
-                  ],
-                  [
-                    "تعديل الملفات",
-                    false,
-                  ],
-                  [
-                    "قاعدة البيانات",
-                    false,
-                  ],
-                  [
-                    "Deploy",
-                    false,
-                  ],
-                  [
-                    "Rollback",
-                    false,
-                  ],
-                ].map(
-                  ([
-                    label,
-                    enabled,
-                  ]) => (
-                    <div
-                      key={
-                        label
-                      }
-                      style={{
-                        display:
-                          "flex",
-                        justifyContent:
-                          "space-between",
-                        alignItems:
-                          "center",
-                        padding:
-                          "10px 12px",
-                        borderBottom:
-                          "1px solid #f1f5f2",
-                      }}
-                    >
-                      <span>
-                        {label}
-                      </span>
-
-                      <span
-                        style={{
-                          color:
-                            enabled
-                              ? "#16a34a"
-                              : "#64748b",
-                          fontWeight:
-                            700,
-                        }}
-                      >
-                        {enabled
-                          ? "مسموح"
-                          : "مقيد"}
-                      </span>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {activeTab ===
-          "capabilities" && (
-          <section
-            style={{
-              background:
-                "#fff",
-              border:
-                "1px solid #e5ebe7",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
-            }}
-          >
-            <h2
-              style={{
-                margin:
-                  "0 0 8px",
-              }}
-            >
-              صلاحيات والم
-            </h2>
-
-            <p
-              style={{
-                margin:
-                  "0 0 20px",
-                color:
-                  "#64748b",
-              }}
-            >
-              كل صلاحية مستقلة ويمكن تعطيلها بدون تعطيل الموظف بالكامل.
-            </p>
-
-            <div
-              style={{
-                display:
-                  "grid",
-                gap: "10px",
-              }}
-            >
-              {capabilities.map(
-                (capability) => (
-                  <div
-                    key={
-                      capability.id
-                    }
-                    style={{
-                      border:
-                        "1px solid #e5ebe7",
-                      borderRadius:
-                        "16px",
-                      padding:
-                        "16px",
-                      display:
-                        "flex",
-                      alignItems:
-                        "center",
-                      justifyContent:
-                        "space-between",
-                      gap:
-                        "16px",
-                      flexWrap:
-                        "wrap",
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth:
-                          "240px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display:
-                            "flex",
-                          alignItems:
-                            "center",
-                          gap: "8px",
-                          marginBottom:
-                            "5px",
-                        }}
-                      >
-                        <strong>
-                          {capability.capability_name ||
-                            capabilityLabels[
-                              capability
-                                .capability_key
-                            ] ||
-                            capability.capability_key}
-                        </strong>
-
-                        <span
-                          style={{
-                            ...riskClass(
-                              capability.risk_level
-                            ),
-                            padding:
-                              "4px 8px",
-                            borderRadius:
-                              "999px",
-                            fontSize:
-                              "11px",
-                            fontWeight:
-                              700,
-                          }}
-                        >
-                          {riskLabels[
-                            capability
-                              .risk_level
-                          ] ||
-                            capability.risk_level}
-                        </span>
-                      </div>
-
-                      <div
-                        style={{
-                          color:
-                            "#64748b",
-                          fontSize:
-                            "13px",
-                        }}
-                      >
-                        {capability.description ||
-                          ""}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop:
-                            "7px",
-                          color:
-                            capability.requires_approval
-                              ? "#92400e"
-                              : "#166534",
-                          fontSize:
-                            "12px",
-                          fontWeight:
-                            700,
-                        }}
-                      >
-                        {capability.requires_approval
-                          ? "تحتاج موافقة قبل التنفيذ"
-                          : "لا تحتاج موافقة"}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() =>
-                        toggleCapability(
-                          capability
-                        )
-                      }
-                      disabled={
-                        saving
-                      }
-                      style={{
-                        border:
-                          "none",
-                        background:
-                          capability.enabled
-                            ? "#16a34a"
-                            : "#cbd5e1",
-                        color:
-                          "#fff",
-                        borderRadius:
-                          "999px",
-                        padding:
-                          "9px 16px",
-                        cursor:
-                          saving
-                            ? "not-allowed"
-                            : "pointer",
-                        fontWeight:
-                          700,
-                      }}
-                    >
-                      {capability.enabled
-                        ? "مفعلة"
-                        : "معطلة"}
-                    </button>
-                  </div>
-                )
-              )}
-            </div>
-          </section>
-        )}
-
-        {activeTab ===
-          "commands" && (
-          <section
-            style={{
-              background:
-                "#fff",
-              border:
-                "1px solid #e5ebe7",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
-            }}
-          >
-            <div
-              style={{
-                display:
-                  "flex",
-                justifyContent:
-                  "space-between",
-                gap: "12px",
-                flexWrap:
-                  "wrap",
-                marginBottom:
-                  "18px",
+                padding: 18,
+                borderBottom: "1px solid #e5e7eb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
               }}
             >
               <div>
                 <h2
                   style={{
-                    margin:
-                      "0 0 6px",
+                    margin: 0,
+                    fontSize: 20,
                   }}
                 >
                   أوامر والم
                 </h2>
 
-                <p
-                  style={{
-                    margin: 0,
-                    color:
-                      "#64748b",
-                  }}
-                >
-                  سجل الأوامر وحالات تنفيذها.
-                </p>
-              </div>
-
-              <div
-                style={{
-                  display:
-                    "flex",
-                  gap: "8px",
-                  flexWrap:
-                    "wrap",
-                }}
-              >
-                <button
-                  onClick={
-                    openNewCommandModal
-                  }
-                  style={{
-                    border:
-                      "none",
-                    background:
-                      GREEN,
-                    color:
-                      "#fff",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "10px 16px",
-                    cursor:
-                      "pointer",
-                    fontWeight:
-                      700,
-                  }}
-                >
-                  ＋ أمر جديد
-                </button>
-
-                <input
-                  value={
-                    commandSearch
-                  }
-                  onChange={(e) =>
-                    setCommandSearch(
-                      e.target
-                        .value
-                    )
-                  }
-                  placeholder="بحث في الأوامر..."
-                  style={{
-                    border:
-                      "1px solid #dbe5de",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "10px 12px",
-                    outline:
-                      "none",
-                    minWidth:
-                      "220px",
-                  }}
-                />
-
-                <select
-                  value={
-                    statusFilter
-                  }
-                  onChange={(e) =>
-                    setStatusFilter(
-                      e.target
-                        .value
-                    )
-                  }
-                  style={{
-                    border:
-                      "1px solid #dbe5de",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "10px 12px",
-                    background:
-                      "#fff",
-                  }}
-                >
-                  <option value="all">
-                    كل الحالات
-                  </option>
-                  <option value="pending">
-                    معلق
-                  </option>
-                  <option value="running">
-                    قيد التنفيذ
-                  </option>
-                  <option value="completed">
-                    مكتملة
-                  </option>
-                  <option value="failed">
-                    فشلت
-                  </option>
-                  <option value="cancelled">
-                    ملغاة
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display:
-                  "grid",
-                gap: "14px",
-              }}
-            >
-              {filteredCommands.length ===
-                0 && (
                 <div
                   style={{
-                    padding:
-                      "30px",
-                    textAlign:
-                      "center",
-                    color:
-                      "#64748b",
-                    background:
-                      "#f8faf9",
-                    borderRadius:
-                      "16px",
+                    color: "#6b7280",
+                    fontSize: 13,
+                    marginTop: 5,
                   }}
                 >
-                  لا توجد أوامر.
+                  جميع أوامر والم وسجل تنفيذها.
                 </div>
-              )}
+              </div>
 
-              {filteredCommands.map(
-                (command) => {
-                  const button =
-                    getExecutionButton(
-                      command
-                    );
+              <button
+                onClick={openCreateCommand}
+                style={{
+                  border: "none",
+                  background: GREEN,
+                  color: "#fff",
+                  borderRadius: 10,
+                  padding: "11px 16px",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                  fontSize: 14,
+                }}
+              >
+                ＋ أمر جديد
+              </button>
+            </div>
 
-                  const isExecuting =
-                    executingCommandId ===
-                    command.id;
-
-                  const requiresApproval =
-                    command.requires_approval ===
-                    true;
-
-                  const approvalApproved =
-                    command.approval_status ===
-                    "approved";
-
-                  const canStart =
-                    command.status ===
-                      "pending" &&
-                    (!requiresApproval ||
-                      approvalApproved);
-
-                  const waitingForApproval =
-                    command.status ===
-                      "pending" &&
-                    requiresApproval &&
-                    !approvalApproved;
-
-                  return (
-                    <article
-                      key={
-                        command.id
-                      }
+            {commands.length === 0 ? (
+              <div
+                style={{
+                  padding: 30,
+                  textAlign: "center",
+                  color: "#6b7280",
+                }}
+              >
+                لا توجد أوامر حتى الآن.
+              </div>
+            ) : (
+              <div
+                style={{
+                  overflowX: "auto",
+                }}
+              >
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    minWidth: 900,
+                  }}
+                >
+                  <thead>
+                    <tr
                       style={{
-                        border:
-                          "1px solid #e5ebe7",
-                        borderRadius:
-                          "18px",
-                        padding:
-                          "18px",
+                        background: "#f9fafb",
                       }}
                     >
-                      <div
-                        style={{
-                          display:
-                            "flex",
-                          justifyContent:
-                            "space-between",
-                          gap:
-                            "15px",
-                          flexWrap:
-                            "wrap",
-                        }}
-                      >
-                        <div
+                      {[
+                        "الأمر",
+                        "النوع",
+                        "الحالة",
+                        "الخطورة",
+                        "الموافقة",
+                        "التاريخ",
+                        "المدة",
+                        "الإجراء",
+                      ].map((heading) => (
+                        <th
+                          key={heading}
                           style={{
-                            flex: 1,
-                            minWidth:
-                              "260px",
+                            padding: 13,
+                            textAlign: "right",
+                            fontSize: 13,
+                            color: "#6b7280",
+                            borderBottom: "1px solid #e5e7eb",
                           }}
                         >
-                          <div
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {commands.map((command) => {
+                      const executionButton = getExecutionButton(command);
+                      const expanded = expandedCommand === command.id;
+
+                      return (
+                        <tr key={command.id}>
+                          <td
                             style={{
-                              display:
-                                "flex",
-                              alignItems:
-                                "center",
-                              gap:
-                                "8px",
-                              flexWrap:
-                                "wrap",
-                              marginBottom:
-                                "8px",
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
                             }}
                           >
-                            <strong
+                            <div
                               style={{
-                                fontSize:
-                                  "18px",
+                                fontWeight: 800,
+                                color: "#111827",
                               }}
                             >
-                              {
-                                command.command
-                              }
-                            </strong>
+                              {command.command || "بدون اسم"}
+                            </div>
 
+                            <div
+                              style={{
+                                color: "#9ca3af",
+                                fontSize: 11,
+                                marginTop: 4,
+                              }}
+                            >
+                              {command.id}
+                            </div>
+
+                            {expanded && (
+                              <div
+                                style={{
+                                  marginTop: 10,
+                                  padding: 10,
+                                  background: "#f8fafc",
+                                  borderRadius: 8,
+                                  fontSize: 12,
+                                  direction: "ltr",
+                                  textAlign: "left",
+                                  whiteSpace: "pre-wrap",
+                                }}
+                              >
+                                {JSON.stringify(
+                                  {
+                                    input_data: command.input_data,
+                                    output_data: command.output_data,
+                                    result: command.result,
+                                    error_message: command.error_message,
+                                    execution_log: command.execution_log,
+                                  },
+                                  null,
+                                  2
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                            }}
+                          >
+                            {commandTypeLabels[command.command_type] ||
+                              command.command_type}
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                            }}
+                          >
                             <span
                               style={{
-                                ...statusClass(
-                                  command.status
-                                ),
-                                padding:
-                                  "5px 9px",
-                                borderRadius:
-                                  "999px",
-                                fontSize:
-                                  "11px",
-                                fontWeight:
-                                  700,
+                                color: statusColor(command.status),
+                                fontWeight: 800,
                               }}
                             >
-                              {statusLabels[
-                                command.status
-                              ] ||
+                              {statusLabels[command.status] ||
                                 command.status}
                             </span>
+                          </td>
 
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                            }}
+                          >
                             <span
                               style={{
-                                ...riskClass(
-                                  command.risk_level
-                                ),
-                                padding:
-                                  "5px 9px",
-                                borderRadius:
-                                  "999px",
-                                fontSize:
-                                  "11px",
-                                fontWeight:
-                                  700,
+                                color: riskColor(command.risk_level),
+                                fontWeight: 800,
                               }}
                             >
-                              {riskLabels[
-                                command.risk_level
-                              ] ||
+                              {riskLabels[command.risk_level] ||
                                 command.risk_level}
                             </span>
+                          </td>
 
-                            {requiresApproval && (
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                            }}
+                          >
+                            {command.requires_approval ? (
                               <span
                                 style={{
-                                  background:
-                                    approvalApproved
-                                      ? "#dcfce7"
-                                      : "#fef3c7",
                                   color:
-                                    approvalApproved
-                                      ? "#166534"
-                                      : "#92400e",
-                                  padding:
-                                    "5px 9px",
-                                  borderRadius:
-                                    "999px",
-                                  fontSize:
-                                    "11px",
-                                  fontWeight:
-                                    700,
+                                    command.approval_status === "approved"
+                                      ? GREEN
+                                      : "#d97706",
+                                  fontWeight: 800,
                                 }}
                               >
-                                {approvalApproved
+                                {command.approval_status === "approved"
                                   ? "تمت الموافقة"
-                                  : "تحتاج موافقة"}
+                                  : "بانتظار الموافقة"}
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  color: GREEN,
+                                  fontWeight: 800,
+                                }}
+                              >
+                                لا يحتاج
                               </span>
                             )}
-                          </div>
+                          </td>
 
-                          <div
+                          <td
                             style={{
-                              color:
-                                "#64748b",
-                              fontSize:
-                                "13px",
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                              whiteSpace: "nowrap",
                             }}
                           >
-                            {formatDate(
-                              command.created_at
-                            )}
-                          </div>
+                            {formatDate(command.created_at)}
+                          </td>
 
-                          <div
+                          <td
                             style={{
-                              display:
-                                "flex",
-                              gap:
-                                "14px",
-                              flexWrap:
-                                "wrap",
-                              marginTop:
-                                "12px",
-                              fontSize:
-                                "13px",
-                              color:
-                                "#475569",
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                              whiteSpace: "nowrap",
                             }}
                           >
-                            <span>
-                              النوع:{" "}
-                              <strong>
-                                {commandTypeLabels[
-                                  command.command_type
-                                ] ||
-                                  command.command_type}
-                              </strong>
-                            </span>
+                            {formatDuration(command.duration_seconds)}
+                          </td>
 
-                            <span>
-                              النقاط{" "}
-                              <strong>
-                                {command.points_cost ||
-                                  0}
-                              </strong>
-                            </span>
-
-                            <span>
-                              التكلفة{" "}
-                              <strong>
-                                $
-                                {Number(
-                                  command.actual_cost ||
-                                    command.estimated_cost ||
-                                    0
-                                ).toFixed(
-                                  4
-                                )}
-                              </strong>
-                            </span>
-
-                            <span>
-                              المدة{" "}
-                              <strong>
-                                {formatDuration(
-                                  command.duration_seconds
-                                )}
-                              </strong>
-                            </span>
-                          </div>
-                        </div>
-
-                        <div
-                          style={{
-                            display:
-                              "flex",
-                            alignItems:
-                              "center",
-                            gap:
-                              "8px",
-                          }}
-                        >
-                          {canStart && (
-                            <button
-                              onClick={() =>
-                                startCommand(
-                                  command
-                                )
-                              }
-                              disabled={
-                                saving ||
-                                employee?.status !==
-                                  "active"
-                              }
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              verticalAlign: "top",
+                            }}
+                          >
+                            <div
                               style={{
-                                border:
-                                  "none",
-                                background:
-                                  GREEN,
-                                color:
-                                  "#fff",
-                                borderRadius:
-                                  "12px",
-                                padding:
-                                  "11px 16px",
-                                cursor:
-                                  saving
-                                    ? "not-allowed"
-                                    : "pointer",
-                                fontWeight:
-                                  700,
+                                display: "flex",
+                                gap: 6,
+                                flexWrap: "wrap",
                               }}
                             >
-                              ▶ بدء التنفيذ
-                            </button>
-                          )}
-
-                          {waitingForApproval && (
-                            <span
-                              style={{
-                                display:
-                                  "inline-flex",
-                                alignItems:
-                                  "center",
-                                gap:
-                                  "7px",
-                                background:
-                                  "#fffbeb",
-                                border:
-                                  "1px solid #fde68a",
-                                color:
-                                  "#92400e",
-                                borderRadius:
-                                  "12px",
-                                padding:
-                                  "11px 14px",
-                                fontWeight:
-                                  700,
-                                fontSize:
-                                  "13px",
-                              }}
-                            >
-                              ⏳ بانتظار موافقة Super Admin
-                            </span>
-                          )}
-
-                          {button && (
-                            <button
-                              onClick={() =>
-                                executeCommand(
-                                  command
-                                )
-                              }
-                              disabled={
-                                isExecuting ||
-                                executingCommandId !==
-                                  null
-                              }
-                              style={{
-                                border:
-                                  "none",
-                                background:
-                                  "#166534",
-                                color:
-                                  "#fff",
-                                borderRadius:
-                                  "12px",
-                                padding:
-                                  "11px 16px",
-                                cursor:
-                                  isExecuting
-                                    ? "not-allowed"
-                                    : "pointer",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              {isExecuting
-                                ? button.loadingLabel
-                                : button.label}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {command.command_type ===
-                        "edit_files" &&
-                        command.status ===
-                          "running" && (
-                          <div
-                            style={{
-                              marginTop:
-                                "14px",
-                              padding:
-                                "12px 14px",
-                              background:
-                                "#eff6ff",
-                              border:
-                                "1px solid #bfdbfe",
-                              color:
-                                "#1e40af",
-                              borderRadius:
-                                "12px",
-                              fontSize:
-                                "13px",
-                              lineHeight:
-                                1.7,
-                            }}
-                          >
-                            🛡️ هذا اختبار تعديل آمن.
-                            <br />
-                            سيتم إعداد ومعاينة التعديل فقط،
-                            ولن يتم الكتابة على GitHub في هذه المرحلة.
-                          </div>
-                        )}
-
-                      {command.result && (
-                        <div
-                          style={{
-                            marginTop:
-                              "15px",
-                            padding:
-                              "14px",
-                            background:
-                              "#f0fdf4",
-                            border:
-                              "1px solid #dcfce7",
-                            borderRadius:
-                              "14px",
-                            color:
-                              "#166534",
-                          }}
-                        >
-                          <strong>
-                            النتيجة
-                          </strong>
-
-                          <div
-                            style={{
-                              marginTop:
-                                "7px",
-                              whiteSpace:
-                                "pre-wrap",
-                              lineHeight:
-                                1.7,
-                            }}
-                          >
-                            {
-                              command.result
-                            }
-                          </div>
-
-                          {command.command_type ===
-                            "suggest_changes" &&
-                            command.output_data?.suggestions &&
-                            Array.isArray(
-                              command
-                                .output_data
-                                .suggestions
-                            ) && (
-                              <div
-                                style={{
-                                  marginTop:
-                                    "14px",
-                                  display:
-                                    "grid",
-                                  gap:
-                                    "8px",
-                                }}
-                              >
-                                {command.output_data.suggestions.map(
-                                  (
-                                    suggestion,
-                                    index
-                                  ) => (
-                                    <div
-                                      key={`${command.id}-suggestion-${index}`}
-                                      style={{
-                                        background:
-                                          "#fff",
-                                        border:
-                                          "1px solid #dcfce7",
-                                        borderRadius:
-                                          "12px",
-                                        padding:
-                                          "12px",
-                                      }}
-                                    >
-                                      <div
-                                        style={{
-                                          display:
-                                            "flex",
-                                          gap:
-                                            "8px",
-                                          alignItems:
-                                            "center",
-                                          flexWrap:
-                                            "wrap",
-                                        }}
-                                      >
-                                        <strong>
-                                          {index +
-                                            1}.{" "}
-                                          {suggestion.title ||
-                                            "اقتراح تحسين"}
-                                        </strong>
-
-                                        {suggestion.priority && (
-                                          <span
-                                            style={{
-                                              fontSize:
-                                                "11px",
-                                              background:
-                                                suggestion.priority ===
-                                                "high"
-                                                  ? "#fee2e2"
-                                                  : suggestion.priority ===
-                                                    "medium"
-                                                  ? "#fef3c7"
-                                                  : "#dcfce7",
-                                              color:
-                                                suggestion.priority ===
-                                                "high"
-                                                  ? "#991b1b"
-                                                  : suggestion.priority ===
-                                                    "medium"
-                                                  ? "#92400e"
-                                                  : "#166534",
-                                              padding:
-                                                "4px 8px",
-                                              borderRadius:
-                                                "999px",
-                                              fontWeight:
-                                                700,
-                                            }}
-                                          >
-                                            {suggestion.priority ===
-                                            "high"
-                                              ? "مرتفع"
-                                              : suggestion.priority ===
-                                                "medium"
-                                              ? "متوسط"
-                                              : "منخفض"}
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      <div
-                                        style={{
-                                          marginTop:
-                                            "6px",
-                                          color:
-                                            "#475569",
-                                          lineHeight:
-                                            1.7,
-                                        }}
-                                      >
-                                        {suggestion.description ||
-                                          ""}
-                                      </div>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            )}
-
-                          {command.command_type ===
-                            "edit_files" &&
-                            command.output_data && (
-                              <div
-                                style={{
-                                  marginTop:
-                                    "14px",
-                                  display:
-                                    "grid",
-                                  gap:
-                                    "10px",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    background:
-                                      "#fff",
-                                    border:
-                                      "1px solid #dcfce7",
-                                    borderRadius:
-                                      "12px",
-                                    padding:
-                                      "12px",
-                                  }}
-                                >
-                                  <strong>
-                                    حالة الأمان
-                                  </strong>
-
-                                  <div
+                              {command.status === "pending" &&
+                                (!command.requires_approval ||
+                                  command.approval_status === "approved") && (
+                                  <button
+                                    onClick={() => startCommand(command)}
                                     style={{
-                                      marginTop:
-                                        "8px",
-                                      color:
-                                        "#475569",
-                                      lineHeight:
-                                        1.7,
+                                      border: "1px solid #bbf7d0",
+                                      background: "#f0fdf4",
+                                      color: "#166534",
+                                      borderRadius: 8,
+                                      padding: "7px 10px",
+                                      cursor: "pointer",
+                                      fontWeight: 700,
                                     }}
                                   >
-                                    الملفات المعدلة:{" "}
-                                    {command.output_data
-                                      .safety
-                                      ?.files_modified
-                                      ? "نعم"
-                                      : "لا"}
-                                    <br />
-                                    ملفات منشأة:{" "}
-                                    {command.output_data
-                                      .safety
-                                      ?.files_created
-                                      ? "نعم"
-                                      : "لا"}
-                                    <br />
-                                    كتابة GitHub:{" "}
-                                    {command.output_data
-                                      .safety
-                                      ?.github_write_used
-                                      ? "نعم"
-                                      : "لا"}
-                                    <br />
-                                    Dry Run:{" "}
-                                    {command.output_data
-                                      .safety
-                                      ?.dry_run
-                                      ? "نعم"
-                                      : "لا"}
-                                  </div>
-                                </div>
-
-                                {command.output_data
-                                  .preview && (
-                                  <div
-                                    style={{
-                                      background:
-                                        "#fff",
-                                      border:
-                                        "1px solid #e5e7eb",
-                                      borderRadius:
-                                        "12px",
-                                      padding:
-                                        "12px",
-                                    }}
-                                  >
-                                    <strong>
-                                      معاينة التعديل
-                                    </strong>
-
-                                    <div
-                                      style={{
-                                        marginTop:
-                                          "8px",
-                                        color:
-                                          "#475569",
-                                        lineHeight:
-                                          1.7,
-                                      }}
-                                    >
-                                      الملف:{" "}
-                                      {
-                                        command
-                                          .output_data
-                                          .path
-                                      }
-                                      <br />
-                                      عدد أسطر الملف الحالي:{" "}
-                                      {
-                                        command
-                                          .output_data
-                                          .current_lines
-                                      }
-                                      <br />
-                                      عدد أسطر المحتوى الجديد:{" "}
-                                      {
-                                        command
-                                          .output_data
-                                          .proposed_lines
-                                      }
-                                      <br />
-                                      أول سطر مختلف:{" "}
-                                      {
-                                        command
-                                          .output_data
-                                          .first_difference_line ??
-                                        "لا يوجد"
-                                      }
-                                    </div>
-                                  </div>
+                                    ▶ بدء
+                                  </button>
                                 )}
-                              </div>
-                            )}
-                        </div>
-                      )}
 
-                      {command.error_message && (
-                        <div
-                          style={{
-                            marginTop:
-                              "15px",
-                            padding:
-                              "14px",
-                            background:
-                              "#fef2f2",
-                            border:
-                              "1px solid #fecaca",
-                            borderRadius:
-                              "14px",
-                            color:
-                              "#991b1b",
-                          }}
-                        >
-                          <strong>
-                            الخطأ
-                          </strong>
-
-                          <div
-                            style={{
-                              marginTop:
-                                "7px",
-                            }}
-                          >
-                            {
-                              command.error_message
-                            }
-                          </div>
-                        </div>
-                      )}
-
-                      <div
-                        style={{
-                          marginTop:
-                            "15px",
-                          paddingTop:
-                            "14px",
-                          borderTop:
-                            "1px solid #eef2ef",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight:
-                              700,
-                            marginBottom:
-                              "8px",
-                          }}
-                        >
-                          سجل التنفيذ
-                        </div>
-
-                        {Array.isArray(
-                          command.execution_log
-                        ) &&
-                        command
-                          .execution_log
-                          .length > 0 ? (
-                          <div
-                            style={{
-                              display:
-                                "grid",
-                              gap:
-                                "6px",
-                            }}
-                          >
-                            {command.execution_log.map(
-                              (
-                                item,
-                                index
-                              ) => (
-                                <div
-                                  key={`${command.id}-${index}`}
-                                  style={{
-                                    display:
-                                      "flex",
-                                    justifyContent:
-                                      "space-between",
-                                    gap:
-                                      "10px",
-                                    background:
-                                      "#f8faf9",
-                                    padding:
-                                      "9px 11px",
-                                    borderRadius:
-                                      "10px",
-                                    fontSize:
-                                      "12px",
-                                  }}
-                                >
-                                  <strong>
-                                    {
-                                      item.event
-                                    }
-                                  </strong>
-
+                              {command.status === "pending" &&
+                                command.requires_approval &&
+                                command.approval_status !== "approved" && (
                                   <span
                                     style={{
-                                      color:
-                                        "#64748b",
+                                      color: "#d97706",
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      padding: "7px 4px",
                                     }}
                                   >
-                                    {formatDate(
-                                      item.at
-                                    )}
+                                    بانتظار الموافقة
                                   </span>
-                                </div>
-                              )
-                            )}
-                          </div>
-                        ) : (
-                          <div
-                            style={{
-                              color:
-                                "#94a3b8",
-                              fontSize:
-                                "13px",
-                            }}
-                          >
-                            لا يوجد سجل حتى الآن
-                          </div>
-                        )}
-                      </div>
-                    </article>
-                  );
-                })}
-            </div>
-          </section>
+                                )}
+
+                              {command.status === "running" &&
+                                executionButton && (
+                                  <button
+                                    onClick={() => executeCommand(command)}
+                                    disabled={executingId === command.id}
+                                    style={{
+                                      border: "none",
+                                      background: GREEN,
+                                      color: "#fff",
+                                      borderRadius: 8,
+                                      padding: "7px 10px",
+                                      cursor:
+                                        executingId === command.id
+                                          ? "not-allowed"
+                                          : "pointer",
+                                      fontWeight: 700,
+                                      opacity:
+                                        executingId === command.id ? 0.65 : 1,
+                                    }}
+                                  >
+                                    {executingId === command.id
+                                      ? executionButton.loadingLabel
+                                      : executionButton.label}
+                                  </button>
+                                )}
+
+                              <button
+                                onClick={() =>
+                                  setExpandedCommand(
+                                    expanded ? null : command.id
+                                  )
+                                }
+                                style={{
+                                  border: "1px solid #d1d5db",
+                                  background: "#fff",
+                                  color: "#374151",
+                                  borderRadius: 8,
+                                  padding: "7px 10px",
+                                  cursor: "pointer",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {expanded ? "إخفاء" : "التفاصيل"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         )}
 
-        {activeTab ===
-          "approvals" && (
-          <section
+        {activeTab === "approvals" && (
+          <div
             style={{
-              background:
-                "#fff",
-              border:
-                "1px solid #e5ebe7",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              overflow: "hidden",
             }}
           >
             <div
               style={{
-                display:
-                  "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-                gap: "12px",
-                flexWrap:
-                  "wrap",
-                marginBottom:
-                  "18px",
+                padding: 18,
+                borderBottom: "1px solid #e5e7eb",
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 20,
+                }}
+              >
+                موافقات أوامر والم
+              </h2>
+            </div>
+
+            {approvals.length === 0 ? (
+              <div
+                style={{
+                  padding: 30,
+                  textAlign: "center",
+                  color: "#6b7280",
+                }}
+              >
+                لا توجد طلبات موافقة.
+              </div>
+            ) : (
+              <div
+                style={{
+                  overflowX: "auto",
+                }}
+              >
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    minWidth: 850,
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        background: "#f9fafb",
+                      }}
+                    >
+                      {[
+                        "الأمر",
+                        "الصلاحية",
+                        "الخطورة",
+                        "الحالة",
+                        "التاريخ",
+                        "الإجراء",
+                      ].map((heading) => (
+                        <th
+                          key={heading}
+                          style={{
+                            padding: 13,
+                            textAlign: "right",
+                            color: "#6b7280",
+                            fontSize: 13,
+                            borderBottom: "1px solid #e5e7eb",
+                          }}
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {approvals.map((approval) => {
+                      const command = commandMap[approval.command_id];
+
+                      return (
+                        <tr key={approval.id}>
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontWeight: 800,
+                              }}
+                            >
+                              {command?.command || "أمر غير معروف"}
+                            </div>
+
+                            <div
+                              style={{
+                                color: "#9ca3af",
+                                fontSize: 11,
+                                marginTop: 4,
+                              }}
+                            >
+                              {approval.command_id}
+                            </div>
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                          >
+                            {(approval.requested_capabilities || [])
+                              .map(
+                                (item) =>
+                                  capabilityLabels[item] || item
+                              )
+                              .join("، ")}
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                          >
+                            <span
+                              style={{
+                                color: riskColor(approval.risk_level),
+                                fontWeight: 800,
+                              }}
+                            >
+                              {riskLabels[approval.risk_level] ||
+                                approval.risk_level}
+                            </span>
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                          >
+                            <span
+                              style={{
+                                color:
+                                  approval.status === "approved"
+                                    ? GREEN
+                                    : approval.status === "rejected"
+                                    ? "#dc2626"
+                                    : "#d97706",
+                                fontWeight: 800,
+                              }}
+                            >
+                              {approval.status === "approved"
+                                ? "تمت الموافقة"
+                                : approval.status === "rejected"
+                                ? "مرفوض"
+                                : "بانتظار الموافقة"}
+                            </span>
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {formatDate(approval.created_at)}
+                          </td>
+
+                          <td
+                            style={{
+                              padding: 13,
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                          >
+                            {approval.status === "pending" && command && (
+                              <button
+                                onClick={() => {
+                                  setApprovalModal({
+                                    ...approval,
+                                    command,
+                                  });
+                                  setApprovalReason("");
+                                }}
+                                style={{
+                                  border: "none",
+                                  background: GREEN,
+                                  color: "#fff",
+                                  borderRadius: 8,
+                                  padding: "8px 12px",
+                                  cursor: "pointer",
+                                  fontWeight: 800,
+                                }}
+                              >
+                                مراجعة
+                              </button>
+                            )}
+
+                            {approval.status !== "pending" && (
+                              <span
+                                style={{
+                                  color: "#9ca3af",
+                                  fontSize: 12,
+                                }}
+                              >
+                                مكتمل
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "capabilities" && (
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: 18,
+                borderBottom: "1px solid #e5e7eb",
+              }}
+            >
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 20,
+                }}
+              >
+                صلاحيات والم
+              </h2>
+            </div>
+
+            <div
+              style={{
+                overflowX: "auto",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  minWidth: 850,
+                }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      background: "#f9fafb",
+                    }}
+                  >
+                    {[
+                      "الصلاحية",
+                      "الوصف",
+                      "التفعيل",
+                      "الموافقة",
+                      "الخطورة",
+                    ].map((heading) => (
+                      <th
+                        key={heading}
+                        style={{
+                          padding: 13,
+                          textAlign: "right",
+                          color: "#6b7280",
+                          fontSize: 13,
+                          borderBottom: "1px solid #e5e7eb",
+                        }}
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {capabilities.map((capability) => (
+                    <tr key={capability.id}>
+                      <td
+                        style={{
+                          padding: 13,
+                          borderBottom: "1px solid #f1f5f9",
+                          fontWeight: 800,
+                        }}
+                      >
+                        {capabilityLabels[capability.capability_key] ||
+                          capability.capability_name ||
+                          capability.capability_key}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: 13,
+                          borderBottom: "1px solid #f1f5f9",
+                          color: "#6b7280",
+                        }}
+                      >
+                        {capability.description || "—"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: 13,
+                          borderBottom: "1px solid #f1f5f9",
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: capability.enabled ? GREEN : "#dc2626",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {capability.enabled ? "مفعّلة" : "موقوفة"}
+                        </span>
+                      </td>
+
+                      <td
+                        style={{
+                          padding: 13,
+                          borderBottom: "1px solid #f1f5f9",
+                        }}
+                      >
+                        {capability.requires_approval ? "نعم" : "لا"}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: 13,
+                          borderBottom: "1px solid #f1f5f9",
+                        }}
+                      >
+                        <span
+                          style={{
+                            color: riskColor(capability.risk_level),
+                            fontWeight: 800,
+                          }}
+                        >
+                          {riskLabels[capability.risk_level] ||
+                            capability.risk_level}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {createCommandModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 18,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 650,
+              maxHeight: "90vh",
+              overflowY: "auto",
+              background: "#fff",
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: "0 25px 70px rgba(0,0,0,.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                marginBottom: 18,
               }}
             >
               <div>
                 <h2
                   style={{
-                    margin:
-                      "0 0 6px",
+                    margin: 0,
+                    fontSize: 21,
                   }}
                 >
-                  الموافقات
+                  ＋ أمر جديد لوالم
                 </h2>
 
-                <p
-                  style={{
-                    margin: 0,
-                    color:
-                      "#64748b",
-                  }}
-                >
-                  الأوامر التي تحتاج قرار Super Admin قبل التنفيذ.
-                </p>
-              </div>
-
-              <span
-                style={{
-                  background:
-                    pendingApprovals >
-                    0
-                      ? "#fef3c7"
-                      : "#dcfce7",
-                  color:
-                    pendingApprovals >
-                    0
-                      ? "#92400e"
-                      : "#166534",
-                  padding:
-                    "8px 12px",
-                  borderRadius:
-                    "999px",
-                  fontWeight:
-                    700,
-                }}
-              >
-                {pendingApprovals} موافقات معلقة
-              </span>
-            </div>
-
-            <div
-              style={{
-                display:
-                  "grid",
-                gap: "12px",
-              }}
-            >
-              {approvals.length ===
-                0 && (
                 <div
                   style={{
-                    padding:
-                      "30px",
-                    textAlign:
-                      "center",
-                    color:
-                      "#64748b",
-                    background:
-                      "#f8faf9",
-                    borderRadius:
-                      "16px",
+                    color: "#6b7280",
+                    fontSize: 13,
+                    marginTop: 5,
                   }}
                 >
-                  لا توجد موافقات حالياً.
+                  إنشاء أمر آمن من داخل لوحة Super Admin.
                 </div>
-              )}
-
-              {approvals.map(
-                (approval) => {
-                  const relatedCommand =
-                    commands.find(
-                      (command) =>
-                        command.id ===
-                        approval.command_id
-                    );
-
-                  return (
-                    <div
-                      key={
-                        approval.id
-                      }
-                      style={{
-                        border:
-                          "1px solid #e5ebe7",
-                        borderRadius:
-                          "16px",
-                        padding:
-                          "16px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display:
-                            "flex",
-                          justifyContent:
-                            "space-between",
-                          gap:
-                            "12px",
-                          flexWrap:
-                            "wrap",
-                        }}
-                      >
-                        <div
-                          style={{
-                            flex: 1,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display:
-                                "flex",
-                              gap:
-                                "8px",
-                              alignItems:
-                                "center",
-                              flexWrap:
-                                "wrap",
-                            }}
-                          >
-                            <strong
-                              style={{
-                                fontSize:
-                                  "17px",
-                              }}
-                            >
-                              {relatedCommand?.command ||
-                                "طلب موافقة"}
-                            </strong>
-
-                            <span
-                              style={{
-                                ...riskClass(
-                                  approval.risk_level
-                                ),
-                                padding:
-                                  "4px 8px",
-                                borderRadius:
-                                  "999px",
-                                fontSize:
-                                  "11px",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              {riskLabels[
-                                approval.risk_level
-                              ] ||
-                                approval.risk_level}
-                            </span>
-
-                            <span
-                              style={{
-                                background:
-                                  approval.status ===
-                                  "approved"
-                                    ? "#dcfce7"
-                                    : approval.status ===
-                                      "rejected"
-                                    ? "#fee2e2"
-                                    : "#fef3c7",
-                                color:
-                                  approval.status ===
-                                  "approved"
-                                    ? "#166534"
-                                    : approval.status ===
-                                      "rejected"
-                                    ? "#991b1b"
-                                    : "#92400e",
-                                padding:
-                                  "4px 8px",
-                                borderRadius:
-                                  "999px",
-                                fontSize:
-                                  "11px",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              {approval.status ===
-                              "approved"
-                                ? "تمت الموافقة"
-                                : approval.status ===
-                                  "rejected"
-                                ? "مرفوض"
-                                : "معلق"}
-                            </span>
-                          </div>
-
-                          <div
-                            style={{
-                              marginTop:
-                                "8px",
-                              color:
-                                "#64748b",
-                              fontSize:
-                                "13px",
-                            }}
-                          >
-                            النوع:{" "}
-                            {relatedCommand
-                              ? commandTypeLabels[
-                                  relatedCommand
-                                    .command_type
-                                ] ||
-                                relatedCommand.command_type
-                              : "—"}
-                          </div>
-
-                          <div
-                            style={{
-                              marginTop:
-                                "5px",
-                              color:
-                                "#64748b",
-                              fontSize:
-                                "12px",
-                            }}
-                          >
-                            تاريخ الطلب:{" "}
-                            {formatDate(
-                              approval.created_at
-                            )}
-                          </div>
-                        </div>
-
-                        {approval.status ===
-                          "pending" && (
-                          <div
-                            style={{
-                              display:
-                                "flex",
-                              gap:
-                                "8px",
-                            }}
-                          >
-                            <button
-                              onClick={() => {
-                                setDecisionModal(
-                                  {
-                                    approval,
-                                    decision:
-                                      "approve",
-                                  }
-                                );
-                                setDecisionReason(
-                                  ""
-                                );
-                              }}
-                              style={{
-                                border:
-                                  "none",
-                                background:
-                                  GREEN,
-                                color:
-                                  "#fff",
-                                borderRadius:
-                                  "10px",
-                                padding:
-                                  "9px 14px",
-                                cursor:
-                                  "pointer",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              موافقة
-                            </button>
-
-                            <button
-                              onClick={() => {
-                                setDecisionModal(
-                                  {
-                                    approval,
-                                    decision:
-                                      "reject",
-                                  }
-                                );
-                                setDecisionReason(
-                                  ""
-                                );
-                              }}
-                              style={{
-                                border:
-                                  "1px solid #fecaca",
-                                background:
-                                  "#fff",
-                                color:
-                                  "#b91c1c",
-                                borderRadius:
-                                  "10px",
-                                padding:
-                                  "9px 14px",
-                                cursor:
-                                  "pointer",
-                                fontWeight:
-                                  700,
-                              }}
-                            >
-                              رفض
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                }
-              )}
-            </div>
-          </section>
-        )}
-
-        {activeTab ===
-          "instructions" && (
-          <section
-            style={{
-              background:
-                "#fff",
-              border:
-                "1px solid #e5ebe7",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
-            }}
-          >
-            <h2
-              style={{
-                margin:
-                  "0 0 14px",
-              }}
-            >
-              الشخصية والتعليمات
-            </h2>
-
-            <div
-              style={{
-                display:
-                  "grid",
-                gap:
-                  "14px",
-              }}
-            >
-              <div
-                style={{
-                  padding:
-                    "16px",
-                  background:
-                    "#f8faf9",
-                  borderRadius:
-                    "14px",
-                }}
-              >
-                <strong>
-                  الشخصية
-                </strong>
-
-                <p
-                  style={{
-                    margin:
-                      "8px 0 0",
-                    color:
-                      "#475569",
-                    lineHeight:
-                      1.8,
-                  }}
-                >
-                  {employee?.personality ||
-                    "إماراتية احترافية وودية"}
-                </p>
-              </div>
-
-              <div
-                style={{
-                  padding:
-                    "16px",
-                  background:
-                    "#f8faf9",
-                  borderRadius:
-                    "14px",
-                }}
-              >
-                <strong>
-                  التعليمات
-                </strong>
-
-                <p
-                  style={{
-                    margin:
-                      "8px 0 0",
-                    color:
-                      "#475569",
-                    lineHeight:
-                      1.8,
-                    whiteSpace:
-                      "pre-wrap",
-                  }}
-                >
-                  {employee?.instructions ||
-                    "مساعدة إدارة وتشغيل سوق AI مع الالتزام بالصلاحيات وبوابة الموافقات وعدم تنفيذ العمليات الحساسة دون موافقة Super Admin."}
-                </p>
-              </div>
-            </div>
-          </section>
-        )}
-      </div>
-
-      {/* =====================================================
-          NEW COMMAND MODAL
-          ===================================================== */}
-
-      {newCommandModal && (
-        <div
-          style={{
-            position:
-              "fixed",
-            inset: 0,
-            background:
-              "rgba(15,23,42,.45)",
-            display:
-              "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center",
-            padding:
-              "20px",
-            zIndex:
-              1000,
-          }}
-        >
-          <div
-            style={{
-              width:
-                "100%",
-              maxWidth:
-                "620px",
-              maxHeight:
-                "90vh",
-              overflowY:
-                "auto",
-              background:
-                "#fff",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
-            }}
-          >
-            <div
-              style={{
-                display:
-                  "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-                gap:
-                  "10px",
-                marginBottom:
-                  "18px",
-              }}
-            >
-              <div>
-                <h3
-                  style={{
-                    margin:
-                      "0 0 6px",
-                  }}
-                >
-                  ＋ أمر جديد
-                </h3>
-
-                <p
-                  style={{
-                    margin: 0,
-                    color:
-                      "#64748b",
-                    fontSize:
-                      "13px",
-                  }}
-                >
-                  أنشئ مهمة جديدة لـ والم. الأوامر الحساسة ستنشئ طلب موافقة تلقائياً.
-                </p>
               </div>
 
               <button
-                onClick={
-                  closeNewCommandModal
-                }
-                disabled={
-                  saving
-                }
+                onClick={closeCreateCommand}
+                disabled={savingCommand}
                 style={{
-                  border:
-                    "none",
-                  background:
-                    "#f1f5f2",
-                  color:
-                    "#475569",
-                  width:
-                    "36px",
-                  height:
-                    "36px",
-                  borderRadius:
-                    "10px",
-                  cursor:
-                    "pointer",
-                  fontSize:
-                    "18px",
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  borderRadius: 8,
+                  width: 36,
+                  height: 36,
+                  cursor: "pointer",
+                  fontSize: 18,
                 }}
               >
                 ×
               </button>
             </div>
 
-            <div
+            <label
               style={{
-                display:
-                  "grid",
-                gap:
-                  "14px",
+                display: "block",
+                fontWeight: 800,
+                marginBottom: 7,
               }}
             >
-              <div>
-                <label
-                  style={{
-                    display:
-                      "block",
-                    marginBottom:
-                      "7px",
-                    fontWeight:
-                      700,
-                  }}
-                >
-                  وصف الأمر
-                </label>
+              اسم الأمر
+            </label>
 
-                <input
-                  value={
-                    newCommand.command
-                  }
-                  onChange={(e) =>
-                    setNewCommand(
-                      (current) => ({
-                        ...current,
-                        command:
-                          e.target
-                            .value,
-                      })
-                    )
-                  }
-                  placeholder="مثال: تحليل ملف والم الحالي"
-                  style={{
-                    width:
-                      "100%",
-                    boxSizing:
-                      "border-box",
-                    border:
-                      "1px solid #dbe5de",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "12px",
-                    outline:
-                      "none",
-                  }}
-                />
-              </div>
+            <input
+              value={newCommand.command}
+              onChange={(e) =>
+                setNewCommand((prev) => ({
+                  ...prev,
+                  command: e.target.value,
+                }))
+              }
+              placeholder="مثال: تحليل ملف والم الرئيسي"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 9,
+                marginBottom: 15,
+                outline: "none",
+              }}
+            />
 
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                marginBottom: 7,
+              }}
+            >
+              نوع الأمر
+            </label>
+
+            <select
+              value={newCommand.command_type}
+              onChange={(e) =>
+                setNewCommand((prev) => ({
+                  ...prev,
+                  command_type: e.target.value,
+                }))
+              }
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 9,
+                marginBottom: 15,
+                background: "#fff",
+              }}
+            >
+              {supportedCommandTypes.map((type) => (
+                <option key={type} value={type}>
+                  {commandTypeLabels[type]}
+                </option>
+              ))}
+            </select>
+
+            {selectedCapability && (
               <div
                 style={{
-                  display:
-                    "grid",
-                  gridTemplateColumns:
-                    "1fr 1fr",
-                  gap:
-                    "12px",
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  marginBottom: 15,
                 }}
               >
-                <div>
-                  <label
-                    style={{
-                      display:
-                        "block",
-                      marginBottom:
-                        "7px",
-                      fontWeight:
-                        700,
-                    }}
-                  >
-                    نوع الأمر
-                  </label>
-
-                  <select
-                    value={
-                      newCommand.command_type
-                    }
-                    onChange={(e) =>
-                      setNewCommand(
-                        (current) => ({
-                          ...current,
-                          command_type:
-                            e.target
-                              .value,
-                          risk_level:
-                            [
-                              "edit_files",
-                              "create_files",
-                              "prepare_git_commit",
-                            ].includes(
-                              e.target
-                                .value
-                            )
-                              ? "high"
-                              : [
-                                  "database_modify",
-                                  "deploy_vercel",
-                                  "rollback",
-                                ].includes(
-                                  e.target
-                                    .value
-                                )
-                              ? "critical"
-                              : "low",
-                        })
-                      )
-                    }
-                    style={{
-                      width:
-                        "100%",
-                      border:
-                        "1px solid #dbe5de",
-                      borderRadius:
-                        "12px",
-                      padding:
-                        "12px",
-                      background:
-                        "#fff",
-                    }}
-                  >
-                    {Object.entries(
-                      commandTypeLabels
-                    ).map(
-                      ([
-                        value,
-                        label,
-                      ]) => (
-                        <option
-                          key={
-                            value
-                          }
-                          value={
-                            value
-                          }
-                        >
-                          {label}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-
-                <div>
-                  <label
-                    style={{
-                      display:
-                        "block",
-                      marginBottom:
-                        "7px",
-                      fontWeight:
-                        700,
-                    }}
-                  >
-                    مستوى الخطورة
-                  </label>
-
-                  <select
-                    value={
-                      newCommand.risk_level
-                    }
-                    onChange={(e) =>
-                      setNewCommand(
-                        (current) => ({
-                          ...current,
-                          risk_level:
-                            e.target
-                              .value,
-                        })
-                      )
-                    }
-                    style={{
-                      width:
-                        "100%",
-                      border:
-                        "1px solid #dbe5de",
-                      borderRadius:
-                        "12px",
-                      padding:
-                        "12px",
-                      background:
-                        "#fff",
-                    }}
-                  >
-                    {Object.entries(
-                      riskLabels
-                    ).map(
-                      ([
-                        value,
-                        label,
-                      ]) => (
-                        <option
-                          key={
-                            value
-                          }
-                          value={
-                            value
-                          }
-                        >
-                          {label}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label
+                <span
                   style={{
-                    display:
-                      "block",
-                    marginBottom:
-                      "7px",
-                    fontWeight:
-                      700,
+                    background: "#f3f4f6",
+                    borderRadius: 999,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    fontWeight: 700,
                   }}
                 >
-                  مسار الملف
+                  الخطورة:{" "}
+                  {riskLabels[selectedCapability.risk_level] ||
+                    selectedCapability.risk_level}
+                </span>
+
+                <span
+                  style={{
+                    background: selectedCapability.requires_approval
+                      ? "#fff7ed"
+                      : "#ecfdf5",
+                    color: selectedCapability.requires_approval
+                      ? "#9a3412"
+                      : "#166534",
+                    borderRadius: 999,
+                    padding: "6px 10px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {selectedCapability.requires_approval
+                    ? "يتطلب موافقة"
+                    : "لا يتطلب موافقة"}
+                </span>
+              </div>
+            )}
+
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                marginBottom: 7,
+              }}
+            >
+              مسار الملف
+              <span
+                style={{
+                  color: "#9ca3af",
+                  fontWeight: 400,
+                  marginRight: 5,
+                }}
+              >
+                اختياري
+              </span>
+            </label>
+
+            <input
+              value={newCommand.path}
+              onChange={(e) =>
+                setNewCommand((prev) => ({
+                  ...prev,
+                  path: e.target.value,
+                }))
+              }
+              placeholder="مثال: app/admin/ai-employee/page.js"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 9,
+                marginBottom: 15,
+                direction: "ltr",
+                textAlign: "left",
+              }}
+            />
+
+            {newCommand.command_type === "edit_files" && (
+              <>
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: 800,
+                    marginBottom: 7,
+                  }}
+                >
+                  المحتوى الجديد
                 </label>
 
-                <input
-                  value={
-                    newCommand.path
-                  }
+                <textarea
+                  value={newCommand.new_content}
                   onChange={(e) =>
-                    setNewCommand(
-                      (current) => ({
-                        ...current,
-                        path:
-                          e.target
-                            .value,
-                      })
-                    )
+                    setNewCommand((prev) => ({
+                      ...prev,
+                      new_content: e.target.value,
+                    }))
                   }
-                  placeholder="مثال: app/admin/ai-employee/page.js"
+                  placeholder="ضع المحتوى المطلوب اختباره هنا..."
+                  rows={10}
                   style={{
-                    width:
-                      "100%",
-                    boxSizing:
-                      "border-box",
-                    border:
-                      "1px solid #dbe5de",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "12px",
-                    outline:
-                      "none",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: 11,
+                    border: "1px solid #d1d5db",
+                    borderRadius: 9,
+                    marginBottom: 10,
+                    direction: "ltr",
+                    textAlign: "left",
+                    resize: "vertical",
+                    fontFamily: "monospace",
                   }}
                 />
-              </div>
 
-              {newCommand.command_type ===
-                "edit_files" && (
-                <div>
-                  <label
-                    style={{
-                      display:
-                        "block",
-                      marginBottom:
-                        "7px",
-                      fontWeight:
-                        700,
-                    }}
-                  >
-                    المحتوى المقترح
-                  </label>
-
-                  <textarea
-                    value={
-                      newCommand.content
-                    }
-                    onChange={(e) =>
-                      setNewCommand(
-                        (current) => ({
-                          ...current,
-                          content:
-                            e.target
-                              .value,
-                        })
-                      )
-                    }
-                    placeholder="أدخل المحتوى المقترح. سيتم استخدام Dry Run فقط ولن يتم تعديل GitHub فعلياً."
-                    rows={
-                      8
-                    }
-                    style={{
-                      width:
-                        "100%",
-                      boxSizing:
-                        "border-box",
-                      border:
-                        "1px solid #dbe5de",
-                      borderRadius:
-                        "12px",
-                      padding:
-                        "12px",
-                      resize:
-                        "vertical",
-                      outline:
-                        "none",
-                      fontFamily:
-                        "monospace",
-                      direction:
-                        "ltr",
-                      textAlign:
-                        "left",
-                    }}
-                  />
-
-                  <div
-                    style={{
-                      marginTop:
-                        "8px",
-                      padding:
-                        "10px 12px",
-                      background:
-                        "#eff6ff",
-                      border:
-                        "1px solid #bfdbfe",
-                      color:
-                        "#1e40af",
-                      borderRadius:
-                        "10px",
-                      fontSize:
-                        "12px",
-                      lineHeight:
-                        1.7,
-                    }}
-                  >
-                    🛡️ التعديل الآمن حالياً يعمل Dry Run فقط.
-                    لن تتم الكتابة على GitHub.
-                  </div>
-                </div>
-              )}
-
-              {commandNeedsApproval(
-                newCommand.command_type,
-                newCommand.risk_level
-              ) && (
                 <div
                   style={{
-                    background:
-                      "#fffbeb",
-                    border:
-                      "1px solid #fde68a",
-                    color:
-                      "#92400e",
-                    borderRadius:
-                      "12px",
-                    padding:
-                      "12px",
-                    fontSize:
-                      "13px",
-                    lineHeight:
-                      1.7,
+                    background: "#ecfdf5",
+                    color: "#166534",
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 10,
+                    padding: 11,
+                    marginBottom: 15,
+                    fontSize: 12,
+                    fontWeight: 700,
                   }}
                 >
-                  🔐 هذا الأمر يحتاج موافقة Super Admin.
-                  <br />
-                  سيتم إنشاء طلب الموافقة تلقائياً بعد إنشاء الأمر.
+                  🛡️ التعديل سيكون Dry Run فقط في هذه المرحلة. لن تتم
+                  الكتابة الفعلية على GitHub.
                 </div>
-              )}
+              </>
+            )}
 
-              <div
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                marginBottom: 7,
+              }}
+            >
+              ملاحظات
+              <span
                 style={{
-                  display:
-                    "flex",
-                  justifyContent:
-                    "flex-start",
-                  gap:
-                    "8px",
-                  marginTop:
-                    "4px",
+                  color: "#9ca3af",
+                  fontWeight: 400,
+                  marginRight: 5,
                 }}
               >
-                <button
-                  onClick={
-                    createCommand
-                  }
-                  disabled={
-                    saving
-                  }
-                  style={{
-                    border:
-                      "none",
-                    background:
-                      GREEN,
-                    color:
-                      "#fff",
-                    borderRadius:
-                      "10px",
-                    padding:
-                      "11px 18px",
-                    cursor:
-                      saving
-                        ? "not-allowed"
-                        : "pointer",
-                    fontWeight:
-                      700,
-                  }}
-                >
-                  {saving
-                    ? "جارٍ إنشاء الأمر..."
-                    : "إنشاء الأمر"}
-                </button>
-
-                <button
-                  onClick={
-                    closeNewCommandModal
-                  }
-                  disabled={
-                    saving
-                  }
-                  style={{
-                    border:
-                      "1px solid #dbe5de",
-                    background:
-                      "#fff",
-                    color:
-                      "#475569",
-                    borderRadius:
-                      "10px",
-                    padding:
-                      "11px 18px",
-                    cursor:
-                      "pointer",
-                    fontWeight:
-                      700,
-                  }}
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================
-          APPROVAL DECISION MODAL
-          ===================================================== */}
-
-      {decisionModal && (
-        <div
-          style={{
-            position:
-              "fixed",
-            inset: 0,
-            background:
-              "rgba(15,23,42,.45)",
-            display:
-              "flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center",
-            padding:
-              "20px",
-            zIndex:
-              1100,
-          }}
-        >
-          <div
-            style={{
-              width:
-                "100%",
-              maxWidth:
-                "520px",
-              background:
-                "#fff",
-              borderRadius:
-                "20px",
-              padding:
-                "22px",
-            }}
-          >
-            <h3
-              style={{
-                margin:
-                  "0 0 10px",
-              }}
-            >
-              {decisionModal.decision ===
-              "approve"
-                ? "الموافقة على الأمر"
-                : "رفض الأمر"}
-            </h3>
-
-            <p
-              style={{
-                color:
-                  "#64748b",
-                lineHeight:
-                  1.7,
-              }}
-            >
-              {commands.find(
-                (command) =>
-                  command.id ===
-                  decisionModal
-                    .approval
-                    .command_id
-              )?.command ||
-                "هذا الأمر"}
-            </p>
-
-            <p
-              style={{
-                color:
-                  "#64748b",
-                lineHeight:
-                  1.7,
-              }}
-            >
-              القرار سيُسجل في سجل الموافقات. الموافقة لا تعني تنفيذ الأمر تلقائياً.
-            </p>
+                اختياري
+              </span>
+            </label>
 
             <textarea
-              value={
-                decisionReason
-              }
+              value={newCommand.notes}
               onChange={(e) =>
-                setDecisionReason(
-                  e.target
-                    .value
-                )
+                setNewCommand((prev) => ({
+                  ...prev,
+                  notes: e.target.value,
+                }))
               }
-              placeholder="سبب القرار (اختياري)"
-              rows={4}
+              placeholder="أي تعليمات إضافية لوالم..."
+              rows={3}
               style={{
-                width:
-                  "100%",
-                boxSizing:
-                  "border-box",
-                border:
-                  "1px solid #dbe5de",
-                borderRadius:
-                  "12px",
-                padding:
-                  "12px",
-                resize:
-                  "vertical",
-                outline:
-                  "none",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 9,
+                marginBottom: 18,
+                resize: "vertical",
               }}
             />
 
             <div
               style={{
-                display:
-                  "flex",
-                justifyContent:
-                  "flex-start",
-                gap:
-                  "8px",
-                marginTop:
-                  "14px",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
               }}
             >
               <button
-                onClick={() =>
-                  decideApproval(
-                    decisionModal.decision
-                  )
-                }
-                disabled={
-                  saving
-                }
+                onClick={closeCreateCommand}
+                disabled={savingCommand}
                 style={{
-                  border:
-                    "none",
-                  background:
-                    decisionModal.decision ===
-                    "approve"
-                      ? GREEN
-                      : "#dc2626",
-                  color:
-                    "#fff",
-                  borderRadius:
-                    "10px",
-                  padding:
-                    "10px 16px",
-                  cursor:
-                    saving
-                      ? "not-allowed"
-                      : "pointer",
-                  fontWeight:
-                    700,
-                }}
-              >
-                تأكيد
-              </button>
-
-              <button
-                onClick={() => {
-                  setDecisionModal(
-                    null
-                  );
-                  setDecisionReason(
-                    ""
-                  );
-                }}
-                style={{
-                  border:
-                    "1px solid #dbe5de",
-                  background:
-                    "#fff",
-                  color:
-                    "#475569",
-                  borderRadius:
-                    "10px",
-                  padding:
-                    "10px 16px",
-                  cursor:
-                    "pointer",
-                  fontWeight:
-                    700,
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  color: "#374151",
+                  borderRadius: 9,
+                  padding: "10px 16px",
+                  cursor: "pointer",
+                  fontWeight: 700,
                 }}
               >
                 إلغاء
+              </button>
+
+              <button
+                onClick={createCommand}
+                disabled={savingCommand}
+                style={{
+                  border: "none",
+                  background: GREEN,
+                  color: "#fff",
+                  borderRadius: 9,
+                  padding: "10px 18px",
+                  cursor: savingCommand ? "not-allowed" : "pointer",
+                  fontWeight: 800,
+                  opacity: savingCommand ? 0.7 : 1,
+                }}
+              >
+                {savingCommand ? "جارٍ إنشاء الأمر..." : "إنشاء الأمر"}
               </button>
             </div>
           </div>
         </div>
       )}
-    </main>
+
+      {approvalModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 18,
+            zIndex: 1100,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 580,
+              background: "#fff",
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: "0 25px 70px rgba(0,0,0,.25)",
+            }}
+          >
+            <h2
+              style={{
+                margin: "0 0 8px",
+                fontSize: 21,
+              }}
+            >
+              مراجعة طلب الموافقة
+            </h2>
+
+            <div
+              style={{
+                color: "#6b7280",
+                fontSize: 13,
+                marginBottom: 16,
+              }}
+            >
+              راجع الأمر قبل السماح لوالم ببدء التنفيذ.
+            </div>
+
+            <div
+              style={{
+                background: "#f8fafc",
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 15,
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 800,
+                  marginBottom: 8,
+                }}
+              >
+                {approvalModal.command?.command || "أمر"}
+              </div>
+
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#4b5563",
+                  lineHeight: 1.8,
+                }}
+              >
+                النوع:{" "}
+                {commandTypeLabels[
+                  approvalModal.command?.command_type
+                ] || approvalModal.command?.command_type}
+                <br />
+                الخطورة:{" "}
+                {riskLabels[approvalModal.risk_level] ||
+                  approvalModal.risk_level}
+                <br />
+                الصلاحية:{" "}
+                {(approvalModal.requested_capabilities || [])
+                  .map(
+                    (item) => capabilityLabels[item] || item
+                  )
+                  .join("، ")}
+              </div>
+            </div>
+
+            <label
+              style={{
+                display: "block",
+                fontWeight: 800,
+                marginBottom: 7,
+              }}
+            >
+              ملاحظة القرار
+            </label>
+
+            <textarea
+              value={approvalReason}
+              onChange={(e) => setApprovalReason(e.target.value)}
+              placeholder="اختياري"
+              rows={4}
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 11,
+                border: "1px solid #d1d5db",
+                borderRadius: 9,
+                marginBottom: 18,
+                resize: "vertical",
+              }}
+            />
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+              }}
+            >
+              <button
+                onClick={() => {
+                  setApprovalModal(null);
+                  setApprovalReason("");
+                }}
+                style={{
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  color: "#374151",
+                  borderRadius: 9,
+                  padding: "10px 15px",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                إلغاء
+              </button>
+
+              <button
+                onClick={rejectCommand}
+                style={{
+                  border: "none",
+                  background: "#dc2626",
+                  color: "#fff",
+                  borderRadius: 9,
+                  padding: "10px 15px",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                رفض
+              </button>
+
+              <button
+                onClick={approveCommand}
+                style={{
+                  border: "none",
+                  background: GREEN,
+                  color: "#fff",
+                  borderRadius: 9,
+                  padding: "10px 15px",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                ✓ موافقة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
