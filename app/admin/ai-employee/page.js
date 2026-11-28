@@ -414,6 +414,16 @@ export default function SuperAdminAIEmployeePage() {
       return;
     }
 
+    if (
+      command.requires_approval === true &&
+      command.approval_status !== "approved"
+    ) {
+      setError(
+        "هذا الأمر يحتاج موافقة Super Admin قبل بدء التنفيذ."
+      );
+      return;
+    }
+
     setSaving(true);
     setMessage("");
     setError("");
@@ -1370,6 +1380,22 @@ export default function SuperAdminAIEmployeePage() {
                 const isExecuting =
                   executingCommandId === command.id;
 
+                const requiresApproval =
+                  command.requires_approval === true;
+
+                const approvalApproved =
+                  command.approval_status === "approved";
+
+                const canStart =
+                  command.status === "pending" &&
+                  (!requiresApproval ||
+                    approvalApproved);
+
+                const waitingForApproval =
+                  command.status === "pending" &&
+                  requiresApproval &&
+                  !approvalApproved;
+
                 return (
                   <article
                     key={command.id}
@@ -1442,6 +1468,29 @@ export default function SuperAdminAIEmployeePage() {
                               command.risk_level
                             ] || command.risk_level}
                           </span>
+
+                          {requiresApproval && (
+                            <span
+                              style={{
+                                background:
+                                  approvalApproved
+                                    ? "#dcfce7"
+                                    : "#fef3c7",
+                                color:
+                                  approvalApproved
+                                    ? "#166534"
+                                    : "#92400e",
+                                padding: "5px 9px",
+                                borderRadius: "999px",
+                                fontSize: "11px",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {approvalApproved
+                                ? "تمت الموافقة"
+                                : "تحتاج موافقة"}
+                            </span>
+                          )}
                         </div>
 
                         <div
@@ -1512,8 +1561,7 @@ export default function SuperAdminAIEmployeePage() {
                           gap: "8px",
                         }}
                       >
-                        {command.status ===
-                          "pending" && (
+                        {canStart && (
                           <button
                             onClick={() =>
                               startCommand(command)
@@ -1537,6 +1585,26 @@ export default function SuperAdminAIEmployeePage() {
                           >
                             ▶ بدء التنفيذ
                           </button>
+                        )}
+
+                        {waitingForApproval && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "7px",
+                              background: "#fffbeb",
+                              border:
+                                "1px solid #fde68a",
+                              color: "#92400e",
+                              borderRadius: "12px",
+                              padding: "11px 14px",
+                              fontWeight: 700,
+                              fontSize: "13px",
+                            }}
+                          >
+                            ⏳ بانتظار موافقة Super Admin
+                          </span>
                         )}
 
                         {button && (
