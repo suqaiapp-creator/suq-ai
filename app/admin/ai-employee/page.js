@@ -181,7 +181,7 @@ function getExecutionButton(command) {
   if (command.command_type === "edit_files") {
     return {
       label: "🛡️ تنفيذ التعديل الآمن",
-      loadingLabel: "🛡️ جارٍ إعداد معاينة التعديل...",
+      loadingLabel: "🛡️ جارٍ تجهيز التعديل الآمن...",
     };
   }
 
@@ -463,6 +463,15 @@ export default function SuperAdminAIEmployeePage() {
                 ...item,
                 status: "running",
                 started_at: new Date().toISOString(),
+                execution_log: [
+                  ...(Array.isArray(item.execution_log)
+                    ? item.execution_log
+                    : []),
+                  {
+                    event: "execution_started",
+                    at: new Date().toISOString(),
+                  },
+                ],
               }
             : item
         )
@@ -535,7 +544,7 @@ export default function SuperAdminAIEmployeePage() {
         command.command_type === "edit_files"
       ) {
         setMessage(
-          "🟢 تمت معاينة تعديل الملف بأمان. لم يتم تعديل أي ملف في GitHub."
+          "🟢 تم تنفيذ التعديل الآمن بنجاح. لم يتم تعديل أي ملف فعلياً."
         );
       } else {
         setMessage(
@@ -1650,6 +1659,30 @@ export default function SuperAdminAIEmployeePage() {
                       </div>
                     </div>
 
+                    {command.command_type ===
+                      "edit_files" &&
+                      command.status ===
+                        "running" && (
+                        <div
+                          style={{
+                            marginTop: "14px",
+                            padding: "12px 14px",
+                            background: "#eff6ff",
+                            border:
+                              "1px solid #bfdbfe",
+                            color: "#1e40af",
+                            borderRadius: "12px",
+                            fontSize: "13px",
+                            lineHeight: 1.7,
+                          }}
+                        >
+                          🛡️ هذا اختبار تعديل آمن.
+                          <br />
+                          سيتم إعداد ومعاينة التعديل فقط،
+                          ولن يتم الكتابة على GitHub في هذه المرحلة.
+                        </div>
+                      )}
+
                     {command.result && (
                       <div
                         style={{
@@ -1766,6 +1799,129 @@ export default function SuperAdminAIEmployeePage() {
                                     </div>
                                   </div>
                                 )
+                              )}
+                            </div>
+                          )}
+
+                        {command.command_type ===
+                          "edit_files" &&
+                          command.output_data && (
+                            <div
+                              style={{
+                                marginTop: "14px",
+                                display: "grid",
+                                gap: "10px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  background: "#fff",
+                                  border:
+                                    "1px solid #dcfce7",
+                                  borderRadius: "12px",
+                                  padding: "12px",
+                                }}
+                              >
+                                <strong>
+                                  حالة الأمان
+                                </strong>
+
+                                <div
+                                  style={{
+                                    marginTop: "8px",
+                                    color: "#475569",
+                                    lineHeight: 1.7,
+                                  }}
+                                >
+                                  الملفات المعدلة:{" "}
+                                  {command.output_data
+                                    .safety
+                                    ?.files_modified
+                                    ? "نعم"
+                                    : "لا"}
+                                  <br />
+                                  ملفات منشأة:{" "}
+                                  {command.output_data
+                                    .safety
+                                    ?.files_created
+                                    ? "نعم"
+                                    : "لا"}
+                                  <br />
+                                  كتابة GitHub:{" "}
+                                  {command.output_data
+                                    .safety
+                                    ?.github_write_used
+                                    ? "نعم"
+                                    : "لا"}
+                                  <br />
+                                  Dry Run:{" "}
+                                  {command.output_data
+                                    .safety?.dry_run
+                                    ? "نعم"
+                                    : "لا"}
+                                </div>
+                              </div>
+
+                              {command.output_data
+                                .preview && (
+                                <div
+                                  style={{
+                                    background:
+                                      "#fff",
+                                    border:
+                                      "1px solid #e5e7eb",
+                                    borderRadius:
+                                      "12px",
+                                    padding: "12px",
+                                  }}
+                                >
+                                  <strong>
+                                    معاينة التعديل
+                                  </strong>
+
+                                  <div
+                                    style={{
+                                      marginTop:
+                                        "8px",
+                                      color:
+                                        "#475569",
+                                      lineHeight:
+                                        1.7,
+                                    }}
+                                  >
+                                    الملف:{" "}
+                                    {
+                                      command
+                                        .output_data
+                                        .preview
+                                        .path
+                                    }
+                                    <br />
+                                    عدد أسطر الملف الحالي:{" "}
+                                    {
+                                      command
+                                        .output_data
+                                        .preview
+                                        .oldLineCount
+                                    }
+                                    <br />
+                                    عدد أسطر المحتوى الجديد:{" "}
+                                    {
+                                      command
+                                        .output_data
+                                        .preview
+                                        .newLineCount
+                                    }
+                                    <br />
+                                    أول سطر مختلف:{" "}
+                                    {
+                                      command
+                                        .output_data
+                                        .preview
+                                        .firstDifferenceLine
+                                    }
+                                  </div>
+                                </div>
                               )}
                             </div>
                           )}
