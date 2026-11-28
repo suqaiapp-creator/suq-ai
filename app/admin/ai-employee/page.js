@@ -527,6 +527,11 @@ export default function AiEmployeePage() {
           commandPath.trim();
       }
 
+      /*
+       * تعديل الملفات:
+       * في هذه المرحلة يتم إنشاء معاينة فقط.
+       * لا توجد كتابة فعلية على GitHub.
+       */
       if (commandType === "edit_files") {
         if (!commandPath.trim()) {
           throw new Error(
@@ -534,11 +539,24 @@ export default function AiEmployeePage() {
           );
         }
 
+        if (!newContent.trim()) {
+          throw new Error(
+            "يجب إدخال المحتوى الجديد."
+          );
+        }
+
         inputData.path =
           commandPath.trim();
 
         inputData.dry_run = true;
-        inputData.new_content = newContent;
+        inputData.new_content =
+          newContent;
+
+        inputData.edit_mode =
+          "preview";
+
+        inputData.confirm_write =
+          false;
       }
 
       if (commandType === "run_build") {
@@ -785,6 +803,22 @@ export default function AiEmployeePage() {
       return null;
     }
 
+    /*
+     * حماية إضافية:
+     * edit_files لا يدخل من زر التنفيذ العام.
+     * التنفيذ الفعلي سيتم ربطه لاحقًا
+     * بمسار موافقة وتنفيذ منفصل وآمن.
+     */
+    if (
+      command.command_type ===
+      "edit_files"
+    ) {
+      setActionError(
+        "تعديل الملفات يعمل حاليًا بوضع المعاينة فقط. التنفيذ الفعلي سيتم تفعيله بعد تجهيز مسار الموافقة والكتابة الآمنة."
+      );
+      return null;
+    }
+
     setExecutingId(command.id);
 
     setExecutionMessage(
@@ -932,21 +966,26 @@ export default function AiEmployeePage() {
     }
   }
 
-  /*
-   * التعديل الأساسي:
-   * بعد نجاح start_ai_employee_command
-   * يتم جلب الأمر من قاعدة البيانات،
-   * ثم تشغيل محرك التنفيذ مباشرة.
-   *
-   * هذا يمنع بقاء الأمر في running
-   * بدون استدعاء /api/admin/ai-employee/execute.
-   */
   async function startCommand(command) {
     if (!command?.id) return;
 
     if (executingId) {
       setActionError(
         "يوجد أمر آخر قيد التنفيذ من الواجهة."
+      );
+      return;
+    }
+
+    /*
+     * edit_files لا يبدأ من زر "بدء وتنفيذ"
+     * لأنه يحتاج مسار معاينة + موافقة + تنفيذ فعلي منفصل.
+     */
+    if (
+      command.command_type ===
+      "edit_files"
+    ) {
+      setActionError(
+        "تعديل الملفات لا يتم تشغيله من المسار العام. أنشئ المعاينة أولًا، ثم سيتم اعتماد وتنفيذ التعديل من المسار الآمن المخصص له."
       );
       return;
     }
@@ -976,10 +1015,6 @@ export default function AiEmployeePage() {
         );
       }
 
-      /*
-       * نعيد تحميل الأمر بعد الـ RPC
-       * حتى نتأكد أن الحالة أصبحت running.
-       */
       const refreshed =
         await refreshCommandData();
 
@@ -1013,11 +1048,6 @@ export default function AiEmployeePage() {
         "تم بدء الأمر. جارٍ الآن تشغيل محرك التنفيذ..."
       );
 
-      /*
-       * التشغيل الفعلي للـ API.
-       * executeCommand يتحقق من running
-       * ثم يستدعي Route.
-       */
       await executeCommand(
         runningCommand
       );
@@ -1059,11 +1089,6 @@ export default function AiEmployeePage() {
           ? "approve_ai_employee_command"
           : "reject_ai_employee_command";
 
-      /*
-       * الإصدار الصحيح من RPC يستخدم:
-       * p_command_id
-       * p_reason
-       */
       const {
         data,
         error,
@@ -1099,7 +1124,7 @@ export default function AiEmployeePage() {
 
       setActionMessage(
         decision === "approve"
-          ? "تم اعتماد الأمر. يمكن الآن بدء التنفيذ."
+          ? "تم اعتماد الأمر. يمكن الآن تجهيز مسار التنفيذ."
           : "تم رفض الأمر."
       );
     } catch (error) {
@@ -2098,7 +2123,9 @@ export default function AiEmployeePage() {
                             "running" &&
                           executableCommandTypes.includes(
                             command.command_type
-                          );
+                          ) &&
+                          command.command_type !==
+                            "edit_files";
 
                         const isExecuting =
                           executingId ===
@@ -2230,30 +2257,56 @@ export default function AiEmployeePage() {
                                 }}
                               >
                                 {command.status ===
-                                  "pending" && (
-                                  <button
-                                    onClick={() =>
-                                      startCommand(
-                                        command
-                                      )
-                                    }
-                                    disabled={
-                                      saving ||
-                                      Boolean(
-                                        executingId
-                                      )
-                                    }
-                                    style={{
-                                      ...smallButton,
-                                      background:
-                                        "#dcfce7",
-                                      color:
-                                        "#166534",
-                                    }}
-                                  >
-                                    بدء وتنفيذ
-                                  </button>
-                                )}
+                                  "pending" &&
+                                  command.command_type !==
+                                    "edit_files" && (
+                                    <button
+                                      onClick={() =>
+                                        startCommand(
+                                          command
+                                        )
+                                      }
+                                      disabled={
+                                        saving ||
+                                        Boolean(
+                                          executingId
+                                        )
+                                      }
+                                      style={{
+                                        ...smallButton,
+                                        background:
+                                          "#dcfce7",
+                                        color:
+                                          "#166534",
+                                      }}
+                                    >
+                                      بدء وتنفيذ
+                                    </button>
+                                  )}
+
+                                {command.status ===
+                                  "pending" &&
+                                  command.command_type ===
+                                    "edit_files" && (
+                                    <span
+                                      style={{
+                                        padding:
+                                          "8px 10px",
+                                        borderRadius:
+                                          8,
+                                        background:
+                                          "#fef3c7",
+                                        color:
+                                          "#92400e",
+                                        fontSize:
+                                          12,
+                                        fontWeight:
+                                          700,
+                                      }}
+                                    >
+                                      معاينة تنتظر الاعتماد
+                                    </span>
+                                  )}
 
                                 {canExecute && (
                                   <button
@@ -2286,14 +2339,35 @@ export default function AiEmployeePage() {
                                         "analyze_code"
                                       ? "🔎 تحليل الكود"
                                       : command.command_type ===
-                                        "edit_files"
-                                      ? "✏️ تنفيذ"
-                                      : command.command_type ===
                                         "run_build"
                                       ? "🛠️ فحص Build"
                                       : "▶ تنفيذ"}
                                   </button>
                                 )}
+
+                                {command.command_type ===
+                                  "edit_files" &&
+                                  command.approval_status ===
+                                    "approved" && (
+                                    <span
+                                      style={{
+                                        padding:
+                                          "8px 10px",
+                                        borderRadius:
+                                          8,
+                                        background:
+                                          "#dcfce7",
+                                        color:
+                                          "#166534",
+                                        fontSize:
+                                          12,
+                                        fontWeight:
+                                          700,
+                                      }}
+                                    >
+                                      معتمد — التنفيذ الفعلي لاحقًا
+                                    </span>
+                                  )}
 
                                 <button
                                   onClick={() =>
@@ -2637,6 +2711,18 @@ export default function AiEmployeePage() {
                   />
 
                   <Info
+                    label="الموافقة"
+                    value={
+                      selectedCommand.requires_approval
+                        ? selectedCommand.approval_status ===
+                          "approved"
+                          ? "معتمد"
+                          : "بانتظار الاعتماد"
+                        : "لا يحتاج"
+                    }
+                  />
+
+                  <Info
                     label="المدة"
                     value={formatDuration(
                       selectedCommand.duration_seconds
@@ -2842,7 +2928,7 @@ export default function AiEmployeePage() {
                   <div
                     style={labelStyle}
                   >
-                    المحتوى الجديد — Dry Run
+                    المحتوى الجديد — معاينة التعديل
                   </div>
 
                   <textarea
@@ -2853,28 +2939,42 @@ export default function AiEmployeePage() {
                       )
                     }
                     rows={10}
-                    placeholder="المحتوى الذي سيتم معاينته فقط..."
+                    placeholder="المحتوى الجديد الذي تريد من والم معاينته..."
                     style={{
                       ...inputStyle,
                       resize:
                         "vertical",
                       fontFamily:
                         "monospace",
+                      direction: "ltr",
+                      textAlign: "left",
                     }}
                   />
 
                   <div
                     style={{
-                      marginTop: 6,
+                      marginTop: 8,
+                      padding: 10,
+                      background:
+                        "#fffbeb",
+                      border:
+                        "1px solid #fde68a",
+                      borderRadius: 9,
                       color:
                         "#92400e",
                       fontSize: 12,
+                      lineHeight: 1.7,
                     }}
                   >
-                    تعديل الملفات يعمل
-                    حاليًا كـ Dry Run فقط،
-                    بدون كتابة فعلية على
-                    GitHub.
+                    <strong>
+                      وضع آمن:
+                    </strong>{" "}
+                    سيتم إنشاء معاينة للتعديل
+                    فقط. لا يتم الكتابة على GitHub
+                    في هذه المرحلة. بعد ذلك يحتاج
+                    التعديل إلى موافقة Super Admin
+                    ومسار تنفيذ منفصل قبل أي كتابة
+                    فعلية.
                   </div>
                 </label>
               )}
@@ -2965,6 +3065,9 @@ export default function AiEmployeePage() {
                 >
                   {saving
                     ? "جاري الإنشاء..."
+                    : commandType ===
+                      "edit_files"
+                    ? "إنشاء معاينة التعديل"
                     : "إنشاء الأمر"}
                 </button>
 
