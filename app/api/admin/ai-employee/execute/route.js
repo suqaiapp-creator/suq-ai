@@ -36,11 +36,15 @@ function normalizePath(value) {
     .replace(/^\/+/, "")
     .replace(/\/+/g, "/");
 
-  const parts = normalized.split("/");
-
-  if (parts.some((part) => part === "..")) {
+  if (
+    normalized.split("/").some(
+      (part) => part === ".."
+    )
+  ) {
     throw new Error("المسار غير مسموح");
   }
+
+  const lower = normalized.toLowerCase();
 
   const blocked = [
     ".env",
@@ -53,66 +57,26 @@ function normalizePath(value) {
     ".vercel",
   ];
 
-  const lower = normalized.toLowerCase();
-
   for (const item of blocked) {
     if (
       lower === item ||
       lower.startsWith(`${item}/`) ||
       lower.includes(`/${item}/`)
     ) {
-      throw new Error("هذا المسار محظور لأسباب أمنية");
+      throw new Error(
+        "هذا المسار محظور لأسباب أمنية"
+      );
     }
   }
 
   return normalized;
 }
 
-function isSafeFilePath(path) {
-  const normalized = normalizePath(path);
-
-  if (!normalized) return false;
-
-  const lower = normalized.toLowerCase();
-
-  const blockedNames = [
-    ".env",
-    ".env.local",
-    ".env.production",
-    ".env.development",
-    ".env.test",
-  ];
-
-  if (
-    blockedNames.some(
-      (name) =>
-        lower === name ||
-        lower.endsWith(`/${name}`)
-    )
-  ) {
-    return false;
-  }
-
-  const blockedFolders = [
-    "node_modules/",
-    ".git/",
-    ".vercel/",
-  ];
-
-  if (
-    blockedFolders.some((folder) =>
-      lower.includes(folder)
-    )
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
 async function githubRequest(path) {
   if (!process.env.GITHUB_TOKEN) {
-    throw new Error("GITHUB_TOKEN غير موجود في Vercel");
+    throw new Error(
+      "GITHUB_TOKEN غير موجود في Vercel"
+    );
   }
 
   const response = await fetch(
@@ -135,66 +99,22 @@ async function githubRequest(path) {
   }
 
   if (!response.ok) {
-    const message =
+    throw new Error(
       data?.message ||
-      `GitHub API error ${response.status}`;
-
-    throw new Error(message);
+        `GitHub API error ${response.status}`
+    );
   }
 
   return data;
 }
 
-async function readRepositoryTree() {
-  const data = await githubRequest(
-    `/repos/${encodeURIComponent(
-      GITHUB_OWNER
-    )}/${encodeURIComponent(
-      GITHUB_REPO
-    )}/git/trees/${encodeURIComponent(
-      GITHUB_BRANCH
-    )}?recursive=1`
-  );
-
-  const tree = Array.isArray(data?.tree)
-    ? data.tree
-    : [];
-
-  const files = tree
-    .filter(
-      (item) =>
-        item.type === "blob" &&
-        typeof item.path === "string" &&
-        isSafeFilePath(item.path)
-    )
-    .slice(0, 500)
-    .map((item) => ({
-      path: item.path,
-      type: item.type,
-      size: item.size || 0,
-      sha: item.sha || null,
-      url: item.url || null,
-    }));
-
-  return {
-    repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
-    branch: GITHUB_BRANCH,
-    total_files: files.length,
-    truncated: tree.length > 500,
-    files,
-  };
-}
-
 async function readRepositoryFile(path) {
-  const normalizedPath = normalizePath(path);
+  const normalizedPath =
+    normalizePath(path);
 
   if (!normalizedPath) {
-    return readRepositoryTree();
-  }
-
-  if (!isSafeFilePath(normalizedPath)) {
     throw new Error(
-      "لا يمكن قراءة هذا الملف لأسباب أمنية"
+      "يجب تحديد مسار الملف لتحليل الكود"
     );
   }
 
@@ -216,15 +136,17 @@ async function readRepositoryFile(path) {
 
   if (data?.type !== "file") {
     throw new Error(
-      "المسار المطلوب ليس ملفاً قابلاً للقراءة"
+      "المسار المطلوب ليس ملفاً"
     );
   }
 
-  const size = Number(data.size || 0);
+  const size = Number(
+    data.size || 0
+  );
 
   if (size > 500000) {
     throw new Error(
-      "الملف أكبر من الحد المسموح للقراءة"
+      "الملف أكبر من الحد المسموح للتحليل"
     );
   }
 
@@ -249,8 +171,151 @@ async function readRepositoryFile(path) {
   };
 }
 
+function analyzeCodeStructure(
+  content,
+  path
+) {
+  const lines =
+    content.split("\n");
+
+  const imports = [];
+  const exports = [];
+  const functions = [];
+  const hooks = [];
+  const todos = [];
+  const possibleIssues = [];
+
+  for (
+    let i = 0;
+    i < lines.length;
+    i++
+  ) {
+    const line = lines[i];
+
+    const importMatch =
+      line.match(
+        /^\s*import\s+(.+?)\s+from\s+["'](.+?)["']/
+      );
+
+    if (importMatch) {
+      imports.push({
+        line: i + 1,
+        source: importMatch[2],
+      });
+    }
+
+    if (
+      /^\s*export\s+(default\s+)?/.test(
+        line
+      )
+    ) {
+      exports.push({
+        line: i + 1,
+        code: line.trim().slice(0, 300),
+      });
+    }
+
+    const functionMatch =
+      line.match(
+        /^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)/
+      );
+
+    if (functionMatch) {
+      functions.push({
+        line: i + 1,
+        name: functionMatch[1],
+      });
+    }
+
+    const hookMatch =
+      line.match(
+        /\b(use[A-Z][A-Za-z0-9_$]*)\s*\(/
+      );
+
+    if (hookMatch) {
+      hooks.push({
+        line: i + 1,
+        name: hookMatch[1],
+      });
+    }
+
+    if (
+      /\bTODO\b|\bFIXME\b/i.test(
+        line
+      )
+    ) {
+      todos.push({
+        line: i + 1,
+        text: line.trim().slice(0, 300),
+      });
+    }
+
+    if (
+      /console\.log\s*\(/.test(
+        line
+      )
+    ) {
+      possibleIssues.push({
+        line: i + 1,
+        type: "console_log",
+        message:
+          "يوجد console.log داخل الملف. يفضل مراجعته قبل الإنتاج.",
+      });
+    }
+
+    if (
+      /dangerouslySetInnerHTML/.test(
+        line
+      )
+    ) {
+      possibleIssues.push({
+        line: i + 1,
+        type: "dangerous_html",
+        message:
+          "استخدام dangerouslySetInnerHTML يحتاج مراجعة أمنية.",
+      });
+    }
+
+    if (
+      /process\.env\./.test(
+        line
+      ) &&
+      !/NEXT_PUBLIC_/.test(
+        line
+      )
+    ) {
+      possibleIssues.push({
+        line: i + 1,
+        type: "server_env_reference",
+        message:
+          "تم العثور على متغير بيئة غير NEXT_PUBLIC_. يجب التأكد أن الملف يعمل على الخادم فقط إذا كان يعتمد عليه.",
+      });
+    }
+  }
+
+  return {
+    file: path,
+    language:
+      path.endsWith(".js") ||
+      path.endsWith(".jsx")
+        ? "JavaScript"
+        : path.endsWith(".ts") ||
+          path.endsWith(".tsx")
+        ? "TypeScript"
+        : "Unknown",
+    total_lines: lines.length,
+    imports,
+    exports,
+    functions,
+    hooks,
+    todos,
+    possible_issues: possibleIssues,
+  };
+}
+
 async function getAuthenticatedSupabase() {
-  const cookieStore = await cookies();
+  const cookieStore =
+    await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -260,7 +325,6 @@ async function getAuthenticatedSupabase() {
         getAll() {
           return cookieStore.getAll();
         },
-
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(
@@ -276,9 +340,7 @@ async function getAuthenticatedSupabase() {
                 );
               }
             );
-          } catch {
-            // لا نحتاج تعديل الكوكيز هنا
-          }
+          } catch {}
         },
       },
     }
@@ -307,44 +369,57 @@ async function appendExecutionLog(
   try {
     const { data: command } =
       await supabaseAdmin
-        .from("ai_employee_commands")
-        .select("execution_log")
-        .eq("id", commandId)
+        .from(
+          "ai_employee_commands"
+        )
+        .select(
+          "execution_log"
+        )
+        .eq(
+          "id",
+          commandId
+        )
         .maybeSingle();
 
     if (!command) return;
 
-    const currentLog = Array.isArray(
-      command.execution_log
-    )
-      ? command.execution_log
-      : [];
-
-    const nextLog = [
-      ...currentLog,
-      {
-        event,
-        at: new Date().toISOString(),
-        ...details,
-      },
-    ];
+    const currentLog =
+      Array.isArray(
+        command.execution_log
+      )
+        ? command.execution_log
+        : [];
 
     await supabaseAdmin
-      .from("ai_employee_commands")
+      .from(
+        "ai_employee_commands"
+      )
       .update({
-        execution_log: nextLog,
-        updated_at: new Date().toISOString(),
+        execution_log: [
+          ...currentLog,
+          {
+            event,
+            at: new Date().toISOString(),
+            ...details,
+          },
+        ],
+        updated_at:
+          new Date().toISOString(),
       })
-      .eq("id", commandId);
-  } catch {
-    // سجل التنفيذ لا يجب أن يمنع العملية الأساسية
-  }
+      .eq(
+        "id",
+        commandId
+      );
+  } catch {}
 }
 
-export async function POST(request) {
+export async function POST(
+  request
+) {
   let commandId = null;
 
-  const supabaseAdmin = createAdminSupabase();
+  const supabaseAdmin =
+    createAdminSupabase();
 
   try {
     const supabaseAuth =
@@ -355,7 +430,8 @@ export async function POST(request) {
         user,
       },
       error: userError,
-    } = await supabaseAuth.auth.getUser();
+    } =
+      await supabaseAuth.auth.getUser();
 
     if (
       userError ||
@@ -364,7 +440,8 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "يجب تسجيل الدخول أولاً",
+          error:
+            "يجب تسجيل الدخول أولاً",
         },
         {
           status: 401,
@@ -372,13 +449,19 @@ export async function POST(request) {
       );
     }
 
-    const { data: profile, error: profileError } =
+    const {
+      data: profile,
+      error: profileError,
+    } =
       await supabaseAdmin
         .from("profiles")
         .select(
           "id, is_super_admin, account_status"
         )
-        .eq("id", user.id)
+        .eq(
+          "id",
+          user.id
+        )
         .maybeSingle();
 
     if (
@@ -397,31 +480,19 @@ export async function POST(request) {
       );
     }
 
-    if (
-      profile.account_status &&
-      profile.account_status !== "active"
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "حساب Super Admin غير نشط",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    const body = await request.json();
+    const body =
+      await request.json();
 
     commandId =
-      body?.command_id || null;
+      body?.command_id ||
+      null;
 
     if (!commandId) {
       return NextResponse.json(
         {
           success: false,
-          error: "command_id مطلوب",
+          error:
+            "command_id مطلوب",
         },
         {
           status: 400,
@@ -432,11 +503,17 @@ export async function POST(request) {
     const {
       data: command,
       error: commandError,
-    } = await supabaseAdmin
-      .from("ai_employee_commands")
-      .select("*")
-      .eq("id", commandId)
-      .maybeSingle();
+    } =
+      await supabaseAdmin
+        .from(
+          "ai_employee_commands"
+        )
+        .select("*")
+        .eq(
+          "id",
+          commandId
+        )
+        .maybeSingle();
 
     if (
       commandError ||
@@ -445,7 +522,8 @@ export async function POST(request) {
       return NextResponse.json(
         {
           success: false,
-          error: "الأمر غير موجود",
+          error:
+            "الأمر غير موجود",
         },
         {
           status: 404,
@@ -455,13 +533,15 @@ export async function POST(request) {
 
     if (
       command.command_type !==
-      "read_project_files"
+        "read_project_files" &&
+      command.command_type !==
+        "analyze_code"
     ) {
       return NextResponse.json(
         {
           success: false,
           error:
-            "هذا النوع من الأوامر غير مربوط بطبقة التنفيذ الحالية",
+            "نوع الأمر غير مدعوم في طبقة التنفيذ الحالية",
         },
         {
           status: 400,
@@ -469,13 +549,17 @@ export async function POST(request) {
       );
     }
 
-    if (command.status !== "running") {
+    if (
+      command.status !==
+      "running"
+    ) {
       return NextResponse.json(
         {
           success: false,
           error:
             "الأمر يجب أن يكون في حالة قيد التنفيذ",
-          status: command.status,
+          status:
+            command.status,
         },
         {
           status: 409,
@@ -490,36 +574,38 @@ export async function POST(request) {
         ? command.requested_capabilities
         : [];
 
+    const requiredCapability =
+      command.command_type ===
+      "analyze_code"
+        ? "analyze_code"
+        : "read_project_files";
+
     if (
       !requestedCapabilities.includes(
-        "read_project_files"
+        requiredCapability
       )
     ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "الأمر لا يطلب صلاحية قراءة الملفات",
-        },
-        {
-          status: 403,
-        }
+      throw new Error(
+        `الأمر لا يطلب الصلاحية المطلوبة: ${requiredCapability}`
       );
     }
 
     const {
       data: employee,
       error: employeeError,
-    } = await supabaseAdmin
-      .from("ai_employees")
-      .select(
-        "id, name, status"
-      )
-      .eq(
-        "id",
-        command.ai_employee_id
-      )
-      .maybeSingle();
+    } =
+      await supabaseAdmin
+        .from(
+          "ai_employees"
+        )
+        .select(
+          "id, name, status"
+        )
+        .eq(
+          "id",
+          command.ai_employee_id
+        )
+        .maybeSingle();
 
     if (
       employeeError ||
@@ -530,33 +616,33 @@ export async function POST(request) {
       );
     }
 
-    if (employee.status !== "active") {
+    if (
+      employee.status !==
+      "active"
+    ) {
       throw new Error(
         "موظف AI غير نشط"
       );
     }
 
-    /*
-      مهم:
-      هنا نستخدم supabaseAuth وليس supabaseAdmin.
-      السبب أن authorize_ai_employee_command
-      يعتمد على auth.uid().
-    */
     const {
       data: authorization,
-      error: authorizationError,
-    } = await supabaseAuth.rpc(
-      "authorize_ai_employee_command",
-      {
-        p_command_id: commandId,
-      }
-    );
+      error:
+        authorizationError,
+    } =
+      await supabaseAuth.rpc(
+        "authorize_ai_employee_command",
+        {
+          p_command_id:
+            commandId,
+        }
+      );
 
-    if (authorizationError) {
+    if (
+      authorizationError
+    ) {
       throw new Error(
-        `فشل التحقق من بوابة الصلاحيات: ${
-          authorizationError.message
-        }`
+        `فشل التحقق من بوابة الصلاحيات: ${authorizationError.message}`
       );
     }
 
@@ -575,97 +661,120 @@ export async function POST(request) {
       "execution_authorized",
       {
         capability:
-          "read_project_files",
-        risk_level:
-          command.risk_level || "low",
+          requiredCapability,
       }
     );
 
     const inputData =
       command.input_data &&
-      typeof command.input_data === "object"
+      typeof command.input_data ===
+        "object"
         ? command.input_data
         : {};
 
-    const requestedPath =
+    const path =
       normalizePath(
         inputData.path || ""
+      );
+
+    if (!path) {
+      throw new Error(
+        "تحليل الكود يحتاج مسار ملف محدد"
+      );
+    }
+
+    await appendExecutionLog(
+      supabaseAdmin,
+      commandId,
+      "github_file_read_started",
+      {
+        repository:
+          `${GITHUB_OWNER}/${GITHUB_REPO}`,
+        branch:
+          GITHUB_BRANCH,
+        path,
+      }
+    );
+
+    const file =
+      await readRepositoryFile(
+        path
       );
 
     await appendExecutionLog(
       supabaseAdmin,
       commandId,
-      "github_read_started",
+      "github_file_read_completed",
       {
-        repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
-        branch: GITHUB_BRANCH,
-        path:
-          requestedPath || "/",
+        path,
+        size:
+          file.size,
       }
     );
 
-    const result =
-      requestedPath
-        ? await readRepositoryFile(
-            requestedPath
-          )
-        : await readRepositoryTree();
+    const analysis =
+      analyzeCodeStructure(
+        file.content,
+        file.path
+      );
 
     await appendExecutionLog(
       supabaseAdmin,
       commandId,
-      "github_read_completed",
+      "code_analysis_completed",
       {
-        repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
-        branch: GITHUB_BRANCH,
-        path:
-          requestedPath || "/",
-        total_files:
-          result.total_files ||
-          undefined,
+        path,
+        total_lines:
+          analysis.total_lines,
+        imports:
+          analysis.imports.length,
+        functions:
+          analysis.functions.length,
+        possible_issues:
+          analysis.possible_issues.length,
       }
     );
 
-    /*
-      أيضاً نستخدم supabaseAuth هنا
-      لأن complete_ai_employee_command
-      يعتمد على auth.uid().
-    */
     const {
       data: completed,
-      error: completeError,
-    } = await supabaseAuth.rpc(
-      "complete_ai_employee_command",
-      {
-        p_command_id: commandId,
-        p_result: requestedPath
-          ? `تمت قراءة الملف ${requestedPath} بنجاح.`
-          : `تمت قراءة هيكل مشروع ${GITHUB_OWNER}/${GITHUB_REPO} بنجاح.`,
-        p_output_data: result,
-      }
-    );
+      error:
+        completeError,
+    } =
+      await supabaseAuth.rpc(
+        "complete_ai_employee_command",
+        {
+          p_command_id:
+            commandId,
+          p_result:
+            `تم تحليل الملف ${path} بنجاح. عدد الأسطر: ${analysis.total_lines}.`,
+          p_output_data:
+            analysis,
+        }
+      );
 
-    if (completeError) {
+    if (
+      completeError
+    ) {
       throw new Error(
-        `تمت قراءة GitHub لكن تعذر إكمال الأمر: ${
-          completeError.message
-        }`
+        `تم التحليل لكن تعذر إكمال الأمر: ${completeError.message}`
       );
     }
 
     return NextResponse.json({
       success: true,
       message:
-        "تمت قراءة مشروع سوق AI بنجاح",
-      command_id: commandId,
+        "تم تحليل الكود بنجاح",
+      command_id:
+        commandId,
       completed: true,
-      result,
-      execution: completed || null,
+      analysis,
+      execution:
+        completed || null,
     });
   } catch (error) {
     const message =
       error?.message ||
-      "حدث خطأ غير متوقع أثناء تنفيذ الأمر";
+      "حدث خطأ غير متوقع";
 
     if (commandId) {
       await appendExecutionLog(
@@ -673,14 +782,11 @@ export async function POST(request) {
         commandId,
         "execution_failed",
         {
-          error: message,
+          error:
+            message,
         }
       );
 
-      /*
-        نستخدم اتصال المستخدم لاحقاً إذا أمكن
-        حتى تعمل auth.uid() داخل RPC.
-      */
       try {
         const supabaseAuth =
           await getAuthenticatedSupabase();
@@ -688,77 +794,25 @@ export async function POST(request) {
         await supabaseAuth.rpc(
           "fail_ai_employee_command",
           {
-            p_command_id: commandId,
-            p_error_message: message,
+            p_command_id:
+              commandId,
+            p_error_message:
+              message,
           }
         );
       } catch {
-        /*
-          إذا فشل RPC أيضاً، نضمن على الأقل
-          تسجيل الخطأ مباشرة عبر service role.
-        */
-
         try {
-          const {
-            data: currentCommand,
-          } = await supabaseAdmin
-            .from(
-              "ai_employee_commands"
-            )
-            .select(
-              "execution_log, started_at"
-            )
-            .eq(
-              "id",
-              commandId
-            )
-            .maybeSingle();
-
-          const log = Array.isArray(
-            currentCommand?.execution_log
-          )
-            ? currentCommand.execution_log
-            : [];
-
-          const startedAt =
-            currentCommand?.started_at
-              ? new Date(
-                  currentCommand.started_at
-                ).getTime()
-              : null;
-
-          const durationSeconds =
-            startedAt
-              ? Math.max(
-                  0,
-                  (
-                    Date.now() -
-                    startedAt
-                  ) / 1000
-                )
-              : 0;
-
           await supabaseAdmin
             .from(
               "ai_employee_commands"
             )
             .update({
-              status: "failed",
-              error_message: message,
+              status:
+                "failed",
+              error_message:
+                message,
               completed_at:
                 new Date().toISOString(),
-              duration_seconds:
-                durationSeconds,
-              execution_log: [
-                ...log,
-                {
-                  event:
-                    "execution_failed",
-                  at: new Date().toISOString(),
-                  error: message,
-                  fallback: true,
-                },
-              ],
               updated_at:
                 new Date().toISOString(),
             })
@@ -766,17 +820,17 @@ export async function POST(request) {
               "id",
               commandId
             );
-        } catch {
-          // لا شيء إضافي
-        }
+        } catch {}
       }
     }
 
     return NextResponse.json(
       {
         success: false,
-        error: message,
-        command_id: commandId,
+        error:
+          message,
+        command_id:
+          commandId,
       },
       {
         status: 500,
