@@ -5,19 +5,51 @@ import { createClient } from "../../../lib/supabase/client";
 
 const supabase = createClient();
 
-const STATUS_LABELS = {
+const GREEN = "#16a34a";
+
+const capabilityLabels = {
+  read_project_files: "قراءة ملفات المشروع",
+  analyze_code: "تحليل الكود",
+  suggest_changes: "اقتراح تعديلات",
+  create_files: "إنشاء ملفات",
+  edit_files: "تعديل الملفات",
+  run_build: "تشغيل Build",
+  run_tests: "تشغيل الاختبارات",
+  database_review: "مراجعة قاعدة البيانات",
+  database_modify: "تعديل قاعدة البيانات",
+  prepare_git_commit: "تجهيز Git Commit",
+  deploy_vercel: "النشر إلى Vercel",
+  rollback: "Rollback",
+};
+
+const riskLabels = {
+  low: "منخفض",
+  medium: "متوسط",
+  high: "مرتفع",
+  critical: "حرج",
+};
+
+const commandTypeLabels = {
+  read_project_files: "قراءة الملفات",
+  analyze_code: "تحليل الكود",
+  suggest_changes: "اقتراح تعديلات",
+  create_files: "إنشاء ملفات",
+  edit_files: "تعديل الملفات",
+  run_build: "تشغيل Build",
+  run_tests: "تشغيل الاختبارات",
+  database_review: "مراجعة قاعدة البيانات",
+  database_modify: "تعديل قاعدة البيانات",
+  prepare_git_commit: "تجهيز Git Commit",
+  deploy_vercel: "النشر إلى Vercel",
+  rollback: "Rollback",
+};
+
+const statusLabels = {
   pending: "معلق",
   running: "قيد التنفيذ",
   completed: "مكتملة",
   failed: "فشلت",
   cancelled: "ملغاة",
-};
-
-const RISK_LABELS = {
-  low: "منخفض",
-  medium: "متوسط",
-  high: "مرتفع",
-  critical: "حرج",
 };
 
 function formatDate(value) {
@@ -26,10 +58,10 @@ function formatDate(value) {
   try {
     return new Date(value).toLocaleString("ar-AE", {
       dateStyle: "short",
-      timeStyle: "short",
+      timeStyle: "medium",
     });
   } catch {
-    return "—";
+    return value;
   }
 }
 
@@ -55,50 +87,143 @@ function formatDuration(seconds) {
   return `${hours}س ${remainingMinutes}د`;
 }
 
-function statusLabel(status) {
-  return STATUS_LABELS[status] || status || "—";
-}
-
-function riskLabel(level) {
-  return RISK_LABELS[level] || level || "—";
-}
-
 function statusClass(status) {
-  if (status === "completed") return "success";
-  if (status === "running") return "running";
-  if (status === "failed") return "danger";
-  if (status === "cancelled") return "muted";
-  return "pending";
+  if (status === "completed") {
+    return {
+      background: "#dcfce7",
+      color: "#166534",
+    };
+  }
+
+  if (status === "running") {
+    return {
+      background: "#ecfdf5",
+      color: "#047857",
+    };
+  }
+
+  if (status === "failed") {
+    return {
+      background: "#fee2e2",
+      color: "#b91c1c",
+    };
+  }
+
+  if (status === "cancelled") {
+    return {
+      background: "#f3f4f6",
+      color: "#4b5563",
+    };
+  }
+
+  return {
+    background: "#fef3c7",
+    color: "#92400e",
+  };
 }
 
-function riskClass(level) {
-  if (level === "critical") return "danger";
-  if (level === "high") return "warning";
-  if (level === "medium") return "medium";
-  return "low";
+function riskClass(risk) {
+  if (risk === "critical") {
+    return {
+      background: "#fee2e2",
+      color: "#991b1b",
+    };
+  }
+
+  if (risk === "high") {
+    return {
+      background: "#ffedd5",
+      color: "#9a3412",
+    };
+  }
+
+  if (risk === "medium") {
+    return {
+      background: "#fef3c7",
+      color: "#92400e",
+    };
+  }
+
+  return {
+    background: "#dcfce7",
+    color: "#166534",
+  };
 }
 
-export default function AIEmployeePage() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [executing, setExecuting] = useState(false);
+function getExecutionButton(command) {
+  if (!command) return null;
 
-  const [profile, setProfile] = useState(null);
-  const [employee, setEmployee] = useState(null);
-  const [capabilities, setCapabilities] = useState([]);
-  const [commands, setCommands] = useState([]);
-  const [approvals, setApprovals] = useState([]);
+  if (
+    command.status !== "running"
+  ) {
+    return null;
+  }
 
-  const [activeTab, setActiveTab] = useState("overview");
+  if (
+    command.command_type ===
+    "read_project_files"
+  ) {
+    return {
+      label: "📂 تنفيذ القراءة",
+      loadingLabel: "📂 جارٍ قراءة المشروع...",
+    };
+  }
 
-  const [commandSearch, setCommandSearch] = useState("");
-  const [commandFilter, setCommandFilter] = useState("all");
+  if (
+    command.command_type ===
+    "analyze_code"
+  ) {
+    return {
+      label: "🔍 تنفيذ التحليل",
+      loadingLabel: "🔍 جارٍ تحليل الكود...",
+    };
+  }
 
-  const [approvalModal, setApprovalModal] = useState(null);
-  const [approvalReason, setApprovalReason] = useState("");
+  return null;
+}
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+export default function SuperAdminAIEmployeePage() {
+  const [loading, setLoading] =
+    useState(true);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [executingCommandId, setExecutingCommandId] =
+    useState(null);
+
+  const [employee, setEmployee] =
+    useState(null);
+
+  const [capabilities, setCapabilities] =
+    useState([]);
+
+  const [commands, setCommands] =
+    useState([]);
+
+  const [approvals, setApprovals] =
+    useState([]);
+
+  const [activeTab, setActiveTab] =
+    useState("overview");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const [commandSearch, setCommandSearch] =
+    useState("");
+
+  const [statusFilter, setStatusFilter] =
+    useState("all");
+
+  const [decisionModal, setDecisionModal] =
+    useState(null);
+
+  const [decisionReason, setDecisionReason] =
+    useState("");
 
   async function loadData() {
     setLoading(true);
@@ -106,44 +231,79 @@ export default function AIEmployeePage() {
 
     try {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: {
+          user,
+        },
+        error: userError,
+      } =
+        await supabase.auth.getUser();
 
-      if (!user) {
-        throw new Error("يجب تسجيل الدخول أولاً");
-      }
-
-      const { data: profileData, error: profileError } =
-        await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", user.id)
-          .maybeSingle();
-
-      if (profileError) throw profileError;
-
-      if (!profileData?.is_super_admin) {
+      if (
+        userError ||
+        !user
+      ) {
         throw new Error(
-          "هذه الصفحة متاحة للـ Super Admin فقط."
+          "يجب تسجيل الدخول أولاً"
         );
       }
 
-      setProfile(profileData);
+      const {
+        data: profile,
+        error: profileError,
+      } =
+        await supabase
+          .from("profiles")
+          .select(
+            "id, is_super_admin, account_status"
+          )
+          .eq(
+            "id",
+            user.id
+          )
+          .maybeSingle();
 
-      const { data: employeeData, error: employeeError } =
+      if (
+        profileError
+      ) {
+        throw profileError;
+      }
+
+      if (
+        !profile?.is_super_admin
+      ) {
+        throw new Error(
+          "هذه الصفحة متاحة للـ Super Admin فقط"
+        );
+      }
+
+      const {
+        data: employeeData,
+        error: employeeError,
+      } =
         await supabase
           .from("ai_employees")
           .select("*")
-          .eq("name", "والم")
+          .eq(
+            "name",
+            "والم"
+          )
           .maybeSingle();
 
-      if (employeeError) throw employeeError;
-
-      if (!employeeData) {
-        throw new Error("موظف AI «والم» غير موجود.");
+      if (
+        employeeError
+      ) {
+        throw employeeError;
       }
 
-      setEmployee(employeeData);
+      if (!employeeData) {
+        throw new Error(
+          "موظف والم غير موجود"
+        );
+      }
+
+      setEmployee(
+        employeeData
+      );
 
       const [
         capabilitiesResult,
@@ -151,57 +311,90 @@ export default function AIEmployeePage() {
         approvalsResult,
       ] = await Promise.all([
         supabase
-          .from("ai_employee_capabilities")
+          .from(
+            "ai_employee_capabilities"
+          )
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
-          .order("created_at", {
-            ascending: true,
-          }),
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
+          .order(
+            "risk_level",
+            {
+              ascending: true,
+            }
+          ),
 
         supabase
-          .from("ai_employee_commands")
+          .from(
+            "ai_employee_commands"
+          )
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
-          .order("created_at", {
-            ascending: false,
-          }),
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false,
+            }
+          ),
 
         supabase
-          .from("ai_employee_approvals")
+          .from(
+            "ai_employee_approvals"
+          )
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
-          .order("created_at", {
-            ascending: false,
-          }),
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
+          .order(
+            "created_at",
+            {
+              ascending: false,
+            }
+          ),
       ]);
 
-      if (capabilitiesResult.error) {
+      if (
+        capabilitiesResult.error
+      ) {
         throw capabilitiesResult.error;
       }
 
-      if (commandsResult.error) {
+      if (
+        commandsResult.error
+      ) {
         throw commandsResult.error;
       }
 
-      if (approvalsResult.error) {
+      if (
+        approvalsResult.error
+      ) {
         throw approvalsResult.error;
       }
 
       setCapabilities(
-        capabilitiesResult.data || []
+        capabilitiesResult.data ||
+          []
       );
 
       setCommands(
-        commandsResult.data || []
+        commandsResult.data ||
+          []
       );
 
       setApprovals(
-        approvalsResult.data || []
+        approvalsResult.data ||
+          []
       );
     } catch (err) {
       setError(
         err?.message ||
-          "حدث خطأ أثناء تحميل صفحة والم."
+          "حدث خطأ أثناء تحميل البيانات"
       );
     } finally {
       setLoading(false);
@@ -216,8 +409,8 @@ export default function AIEmployeePage() {
     if (!employee) return;
 
     setSaving(true);
-    setError("");
     setMessage("");
+    setError("");
 
     try {
       const nextStatus =
@@ -225,710 +418,1255 @@ export default function AIEmployeePage() {
           ? "inactive"
           : "active";
 
-      const { data, error: updateError } =
+      const {
+        error: updateError,
+      } =
         await supabase
           .from("ai_employees")
           .update({
             status: nextStatus,
-            updated_at: new Date().toISOString(),
+            updated_at:
+              new Date().toISOString(),
           })
-          .eq("id", employee.id)
-          .select()
-          .single();
+          .eq(
+            "id",
+            employee.id
+          );
 
-      if (updateError) throw updateError;
+      if (
+        updateError
+      ) {
+        throw updateError;
+      }
 
-      setEmployee(data);
+      setEmployee({
+        ...employee,
+        status: nextStatus,
+      });
 
       setMessage(
         nextStatus === "active"
-          ? "تم تفعيل والم."
-          : "تم إيقاف والم."
+          ? "🟢 تم تفعيل والم"
+          : "🟠 تم إيقاف والم"
       );
     } catch (err) {
       setError(
         err?.message ||
-          "تعذر تغيير حالة الموظف."
+          "تعذر تغيير حالة الموظف"
       );
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleCapability(capability) {
-    setError("");
+  async function toggleCapability(
+    capability
+  ) {
+    setSaving(true);
     setMessage("");
+    setError("");
 
     try {
-      const { data, error: updateError } =
+      const {
+        error: updateError,
+      } =
         await supabase
-          .from("ai_employee_capabilities")
+          .from(
+            "ai_employee_capabilities"
+          )
           .update({
-            enabled: !capability.enabled,
-            updated_at: new Date().toISOString(),
+            enabled:
+              !capability.enabled,
+            updated_at:
+              new Date().toISOString(),
           })
-          .eq("id", capability.id)
-          .select()
-          .single();
+          .eq(
+            "id",
+            capability.id
+          );
 
-      if (updateError) throw updateError;
+      if (
+        updateError
+      ) {
+        throw updateError;
+      }
 
       setCapabilities((current) =>
         current.map((item) =>
           item.id === capability.id
-            ? data
+            ? {
+                ...item,
+                enabled:
+                  !item.enabled,
+              }
             : item
         )
       );
 
       setMessage(
-        `${capability.capability_name}: ${
-          data.enabled
-            ? "تم التفعيل"
-            : "تم التعطيل"
-        }`
+        `تم تحديث صلاحية ${capability.capability_name}`
       );
     } catch (err) {
       setError(
         err?.message ||
-          "تعذر تحديث الصلاحية."
+          "تعذر تحديث الصلاحية"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function startCommand(
+    command
+  ) {
+    if (
+      !command ||
+      command.status !==
+        "pending"
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const {
+        data,
+        error: rpcError,
+      } =
+        await supabase.rpc(
+          "start_ai_employee_command",
+          {
+            p_command_id:
+              command.id,
+          }
+        );
+
+      if (
+        rpcError
+      ) {
+        throw rpcError;
+      }
+
+      if (
+        !data?.success
+      ) {
+        throw new Error(
+          data?.message ||
+            "تعذر بدء الأمر"
+        );
+      }
+
+      setCommands((current) =>
+        current.map((item) =>
+          item.id === command.id
+            ? {
+                ...item,
+                status:
+                  "running",
+                started_at:
+                  new Date().toISOString(),
+              }
+            : item
+        )
+      );
+
+      setMessage(
+        "🟢 تم اجتياز بوابة الأمان وبدأت مرحلة التنفيذ."
+      );
+    } catch (err) {
+      setError(
+        err?.message ||
+          "تعذر بدء الأمر"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function executeCommand(
+    command
+  ) {
+    if (!command) return;
+
+    const executionButton =
+      getExecutionButton(
+        command
+      );
+
+    if (
+      !executionButton
+    ) {
+      return;
+    }
+
+    if (
+      executingCommandId
+    ) {
+      return;
+    }
+
+    setExecutingCommandId(
+      command.id
+    );
+
+    setMessage("");
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/admin/ai-employee/execute",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              command_id:
+                command.id,
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !data?.success
+      ) {
+        throw new Error(
+          data?.error ||
+            "فشل تنفيذ الأمر"
+        );
+      }
+
+      setMessage(
+        command.command_type ===
+          "analyze_code"
+          ? "🟢 تم تحليل كود مشروع سوق AI بنجاح."
+          : "🟢 تمت قراءة هيكل مشروع سوق AI بنجاح."
+      );
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err?.message ||
+          "فشل تنفيذ الأمر"
+      );
+
+      await loadData();
+    } finally {
+      setExecutingCommandId(
+        null
       );
     }
   }
 
-  async function decideApproval(decision) {
-    if (!approvalModal?.id) return;
+  async function decideApproval(
+    decision
+  ) {
+    if (
+      !decisionModal?.approval
+    ) {
+      return;
+    }
 
     setSaving(true);
-    setError("");
     setMessage("");
+    setError("");
 
     try {
-      const functionName =
+      const rpcName =
         decision === "approve"
           ? "approve_ai_employee_command"
           : "reject_ai_employee_command";
 
-      const { data, error: rpcError } =
-        await supabase.rpc(functionName, {
-          p_approval_id: approvalModal.id,
-          p_reason:
-            approvalReason.trim() || null,
-        });
+      const {
+        data,
+        error: rpcError,
+      } =
+        await supabase.rpc(
+          rpcName,
+          {
+            p_approval_id:
+              decisionModal.approval
+                .id,
+            p_reason:
+              decisionReason.trim() ||
+              null,
+          }
+        );
 
-      if (rpcError) throw rpcError;
+      if (
+        rpcError
+      ) {
+        throw rpcError;
+      }
 
-      if (!data?.success) {
+      if (
+        data &&
+        data.success === false
+      ) {
         throw new Error(
-          data?.message ||
-            "تعذر تسجيل القرار."
+          data.message ||
+            "تعذر تنفيذ القرار"
         );
       }
 
-      setApprovalModal(null);
-      setApprovalReason("");
+      setDecisionModal(
+        null
+      );
+
+      setDecisionReason("");
 
       setMessage(
         decision === "approve"
-          ? "تمت الموافقة على الأمر. الموافقة لا تشغّل الأمر تلقائيًا."
-          : "تم رفض الأمر."
+          ? "🟢 تمت الموافقة على الأمر."
+          : "🟠 تم رفض الأمر."
       );
 
       await loadData();
     } catch (err) {
       setError(
         err?.message ||
-          "تعذر تسجيل قرار الموافقة."
+          "تعذر حفظ القرار"
       );
     } finally {
       setSaving(false);
     }
   }
-
-  /*
-   * المرحلة الأولى من التنفيذ:
-   * start_ai_employee_command
-   * ينقل الأمر من pending إلى running
-   * ويمرره عبر بوابة الصلاحيات.
-   */
-  async function startCommand(command) {
-    if (!command?.id) return;
-
-    setSaving(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const { data, error: rpcError } =
-        await supabase.rpc(
-          "start_ai_employee_command",
-          {
-            p_command_id: command.id,
-          }
-        );
-
-      if (rpcError) throw rpcError;
-
-      if (!data?.success) {
-        throw new Error(
-          data?.message ||
-            "تعذر بدء الأمر."
-        );
-      }
-
-      setMessage(
-        "تم اجتياز بوابة الأمان وبدأت مرحلة التنفيذ."
-      );
-
-      await loadData();
-    } catch (err) {
-      setError(
-        err?.message ||
-          "تعذر بدء الأمر."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  /*
-   * التنفيذ الفعلي للصلاحية:
-   * read_project_files فقط.
-   *
-   * هذا الطلب يذهب إلى:
-   * /api/admin/ai-employee/execute
-   *
-   * والـ API يتحقق مرة أخرى من:
-   * - Super Admin
-   * - الأمر
-   * - الصلاحية
-   * - GitHub token
-   * - المسار المسموح
-   *
-   * ثم يقرأ هيكل المشروع ويكمل الأمر.
-   */
-  async function executeCommand(command) {
-    if (!command?.id) return;
-
-    setExecuting(true);
-    setError("");
-    setMessage("");
-
-    try {
-      const response = await fetch(
-        "/api/admin/ai-employee/execute",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            command_id: command.id,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data?.success) {
-        throw new Error(
-          data?.error ||
-            "تعذر تنفيذ الأمر."
-        );
-      }
-
-      setMessage(
-        "🟢 تمت قراءة هيكل مشروع سوق AI بنجاح."
-      );
-
-      await loadData();
-    } catch (err) {
-      setError(
-        err?.message ||
-          "حدث خطأ أثناء تنفيذ القراءة."
-      );
-    } finally {
-      setExecuting(false);
-    }
-  }
-
-  const filteredCommands = useMemo(() => {
-    const search =
-      commandSearch.trim().toLowerCase();
-
-    return commands.filter((command) => {
-      const matchesSearch =
-        !search ||
-        String(command.command || "")
-          .toLowerCase()
-          .includes(search) ||
-        String(command.command_type || "")
-          .toLowerCase()
-          .includes(search);
-
-      const matchesFilter =
-        commandFilter === "all" ||
-        command.status === commandFilter;
-
-      return (
-        matchesSearch &&
-        matchesFilter
-      );
-    });
-  }, [
-    commands,
-    commandSearch,
-    commandFilter,
-  ]);
-
-  const pendingApprovals = approvals.filter(
-    (item) =>
-      item.status === "pending"
-  );
 
   const enabledCapabilities =
-    capabilities.filter(
-      (item) => item.enabled
-    ).length;
+    useMemo(
+      () =>
+        capabilities.filter(
+          (item) =>
+            item.enabled
+        ).length,
+      [capabilities]
+    );
 
-  const completedCommands =
-    commands.filter(
-      (item) =>
-        item.status === "completed"
-    ).length;
+  const pendingApprovals =
+    useMemo(
+      () =>
+        approvals.filter(
+          (item) =>
+            item.status ===
+            "pending"
+        ).length,
+      [approvals]
+    );
 
-  const runningCommands =
-    commands.filter(
-      (item) =>
-        item.status === "running"
-    ).length;
+  const filteredCommands =
+    useMemo(() => {
+      const query =
+        commandSearch
+          .trim()
+          .toLowerCase();
 
-  const failedCommands =
-    commands.filter(
-      (item) =>
-        item.status === "failed"
-    ).length;
+      return commands.filter(
+        (command) => {
+          const matchesSearch =
+            !query ||
+            String(
+              command.command || ""
+            )
+              .toLowerCase()
+              .includes(query) ||
+            String(
+              command.command_type ||
+                ""
+            )
+              .toLowerCase()
+              .includes(query);
+
+          const matchesStatus =
+            statusFilter ===
+              "all" ||
+            command.status ===
+              statusFilter;
+
+          return (
+            matchesSearch &&
+            matchesStatus
+          );
+        }
+      );
+    }, [
+      commands,
+      commandSearch,
+      statusFilter,
+    ]);
 
   if (loading) {
     return (
-      <main className="page">
-        <div className="loading">
-          جارٍ تحميل والم...
-        </div>
-
-        <style jsx>{`
-          .page {
-            min-height: 100vh;
-            background: #f6faf7;
-            padding: 24px;
-            color: #17231b;
-          }
-
-          .loading {
-            max-width: 1200px;
-            margin: 80px auto;
-            background: #fff;
-            border: 1px solid #dce9df;
-            border-radius: 22px;
-            padding: 40px;
-            text-align: center;
-            font-size: 18px;
-          }
-        `}</style>
-      </main>
-    );
-  }
-
-  if (!profile || !employee) {
-    return (
-      <main className="page">
-        <div className="errorBox">
-          {error ||
-            "تعذر تحميل بيانات والم."}
-        </div>
-
-        <style jsx>{`
-          .page {
-            min-height: 100vh;
-            background: #f6faf7;
-            padding: 24px;
-          }
-
-          .errorBox {
-            max-width: 700px;
-            margin: 80px auto;
-            padding: 24px;
-            background: #fff;
-            border: 1px solid #fecaca;
-            color: #991b1b;
-            border-radius: 18px;
-            text-align: center;
-          }
-        `}</style>
+      <main
+        dir="rtl"
+        style={{
+          minHeight:
+            "100vh",
+          background:
+            "#f7faf8",
+          display:
+            "flex",
+          alignItems:
+            "center",
+          justifyContent:
+            "center",
+          fontFamily:
+            "Arial, sans-serif",
+          color:
+            "#166534",
+        }}
+      >
+        جاري تحميل ملف والم...
       </main>
     );
   }
 
   return (
-    <main className="page">
-      <div className="container">
-        <header className="header">
-          <div>
-            <div className="eyebrow">
-              Super Admin AI Employee
+    <main
+      dir="rtl"
+      style={{
+        minHeight:
+          "100vh",
+        background:
+          "#f7faf8",
+        color:
+          "#17221b",
+        fontFamily:
+          "Arial, sans-serif",
+        padding:
+          "24px",
+      }}
+    >
+      <div
+        style={{
+          maxWidth:
+            "1400px",
+          margin:
+            "0 auto",
+        }}
+      >
+        <section
+          style={{
+            background:
+              "#ffffff",
+            border:
+              "1px solid #e5ebe7",
+            borderRadius:
+              "24px",
+            padding:
+              "24px",
+            marginBottom:
+              "18px",
+            boxShadow:
+              "0 8px 30px rgba(0,0,0,.04)",
+          }}
+        >
+          <div
+            style={{
+              display:
+                "flex",
+              justifyContent:
+                "space-between",
+              alignItems:
+                "flex-start",
+              gap:
+                "20px",
+              flexWrap:
+                "wrap",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display:
+                    "flex",
+                  alignItems:
+                    "center",
+                  gap:
+                    "10px",
+                  marginBottom:
+                    "8px",
+                }}
+              >
+                <span
+                  style={{
+                    width:
+                      "12px",
+                    height:
+                      "12px",
+                    borderRadius:
+                      "50%",
+                    background:
+                      GREEN,
+                    display:
+                      "inline-block",
+                  }}
+                />
+
+                <span
+                  style={{
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "14px",
+                  }}
+                >
+                  Super Admin AI Employee
+                </span>
+              </div>
+
+              <h1
+                style={{
+                  margin:
+                    "0 0 8px",
+                  fontSize:
+                    "34px",
+                  lineHeight:
+                    1.2,
+                }}
+              >
+                والم
+              </h1>
+
+              <p
+                style={{
+                  margin:
+                    0,
+                  color:
+                    "#64748b",
+                  fontSize:
+                    "16px",
+                }}
+              >
+                الموظف الذكي المسؤول عن مساعدة إدارة وتشغيل سوق AI.
+              </p>
             </div>
 
-            <h1>
-              والم
-              <span className="onlineDot" />
-            </h1>
+            <div
+              style={{
+                display:
+                  "flex",
+                alignItems:
+                  "center",
+                gap:
+                  "10px",
+                flexWrap:
+                  "wrap",
+              }}
+            >
+              <span
+                style={{
+                  background:
+                    employee?.status ===
+                    "active"
+                      ? "#dcfce7"
+                      : "#f3f4f6",
+                  color:
+                    employee?.status ===
+                    "active"
+                      ? "#166534"
+                      : "#475569",
+                  padding:
+                    "8px 14px",
+                  borderRadius:
+                    "999px",
+                  fontWeight:
+                    700,
+                  fontSize:
+                    "13px",
+                }}
+              >
+                {employee?.status ===
+                "active"
+                  ? "نشط"
+                  : "متوقف"}
+              </span>
 
-            <p>
-              الموظف الذكي المسؤول عن مساعدة
-              إدارة وتشغيل سوق AI.
-            </p>
-          </div>
-
-          <button
-            className={
-              employee.status === "active"
-                ? "statusButton active"
-                : "statusButton inactive"
-            }
-            onClick={toggleEmployeeStatus}
-            disabled={saving}
-          >
-            <span />
-            {employee.status === "active"
-              ? "نشط"
-              : "غير نشط"}
-          </button>
-        </header>
-
-        {(message || error) && (
-          <div
-            className={
-              error
-                ? "alert error"
-                : "alert success"
-            }
-          >
-            {error || message}
-          </div>
-        )}
-
-        <section className="kpis">
-          <div className="kpi">
-            <span>الحالة</span>
-            <strong>
-              {employee.status === "active"
-                ? "نشط"
-                : "غير نشط"}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>الصلاحيات المفعلة</span>
-            <strong>
-              {enabledCapabilities}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>الأوامر</span>
-            <strong>
-              {commands.length}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>مكتملة</span>
-            <strong>
-              {completedCommands}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>قيد التنفيذ</span>
-            <strong>
-              {runningCommands}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>فشلت</span>
-            <strong>
-              {failedCommands}
-            </strong>
-          </div>
-
-          <div className="kpi">
-            <span>موافقات معلقة</span>
-            <strong>
-              {pendingApprovals.length}
-            </strong>
+              <button
+                onClick={
+                  toggleEmployeeStatus
+                }
+                disabled={
+                  saving
+                }
+                style={{
+                  border:
+                    "1px solid #dbe5de",
+                  background:
+                    "#fff",
+                  color:
+                    "#166534",
+                  borderRadius:
+                    "12px",
+                  padding:
+                    "10px 14px",
+                  cursor:
+                    saving
+                      ? "not-allowed"
+                      : "pointer",
+                  fontWeight:
+                    700,
+                }}
+              >
+                {employee?.status ===
+                "active"
+                  ? "إيقاف الموظف"
+                  : "تفعيل الموظف"}
+              </button>
+            </div>
           </div>
         </section>
 
-        <nav className="tabs">
-          <button
-            className={
-              activeTab === "overview"
-                ? "tab active"
-                : "tab"
-            }
-            onClick={() =>
-              setActiveTab("overview")
-            }
+        {message && (
+          <div
+            style={{
+              background:
+                "#ecfdf5",
+              border:
+                "1px solid #bbf7d0",
+              color:
+                "#166534",
+              borderRadius:
+                "14px",
+              padding:
+                "13px 16px",
+              marginBottom:
+                "14px",
+              fontWeight:
+                700,
+            }}
           >
-            نظرة عامة
-          </button>
+            {message}
+          </div>
+        )}
 
-          <button
-            className={
-              activeTab === "capabilities"
-                ? "tab active"
-                : "tab"
-            }
-            onClick={() =>
-              setActiveTab("capabilities")
-            }
+        {error && (
+          <div
+            style={{
+              background:
+                "#fef2f2",
+              border:
+                "1px solid #fecaca",
+              color:
+                "#991b1b",
+              borderRadius:
+                "14px",
+              padding:
+                "13px 16px",
+              marginBottom:
+                "14px",
+              fontWeight:
+                700,
+            }}
           >
-            الصلاحيات
-          </button>
+            {error}
+          </div>
+        )}
 
-          <button
-            className={
-              activeTab === "commands"
-                ? "tab active"
-                : "tab"
-            }
-            onClick={() =>
-              setActiveTab("commands")
-            }
+        <section
+          style={{
+            display:
+              "grid",
+            gridTemplateColumns:
+              "repeat(4, minmax(0, 1fr))",
+            gap:
+              "12px",
+            marginBottom:
+              "18px",
+          }}
+        >
+          {[
+            [
+              "الصلاحيات المفعلة",
+              enabledCapabilities,
+            ],
+            [
+              "الأوامر",
+              commands.length,
+            ],
+            [
+              "مكتملة",
+              commands.filter(
+                (c) =>
+                  c.status ===
+                  "completed"
+              ).length,
+            ],
+            [
+              "قيد التنفيذ",
+              commands.filter(
+                (c) =>
+                  c.status ===
+                  "running"
+              ).length,
+            ],
+          ].map(
+            ([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e5ebe7",
+                  borderRadius:
+                    "18px",
+                  padding:
+                    "18px",
+                }}
+              >
+                <div
+                  style={{
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "13px",
+                    marginBottom:
+                      "7px",
+                  }}
+                >
+                  {label}
+                </div>
+
+                <strong
+                  style={{
+                    fontSize:
+                      "27px",
+                  }}
+                >
+                  {value}
+                </strong>
+              </div>
+            )
+          )}
+        </section>
+
+        <section
+          style={{
+            background:
+              "#fff",
+            border:
+              "1px solid #e5ebe7",
+            borderRadius:
+              "20px",
+            padding:
+              "8px",
+            marginBottom:
+              "18px",
+            display:
+              "flex",
+            gap:
+              "6px",
+            overflowX:
+              "auto",
+          }}
+        >
+          {[
+            ["overview", "نظرة عامة"],
+            ["capabilities", "الصلاحيات"],
+            ["commands", "الأوامر"],
+            ["approvals", "الموافقات"],
+            [
+              "instructions",
+              "الشخصية والتعليمات",
+            ],
+          ].map(
+            ([key, label]) => (
+              <button
+                key={key}
+                onClick={() =>
+                  setActiveTab(
+                    key
+                  )
+                }
+                style={{
+                  border:
+                    "none",
+                  background:
+                    activeTab ===
+                    key
+                      ? "#dcfce7"
+                      : "transparent",
+                  color:
+                    activeTab ===
+                    key
+                      ? "#166534"
+                      : "#64748b",
+                  padding:
+                    "11px 16px",
+                  borderRadius:
+                    "12px",
+                  cursor:
+                    "pointer",
+                  fontWeight:
+                    700,
+                  whiteSpace:
+                    "nowrap",
+                }}
+              >
+                {label}
+              </button>
+            )
+          )}
+        </section>
+
+        {activeTab ===
+          "overview" && (
+          <section
+            style={{
+              display:
+                "grid",
+              gridTemplateColumns:
+                "minmax(0, 1.4fr) minmax(300px, .6fr)",
+              gap:
+                "18px",
+            }}
           >
-            الأوامر
-          </button>
+            <div
+              style={{
+                background:
+                  "#fff",
+                border:
+                  "1px solid #e5ebe7",
+                borderRadius:
+                  "20px",
+                padding:
+                  "22px",
+              }}
+            >
+              <h2
+                style={{
+                  margin:
+                    "0 0 18px",
+                  fontSize:
+                    "21px",
+                }}
+              >
+                ملف الموظف
+              </h2>
 
-          <button
-            className={
-              activeTab === "approvals"
-                ? "tab active"
-                : "tab"
-            }
-            onClick={() =>
-              setActiveTab("approvals")
-            }
-          >
-            الموافقات
-          </button>
+              <div
+                style={{
+                  display:
+                    "grid",
+                  gridTemplateColumns:
+                    "repeat(2, minmax(0, 1fr))",
+                  gap:
+                    "14px",
+                }}
+              >
+                {[
+                  [
+                    "الاسم",
+                    employee?.name ||
+                      "والم",
+                  ],
+                  [
+                    "التخصص",
+                    employee?.specialization ||
+                      "مساعد إدارة وتشغيل سوق AI",
+                  ],
+                  [
+                    "المستوى",
+                    employee?.level ||
+                      "lead",
+                  ],
+                  [
+                    "النبرة",
+                    employee?.tone ||
+                      "إماراتية احترافية وودية",
+                  ],
+                  [
+                    "آخر نشاط",
+                    formatDate(
+                      employee?.last_active_at
+                    ),
+                  ],
+                  [
+                    "المهام المكتملة",
+                    employee?.tasks_completed ||
+                      0,
+                  ],
+                ].map(
+                  ([label, value]) => (
+                    <div
+                      key={label}
+                      style={{
+                        border:
+                          "1px solid #edf1ee",
+                        borderRadius:
+                          "14px",
+                        padding:
+                          "14px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color:
+                            "#64748b",
+                          fontSize:
+                            "12px",
+                          marginBottom:
+                            "6px",
+                        }}
+                      >
+                        {label}
+                      </div>
 
-          <button
-            className={
-              activeTab === "instructions"
-                ? "tab active"
-                : "tab"
-            }
-            onClick={() =>
-              setActiveTab("instructions")
-            }
-          >
-            الشخصية والتعليمات
-          </button>
-        </nav>
-
-        {activeTab === "overview" && (
-          <section className="grid">
-            <div className="card">
-              <div className="cardTitle">
-                <h2>ملف الموظف</h2>
+                      <div
+                        style={{
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {value}
+                      </div>
+                    </div>
+                  )
+                )}
               </div>
 
-              <div className="profileHero">
-                <div className="avatar">
-                  والم
-                </div>
-
-                <div>
-                  <h3>{employee.name}</h3>
-
-                  <p>
-                    {employee.specialization ||
-                      "مساعد إدارة وتشغيل سوق AI"}
-                  </p>
-
-                  <div className="badges">
-                    <span className="badge green">
-                      {employee.level ||
-                        "lead"}
-                    </span>
-
-                    <span className="badge">
-                      {employee.tone ||
-                        "إماراتي عملي"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="infoList">
-                <div>
-                  <span>الوصف</span>
-                  <strong>
-                    {employee.description ||
-                      "مساعد داخلي لإدارة وتشغيل سوق AI."}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>آخر نشاط</span>
-                  <strong>
-                    {formatDate(
-                      employee.last_active_at
-                    )}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>المهام المكتملة</span>
-                  <strong>
-                    {employee.tasks_completed ||
-                      0}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>نسبة النجاح</span>
-                  <strong>
-                    {Number(
-                      employee.success_rate || 0
-                    ).toFixed(0)}
-                    %
-                  </strong>
-                </div>
+              <div
+                style={{
+                  marginTop:
+                    "16px",
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
+                  lineHeight:
+                    1.8,
+                  color:
+                    "#475569",
+                }}
+              >
+                {employee?.description ||
+                  "مساعد AI داخلي لسوق AI، يساعد في إدارة وتشغيل المنصة ومتابعة المهام والأقسام وتحليل العمل."}
               </div>
             </div>
 
-            <div className="card">
-              <div className="cardTitle">
-                <h2>حالة الأمان</h2>
+            <div
+              style={{
+                background:
+                  "#fff",
+                border:
+                  "1px solid #e5ebe7",
+                borderRadius:
+                  "20px",
+                padding:
+                  "22px",
+              }}
+            >
+              <h2
+                style={{
+                  margin:
+                    "0 0 18px",
+                  fontSize:
+                    "21px",
+                }}
+              >
+                حالة الأمان
+              </h2>
+
+              <div
+                style={{
+                  background:
+                    "#ecfdf5",
+                  border:
+                    "1px solid #bbf7d0",
+                  borderRadius:
+                    "16px",
+                  padding:
+                    "18px",
+                  color:
+                    "#166534",
+                  lineHeight:
+                    1.8,
+                }}
+              >
+                <strong>
+                  ✓ بوابة التنفيذ مفعلة
+                </strong>
+
+                <div
+                  style={{
+                    marginTop:
+                      "8px",
+                    fontSize:
+                      "14px",
+                  }}
+                >
+                  كل أمر يمر عبر الصلاحيات والموافقة قبل الوصول إلى طبقة التنفيذ.
+                </div>
               </div>
 
-              <div className="securityBox">
-                <div className="securityIcon">
-                  ✓
-                </div>
+              <div
+                style={{
+                  marginTop:
+                    "14px",
+                  display:
+                    "grid",
+                  gap:
+                    "8px",
+                }}
+              >
+                {[
+                  [
+                    "قراءة الملفات",
+                    true,
+                  ],
+                  [
+                    "تعديل الملفات",
+                    false,
+                  ],
+                  [
+                    "قاعدة البيانات",
+                    false,
+                  ],
+                  [
+                    "Deploy",
+                    false,
+                  ],
+                  [
+                    "Rollback",
+                    false,
+                  ],
+                ].map(
+                  ([label, enabled]) => (
+                    <div
+                      key={label}
+                      style={{
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        alignItems:
+                          "center",
+                        padding:
+                          "10px 12px",
+                        borderBottom:
+                          "1px solid #f1f5f2",
+                      }}
+                    >
+                      <span>
+                        {label}
+                      </span>
 
-                <div>
-                  <strong>
-                    بوابة التنفيذ مفعلة
-                  </strong>
-
-                  <p>
-                    كل أمر يمر عبر الصلاحيات
-                    والموافقة قبل الوصول إلى
-                    طبقة التنفيذ.
-                  </p>
-                </div>
-              </div>
-
-              <div className="securityRules">
-                <div>
-                  <span>قراءة الملفات</span>
-                  <b className="allowed">
-                    مسموح
-                  </b>
-                </div>
-
-                <div>
-                  <span>تعديل الملفات</span>
-                  <b>يتطلب موافقة</b>
-                </div>
-
-                <div>
-                  <span>قاعدة البيانات</span>
-                  <b>مقيد</b>
-                </div>
-
-                <div>
-                  <span>Deploy</span>
-                  <b>مقيد</b>
-                </div>
-
-                <div>
-                  <span>Rollback</span>
-                  <b>مقيد</b>
-                </div>
+                      <span
+                        style={{
+                          color:
+                            enabled
+                              ? "#16a34a"
+                              : "#64748b",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {enabled
+                          ? "مسموح"
+                          : "مقيد"}
+                      </span>
+                    </div>
+                  )
+                )}
               </div>
             </div>
           </section>
         )}
 
-        {activeTab === "capabilities" && (
-          <section className="card">
-            <div className="cardTitle">
-              <div>
-                <h2>صلاحيات والم</h2>
-                <p>
-                  كل صلاحية مستقلة ويمكن تعطيلها
-                  بدون تعطيل الموظف بالكامل.
-                </p>
-              </div>
-            </div>
+        {activeTab ===
+          "capabilities" && (
+          <section
+            style={{
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
+          >
+            <h2
+              style={{
+                margin:
+                  "0 0 8px",
+              }}
+            >
+              صلاحيات والم
+            </h2>
 
-            <div className="capabilities">
+            <p
+              style={{
+                margin:
+                  "0 0 20px",
+                color:
+                  "#64748b",
+              }}
+            >
+              كل صلاحية مستقلة ويمكن تعطيلها بدون تعطيل الموظف بالكامل.
+            </p>
+
+            <div
+              style={{
+                display:
+                  "grid",
+                gap:
+                  "10px",
+              }}
+            >
               {capabilities.map(
                 (capability) => (
                   <div
-                    className="capability"
-                    key={capability.id}
+                    key={
+                      capability.id
+                    }
+                    style={{
+                      border:
+                        "1px solid #e5ebe7",
+                      borderRadius:
+                        "16px",
+                      padding:
+                        "16px",
+                      display:
+                        "flex",
+                      alignItems:
+                        "center",
+                      justifyContent:
+                        "space-between",
+                      gap:
+                        "16px",
+                      flexWrap:
+                        "wrap",
+                    }}
                   >
-                    <div>
-                      <div className="capName">
+                    <div
+                      style={{
+                        flex:
+                          1,
+                        minWidth:
+                          "240px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display:
+                            "flex",
+                          alignItems:
+                            "center",
+                          gap:
+                            "8px",
+                          marginBottom:
+                            "5px",
+                        }}
+                      >
                         <strong>
-                          {
-                            capability.capability_name
-                          }
+                          {capability.capability_name ||
+                            capabilityLabels[
+                              capability
+                                .capability_key
+                            ] ||
+                            capability.capability_key}
                         </strong>
 
                         <span
-                          className={`risk ${riskClass(
-                            capability.risk_level
-                          )}`}
+                          style={{
+                            ...riskClass(
+                              capability.risk_level
+                            ),
+                            padding:
+                              "4px 8px",
+                            borderRadius:
+                              "999px",
+                            fontSize:
+                              "11px",
+                            fontWeight:
+                              700,
+                          }}
                         >
-                          {riskLabel(
+                          {riskLabels[
                             capability.risk_level
-                          )}
+                          ] ||
+                            capability.risk_level}
                         </span>
                       </div>
 
-                      <p>
+                      <div
+                        style={{
+                          color:
+                            "#64748b",
+                          fontSize:
+                            "13px",
+                        }}
+                      >
                         {capability.description ||
-                          capability.capability_key}
-                      </p>
+                          ""}
+                      </div>
 
-                      <small>
+                      <div
+                        style={{
+                          marginTop:
+                            "7px",
+                          color:
+                            capability.requires_approval
+                              ? "#92400e"
+                              : "#166534",
+                          fontSize:
+                            "12px",
+                          fontWeight:
+                            700,
+                        }}
+                      >
                         {capability.requires_approval
                           ? "تحتاج موافقة قبل التنفيذ"
                           : "لا تحتاج موافقة"}
-                      </small>
+                      </div>
                     </div>
 
                     <button
-                      className={
-                        capability.enabled
-                          ? "toggle on"
-                          : "toggle"
-                      }
                       onClick={() =>
                         toggleCapability(
                           capability
                         )
                       }
-                      disabled={saving}
-                      aria-label={`تفعيل ${capability.capability_name}`}
+                      disabled={
+                        saving
+                      }
+                      style={{
+                        border:
+                          "none",
+                        background:
+                          capability.enabled
+                            ? "#16a34a"
+                            : "#cbd5e1",
+                        color:
+                          "#fff",
+                        borderRadius:
+                          "999px",
+                        padding:
+                          "9px 16px",
+                        cursor:
+                          saving
+                            ? "not-allowed"
+                            : "pointer",
+                        fontWeight:
+                          700,
+                      }}
                     >
-                      <span />
+                      {capability.enabled
+                        ? "مفعلة"
+                        : "معطلة"}
                     </button>
                   </div>
                 )
@@ -937,210 +1675,354 @@ export default function AIEmployeePage() {
           </section>
         )}
 
-        {activeTab === "commands" && (
-          <section className="card">
-            <div className="cardTitle commandHeader">
+        {activeTab ===
+          "commands" && (
+          <section
+            style={{
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
+          >
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                gap:
+                  "12px",
+                flexWrap:
+                  "wrap",
+                marginBottom:
+                  "18px",
+              }}
+            >
               <div>
-                <h2>أوامر والم</h2>
-                <p>
+                <h2
+                  style={{
+                    margin:
+                      "0 0 6px",
+                  }}
+                >
+                  أوامر والم
+                </h2>
+
+                <p
+                  style={{
+                    margin:
+                      0,
+                    color:
+                      "#64748b",
+                  }}
+                >
                   سجل الأوامر وحالات تنفيذها.
                 </p>
               </div>
 
-              <div className="commandStats">
-                <span>
-                  {commands.length} أمر
-                </span>
+              <div
+                style={{
+                  display:
+                    "flex",
+                  gap:
+                    "8px",
+                  flexWrap:
+                    "wrap",
+                }}
+              >
+                <input
+                  value={
+                    commandSearch
+                  }
+                  onChange={(e) =>
+                    setCommandSearch(
+                      e.target.value
+                    )
+                  }
+                  placeholder="بحث في الأوامر..."
+                  style={{
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    outline:
+                      "none",
+                    minWidth:
+                      "220px",
+                  }}
+                />
+
+                <select
+                  value={
+                    statusFilter
+                  }
+                  onChange={(e) =>
+                    setStatusFilter(
+                      e.target.value
+                    )
+                  }
+                  style={{
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    background:
+                      "#fff",
+                  }}
+                >
+                  <option value="all">
+                    كل الحالات
+                  </option>
+                  <option value="pending">
+                    معلق
+                  </option>
+                  <option value="running">
+                    قيد التنفيذ
+                  </option>
+                  <option value="completed">
+                    مكتملة
+                  </option>
+                  <option value="failed">
+                    فشلت
+                  </option>
+                  <option value="cancelled">
+                    ملغاة
+                  </option>
+                </select>
               </div>
             </div>
 
-            <div className="filters">
-              <input
-                value={commandSearch}
-                onChange={(event) =>
-                  setCommandSearch(
-                    event.target.value
-                  )
-                }
-                placeholder="بحث في الأوامر..."
-              />
-
-              <select
-                value={commandFilter}
-                onChange={(event) =>
-                  setCommandFilter(
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  كل الحالات
-                </option>
-                <option value="pending">
-                  معلقة
-                </option>
-                <option value="running">
-                  قيد التنفيذ
-                </option>
-                <option value="completed">
-                  مكتملة
-                </option>
-                <option value="failed">
-                  فشلت
-                </option>
-                <option value="cancelled">
-                  ملغاة
-                </option>
-              </select>
-            </div>
-
-            <div className="commands">
-              {filteredCommands.length === 0 ? (
-                <div className="empty">
+            <div
+              style={{
+                display:
+                  "grid",
+                gap:
+                  "14px",
+              }}
+            >
+              {filteredCommands.length ===
+                0 && (
+                <div
+                  style={{
+                    padding:
+                      "30px",
+                    textAlign:
+                      "center",
+                    color:
+                      "#64748b",
+                    background:
+                      "#f8faf9",
+                    borderRadius:
+                      "16px",
+                  }}
+                >
                   لا توجد أوامر.
                 </div>
-              ) : (
-                filteredCommands.map(
-                  (command) => {
-                    const isReadProjectFiles =
-                      command.command_type ===
-                      "read_project_files";
+              )}
 
-                    const canExecute =
-                      command.status ===
-                        "running" &&
-                      isReadProjectFiles &&
-                      !executing;
+              {filteredCommands.map(
+                (command) => {
+                  const button =
+                    getExecutionButton(
+                      command
+                    );
 
-                    return (
-                      <article
-                        className="command"
-                        key={command.id}
+                  const isExecuting =
+                    executingCommandId ===
+                    command.id;
+
+                  return (
+                    <article
+                      key={
+                        command.id
+                      }
+                      style={{
+                        border:
+                          "1px solid #e5ebe7",
+                        borderRadius:
+                          "18px",
+                        padding:
+                          "18px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          gap:
+                            "15px",
+                          flexWrap:
+                            "wrap",
+                        }}
                       >
-                        <div className="commandMain">
-                          <div className="commandTop">
-                            <h3>
+                        <div
+                          style={{
+                            flex:
+                              1,
+                            minWidth:
+                              "260px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "8px",
+                              flexWrap:
+                                "wrap",
+                              marginBottom:
+                                "8px",
+                            }}
+                          >
+                            <strong
+                              style={{
+                                fontSize:
+                                  "18px",
+                              }}
+                            >
                               {command.command}
-                            </h3>
+                            </strong>
 
                             <span
-                              className={`status ${statusClass(
-                                command.status
-                              )}`}
+                              style={{
+                                ...statusClass(
+                                  command.status
+                                ),
+                                padding:
+                                  "5px 9px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
+                              }}
                             >
-                              {statusLabel(
+                              {statusLabels[
                                 command.status
-                              )}
+                              ] ||
+                                command.status}
                             </span>
 
                             <span
-                              className={`risk ${riskClass(
-                                command.risk_level
-                              )}`}
+                              style={{
+                                ...riskClass(
+                                  command.risk_level
+                                ),
+                                padding:
+                                  "5px 9px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
+                              }}
                             >
-                              {riskLabel(
+                              {riskLabels[
                                 command.risk_level
-                              )}
+                              ] ||
+                                command.risk_level}
                             </span>
                           </div>
 
-                          <div className="commandMeta">
+                          <div
+                            style={{
+                              color:
+                                "#64748b",
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            {formatDate(
+                              command.created_at
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              gap:
+                                "14px",
+                              flexWrap:
+                                "wrap",
+                              marginTop:
+                                "12px",
+                              fontSize:
+                                "13px",
+                              color:
+                                "#475569",
+                            }}
+                          >
                             <span>
-                              {formatDate(
-                                command.created_at
-                              )}
+                              النوع:{" "}
+                              <strong>
+                                {commandTypeLabels[
+                                  command.command_type
+                                ] ||
+                                  command.command_type}
+                              </strong>
                             </span>
 
                             <span>
                               النقاط{" "}
-                              {Number(
-                                command.points_cost ||
-                                  0
-                              ).toFixed(0)}
+                              <strong>
+                                {command.points_cost ||
+                                  0}
+                              </strong>
                             </span>
 
                             <span>
-                              التكلفة $
-                              {Number(
-                                command.actual_cost ||
-                                  command.estimated_cost ||
-                                  0
-                              ).toFixed(4)}
+                              التكلفة{" "}
+                              <strong>
+                                $
+                                {Number(
+                                  command.actual_cost ||
+                                    command.estimated_cost ||
+                                    0
+                                ).toFixed(4)}
+                              </strong>
                             </span>
 
                             <span>
                               المدة{" "}
-                              {formatDuration(
-                                command.duration_seconds
-                              )}
+                              <strong>
+                                {formatDuration(
+                                  command.duration_seconds
+                                )}
+                              </strong>
                             </span>
                           </div>
-
-                          {command.error_message && (
-                            <div className="commandError">
-                              {command.error_message}
-                            </div>
-                          )}
-
-                          {command.result && (
-                            <div className="resultBox">
-                              <strong>
-                                النتيجة
-                              </strong>
-
-                              <p>
-                                {command.result}
-                              </p>
-                            </div>
-                          )}
-
-                          {Array.isArray(
-                            command.execution_log
-                          ) &&
-                            command.execution_log
-                              .length > 0 && (
-                              <div className="timeline">
-                                <strong>
-                                  سجل التنفيذ
-                                </strong>
-
-                                {command.execution_log.map(
-                                  (
-                                    item,
-                                    index
-                                  ) => (
-                                    <div
-                                      className="timelineItem"
-                                      key={`${command.id}-${index}`}
-                                    >
-                                      <span className="timelineDot" />
-
-                                      <div>
-                                        <b>
-                                          {
-                                            item.event
-                                          }
-                                        </b>
-
-                                        <small>
-                                          {formatDate(
-                                            item.at ||
-                                              item.created_at
-                                          )}
-                                        </small>
-                                      </div>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            )}
                         </div>
 
-                        <div className="commandActions">
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap:
+                              "8px",
+                          }}
+                        >
                           {command.status ===
                             "pending" && (
                             <button
-                              className="primaryButton"
                               onClick={() =>
                                 startCommand(
                                   command
@@ -1148,1152 +2030,736 @@ export default function AIEmployeePage() {
                               }
                               disabled={
                                 saving ||
-                                executing
+                                employee?.status !==
+                                  "active"
                               }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  GREEN,
+                                color:
+                                  "#fff",
+                                borderRadius:
+                                  "12px",
+                                padding:
+                                  "11px 16px",
+                                cursor:
+                                  saving
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontWeight:
+                                  700,
+                              }}
                             >
                               ▶ بدء التنفيذ
                             </button>
                           )}
 
-                          {canExecute && (
+                          {button && (
                             <button
-                              className="executeButton"
                               onClick={() =>
                                 executeCommand(
                                   command
                                 )
                               }
                               disabled={
-                                executing
+                                isExecuting ||
+                                executingCommandId !==
+                                  null
                               }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  "#166534",
+                                color:
+                                  "#fff",
+                                borderRadius:
+                                  "12px",
+                                padding:
+                                  "11px 16px",
+                                cursor:
+                                  isExecuting
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontWeight:
+                                  700,
+                              }}
                             >
-                              {executing
-                                ? "⏳ جارٍ قراءة المشروع..."
-                                : "📂 تنفيذ القراءة"}
+                              {isExecuting
+                                ? button.loadingLabel
+                                : button.label}
                             </button>
                           )}
-
-                          {command.status ===
-                            "running" &&
-                            !isReadProjectFiles && (
-                              <span className="waiting">
-                                التنفيذ الفعلي لهذه
-                                الصلاحية لم يُربط
-                                بعد.
-                              </span>
-                            )}
-
-                          {command.status ===
-                            "completed" && (
-                            <span className="completedText">
-                              ✓ تم التنفيذ
-                            </span>
-                          )}
-
-                          {command.status ===
-                            "failed" && (
-                            <span className="failedText">
-                              ✕ فشل التنفيذ
-                            </span>
-                          )}
                         </div>
-                      </article>
-                    );
-                  }
-                )
+                      </div>
+
+                      {command.result && (
+                        <div
+                          style={{
+                            marginTop:
+                              "15px",
+                            padding:
+                              "14px",
+                            background:
+                              "#f0fdf4",
+                            border:
+                              "1px solid #dcfce7",
+                            borderRadius:
+                              "14px",
+                            color:
+                              "#166534",
+                          }}
+                        >
+                          <strong>
+                            النتيجة
+                          </strong>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "7px",
+                              whiteSpace:
+                                "pre-wrap",
+                              lineHeight:
+                                1.7,
+                            }}
+                          >
+                            {
+                              command.result
+                            }
+                          </div>
+                        </div>
+                      )}
+
+                      {command.error_message && (
+                        <div
+                          style={{
+                            marginTop:
+                              "15px",
+                            padding:
+                              "14px",
+                            background:
+                              "#fef2f2",
+                            border:
+                              "1px solid #fecaca",
+                            borderRadius:
+                              "14px",
+                            color:
+                              "#991b1b",
+                          }}
+                        >
+                          <strong>
+                            الخطأ
+                          </strong>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "7px",
+                            }}
+                          >
+                            {
+                              command.error_message
+                            }
+                          </div>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          marginTop:
+                            "15px",
+                          paddingTop:
+                            "14px",
+                          borderTop:
+                            "1px solid #eef2ef",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight:
+                              700,
+                            marginBottom:
+                              "8px",
+                          }}
+                        >
+                          سجل التنفيذ
+                        </div>
+
+                        {Array.isArray(
+                          command.execution_log
+                        ) &&
+                        command.execution_log
+                          .length > 0 ? (
+                          <div
+                            style={{
+                              display:
+                                "grid",
+                              gap:
+                                "6px",
+                            }}
+                          >
+                            {command.execution_log.map(
+                              (
+                                item,
+                                index
+                              ) => (
+                                <div
+                                  key={
+                                    `${command.id}-${index}`
+                                  }
+                                  style={{
+                                    display:
+                                      "flex",
+                                    justifyContent:
+                                      "space-between",
+                                    gap:
+                                      "10px",
+                                    background:
+                                      "#f8faf9",
+                                    padding:
+                                      "9px 11px",
+                                    borderRadius:
+                                      "10px",
+                                    fontSize:
+                                      "12px",
+                                  }}
+                                >
+                                  <strong>
+                                    {
+                                      item.event
+                                    }
+                                  </strong>
+
+                                  <span
+                                    style={{
+                                      color:
+                                        "#64748b",
+                                    }}
+                                  >
+                                    {formatDate(
+                                      item.at
+                                    )}
+                                  </span>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              color:
+                                "#94a3b8",
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            لا يوجد سجل حتى الآن
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                }
               )}
             </div>
           </section>
         )}
 
-        {activeTab === "approvals" && (
-          <section className="card">
-            <div className="cardTitle">
+        {activeTab ===
+          "approvals" && (
+          <section
+            style={{
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
+          >
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+                gap:
+                  "12px",
+                flexWrap:
+                  "wrap",
+                marginBottom:
+                  "18px",
+              }}
+            >
               <div>
-                <h2>موافقات والم</h2>
-                <p>
-                  الموافقة تسمح بالتنفيذ فقط،
-                  ولا تشغّل الأمر تلقائيًا.
+                <h2
+                  style={{
+                    margin:
+                      "0 0 6px",
+                  }}
+                >
+                  الموافقات
+                </h2>
+
+                <p
+                  style={{
+                    margin:
+                      0,
+                    color:
+                      "#64748b",
+                  }}
+                >
+                  الأوامر التي تحتاج قرار Super Admin قبل التنفيذ.
                 </p>
               </div>
+
+              <span
+                style={{
+                  background:
+                    pendingApprovals >
+                    0
+                      ? "#fef3c7"
+                      : "#dcfce7",
+                  color:
+                    pendingApprovals >
+                    0
+                      ? "#92400e"
+                      : "#166534",
+                  padding:
+                    "8px 12px",
+                  borderRadius:
+                    "999px",
+                  fontWeight:
+                    700,
+                }}
+              >
+                {pendingApprovals} موافقات معلقة
+              </span>
             </div>
 
-            {approvals.length === 0 ? (
-              <div className="empty">
-                لا توجد طلبات موافقة.
-              </div>
-            ) : (
-              <div className="approvals">
-                {approvals.map(
-                  (approval) => (
+            <div
+              style={{
+                display:
+                  "grid",
+                gap:
+                  "12px",
+              }}
+            >
+              {approvals.length ===
+                0 && (
+                <div
+                  style={{
+                    padding:
+                      "30px",
+                    textAlign:
+                      "center",
+                    color:
+                      "#64748b",
+                    background:
+                      "#f8faf9",
+                    borderRadius:
+                      "16px",
+                  }}
+                >
+                  لا توجد موافقات حالياً.
+                </div>
+              )}
+
+              {approvals.map(
+                (approval) => (
+                  <div
+                    key={
+                      approval.id
+                    }
+                    style={{
+                      border:
+                        "1px solid #e5ebe7",
+                      borderRadius:
+                        "16px",
+                      padding:
+                        "16px",
+                    }}
+                  >
                     <div
-                      className="approval"
-                      key={approval.id}
+                      style={{
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        gap:
+                          "12px",
+                        flexWrap:
+                          "wrap",
+                      }}
                     >
                       <div>
-                        <div className="approvalTop">
-                          <strong>
-                            {approval.status ===
-                            "pending"
-                              ? "طلب موافقة"
-                              : approval.decision ===
-                                "approved"
-                              ? "تمت الموافقة"
-                              : "تم الرفض"}
-                          </strong>
+                        <strong>
+                          طلب موافقة
+                        </strong>
 
-                          <span
-                            className={`status ${statusClass(
-                              approval.status ===
-                                "approved"
-                                ? "completed"
-                                : approval.status ===
-                                  "rejected"
-                                ? "failed"
-                                : "pending"
-                            )}`}
-                          >
-                            {approval.status}
-                          </span>
+                        <div
+                          style={{
+                            marginTop:
+                              "7px",
+                            color:
+                              "#64748b",
+                            fontSize:
+                              "13px",
+                          }}
+                        >
+                          الحالة:{" "}
+                          {approval.status}
                         </div>
-
-                        <p>
-                          مستوى الخطورة:{" "}
-                          {riskLabel(
-                            approval.risk_level
-                          )}
-                        </p>
-
-                        <small>
-                          {formatDate(
-                            approval.created_at
-                          )}
-                        </small>
-
-                        {approval.reason && (
-                          <div className="reason">
-                            السبب:{" "}
-                            {approval.reason}
-                          </div>
-                        )}
                       </div>
 
                       {approval.status ===
                         "pending" && (
-                        <div className="approvalActions">
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            gap:
+                              "8px",
+                          }}
+                        >
                           <button
-                            className="approveButton"
                             onClick={() => {
-                              setApprovalModal(
-                                approval
+                              setDecisionModal({
+                                approval,
+                                decision:
+                                  "approve",
+                              });
+                              setDecisionReason(
+                                ""
                               );
-                              setApprovalReason("");
                             }}
-                            disabled={saving}
+                            style={{
+                              border:
+                                "none",
+                              background:
+                                GREEN,
+                              color:
+                                "#fff",
+                              borderRadius:
+                                "10px",
+                              padding:
+                                "9px 14px",
+                              cursor:
+                                "pointer",
+                              fontWeight:
+                                700,
+                            }}
                           >
                             موافقة
                           </button>
 
                           <button
-                            className="rejectButton"
                             onClick={() => {
-                              setApprovalModal(
-                                {
-                                  ...approval,
-                                  reject: true,
-                                }
+                              setDecisionModal({
+                                approval,
+                                decision:
+                                  "reject",
+                              });
+                              setDecisionReason(
+                                ""
                               );
-                              setApprovalReason("");
                             }}
-                            disabled={saving}
+                            style={{
+                              border:
+                                "1px solid #fecaca",
+                              background:
+                                "#fff",
+                              color:
+                                "#b91c1c",
+                              borderRadius:
+                                "10px",
+                              padding:
+                                "9px 14px",
+                              cursor:
+                                "pointer",
+                              fontWeight:
+                                700,
+                            }}
                           >
                             رفض
                           </button>
                         </div>
                       )}
                     </div>
-                  )
-                )}
-              </div>
-            )}
+                  </div>
+                )
+              )}
+            </div>
           </section>
         )}
 
-        {activeTab === "instructions" && (
-          <section className="grid">
-            <div className="card">
-              <div className="cardTitle">
-                <h2>الشخصية</h2>
+        {activeTab ===
+          "instructions" && (
+          <section
+            style={{
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
+          >
+            <h2
+              style={{
+                margin:
+                  "0 0 14px",
+              }}
+            >
+              الشخصية والتعليمات
+            </h2>
+
+            <div
+              style={{
+                display:
+                  "grid",
+                gap:
+                  "14px",
+              }}
+            >
+              <div
+                style={{
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
+                }}
+              >
+                <strong>
+                  الشخصية
+                </strong>
+
+                <p
+                  style={{
+                    margin:
+                      "8px 0 0",
+                    color:
+                      "#475569",
+                    lineHeight:
+                      1.8,
+                  }}
+                >
+                  {employee?.personality ||
+                    "إماراتية احترافية وودية"}
+                </p>
               </div>
 
-              <div className="textBlock">
-                <label>الاسم</label>
-                <div>
-                  {employee.name}
-                </div>
-              </div>
+              <div
+                style={{
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
+                }}
+              >
+                <strong>
+                  التعليمات
+                </strong>
 
-              <div className="textBlock">
-                <label>التخصص</label>
-                <div>
-                  {employee.specialization ||
-                    "مساعد إدارة وتشغيل سوق AI"}
-                </div>
-              </div>
-
-              <div className="textBlock">
-                <label>النبرة</label>
-                <div>
-                  {employee.tone ||
-                    "إماراتي، واضح، عملي"}
-                </div>
-              </div>
-
-              <div className="textBlock">
-                <label>الشخصية</label>
-                <div>
-                  {employee.personality ||
-                    "مجهّز للمهمة، يراجع قبل التنفيذ ولا يتجاوز الصلاحيات."}
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <div className="cardTitle">
-                <h2>تعليمات الموظف</h2>
-              </div>
-
-              <div className="instructions">
-                {employee.instructions ||
-                  "لم تتم إضافة تعليمات مخصصة بعد."}
+                <p
+                  style={{
+                    margin:
+                      "8px 0 0",
+                    color:
+                      "#475569",
+                    lineHeight:
+                      1.8,
+                    whiteSpace:
+                      "pre-wrap",
+                  }}
+                >
+                  {employee?.instructions ||
+                    "مساعدة إدارة وتشغيل سوق AI مع الالتزام بالصلاحيات وبوابة الموافقات وعدم تنفيذ العمليات الحساسة دون موافقة Super Admin."}
+                </p>
               </div>
             </div>
           </section>
         )}
       </div>
 
-      {approvalModal && (
+      {decisionModal && (
         <div
-          className="modalBackdrop"
-          onClick={() =>
-            !saving &&
-            setApprovalModal(null)
-          }
+          style={{
+            position:
+              "fixed",
+            inset:
+              0,
+            background:
+              "rgba(15,23,42,.45)",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            padding:
+              "20px",
+            zIndex:
+              1000,
+          }}
         >
           <div
-            className="modal"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+            style={{
+              width:
+                "100%",
+              maxWidth:
+                "520px",
+              background:
+                "#fff",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
           >
-            <h2>
-              {approvalModal.reject
-                ? "رفض الأمر"
-                : "الموافقة على الأمر"}
-            </h2>
+            <h3
+              style={{
+                margin:
+                  "0 0 10px",
+              }}
+            >
+              {decisionModal.decision ===
+              "approve"
+                ? "الموافقة على الأمر"
+                : "رفض الأمر"}
+            </h3>
 
-            <p>
-              {approvalModal.reject
-                ? "يمكنك إضافة سبب الرفض."
-                : "الموافقة تسمح للأمر بالانتقال إلى التنفيذ، ولا تشغله تلقائيًا."}
+            <p
+              style={{
+                color:
+                  "#64748b",
+                lineHeight:
+                  1.7,
+              }}
+            >
+              القرار سيُسجل في سجل الموافقات. الموافقة لا تعني تنفيذ الأمر تلقائياً.
             </p>
 
             <textarea
-              value={approvalReason}
-              onChange={(event) =>
-                setApprovalReason(
-                  event.target.value
+              value={
+                decisionReason
+              }
+              onChange={(e) =>
+                setDecisionReason(
+                  e.target.value
                 )
               }
-              placeholder="السبب أو الملاحظة..."
-              rows={5}
+              placeholder="سبب القرار (اختياري)"
+              rows={4}
+              style={{
+                width:
+                  "100%",
+                boxSizing:
+                  "border-box",
+                border:
+                  "1px solid #dbe5de",
+                borderRadius:
+                  "12px",
+                padding:
+                  "12px",
+                resize:
+                  "vertical",
+                outline:
+                  "none",
+              }}
             />
 
-            <div className="modalActions">
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "flex-start",
+                gap:
+                  "8px",
+                marginTop:
+                  "14px",
+              }}
+            >
               <button
-                className="secondaryButton"
                 onClick={() =>
-                  setApprovalModal(null)
+                  decideApproval(
+                    decisionModal.decision
+                  )
                 }
-                disabled={saving}
+                disabled={
+                  saving
+                }
+                style={{
+                  border:
+                    "none",
+                  background:
+                    decisionModal.decision ===
+                    "approve"
+                      ? GREEN
+                      : "#dc2626",
+                  color:
+                    "#fff",
+                  borderRadius:
+                    "10px",
+                  padding:
+                    "10px 16px",
+                  cursor:
+                    saving
+                      ? "not-allowed"
+                      : "pointer",
+                  fontWeight:
+                    700,
+                }}
               >
-                إلغاء
+                تأكيد
               </button>
 
               <button
-                className={
-                  approvalModal.reject
-                    ? "rejectButton"
-                    : "approveButton"
-                }
-                onClick={() =>
-                  decideApproval(
-                    approvalModal.reject
-                      ? "reject"
-                      : "approve"
-                  )
-                }
-                disabled={saving}
+                onClick={() => {
+                  setDecisionModal(
+                    null
+                  );
+                  setDecisionReason(
+                    ""
+                  );
+                }}
+                style={{
+                  border:
+                    "1px solid #dbe5de",
+                  background:
+                    "#fff",
+                  color:
+                    "#475569",
+                  borderRadius:
+                    "10px",
+                  padding:
+                    "10px 16px",
+                  cursor:
+                    "pointer",
+                  fontWeight:
+                    700,
+                }}
               >
-                {saving
-                  ? "جارٍ الحفظ..."
-                  : approvalModal.reject
-                  ? "تأكيد الرفض"
-                  : "تأكيد الموافقة"}
+                إلغاء
               </button>
             </div>
           </div>
         </div>
       )}
-
-      <style jsx>{`
-        * {
-          box-sizing: border-box;
-        }
-
-        .page {
-          min-height: 100vh;
-          background: #f6faf7;
-          color: #17231b;
-          padding: 24px;
-        }
-
-        .container {
-          width: min(1250px, 100%);
-          margin: 0 auto;
-        }
-
-        .header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 22px;
-        }
-
-        .eyebrow {
-          color: #15803d;
-          font-size: 13px;
-          font-weight: 800;
-          margin-bottom: 6px;
-        }
-
-        h1 {
-          margin: 0;
-          font-size: 34px;
-          letter-spacing: -1px;
-        }
-
-        .onlineDot {
-          display: inline-block;
-          width: 10px;
-          height: 10px;
-          background: #16a34a;
-          border-radius: 50%;
-          margin-right: 9px;
-          vertical-align: middle;
-        }
-
-        .header p {
-          margin: 7px 0 0;
-          color: #64746a;
-        }
-
-        .statusButton {
-          border: 1px solid #d7e6db;
-          background: #fff;
-          padding: 11px 16px;
-          border-radius: 13px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 800;
-        }
-
-        .statusButton span {
-          width: 9px;
-          height: 9px;
-          border-radius: 50%;
-          background: #94a3b8;
-        }
-
-        .statusButton.active span {
-          background: #16a34a;
-        }
-
-        .statusButton.inactive span {
-          background: #ef4444;
-        }
-
-        .alert {
-          border-radius: 14px;
-          padding: 13px 15px;
-          margin-bottom: 18px;
-          font-weight: 700;
-        }
-
-        .alert.success {
-          background: #ecfdf3;
-          color: #166534;
-          border: 1px solid #bbf7d0;
-        }
-
-        .alert.error {
-          background: #fef2f2;
-          color: #991b1b;
-          border: 1px solid #fecaca;
-        }
-
-        .kpis {
-          display: grid;
-          grid-template-columns: repeat(7, 1fr);
-          gap: 10px;
-          margin-bottom: 18px;
-        }
-
-        .kpi {
-          background: #fff;
-          border: 1px solid #dce9df;
-          border-radius: 16px;
-          padding: 15px;
-        }
-
-        .kpi span {
-          display: block;
-          color: #718078;
-          font-size: 12px;
-          margin-bottom: 7px;
-        }
-
-        .kpi strong {
-          font-size: 20px;
-        }
-
-        .tabs {
-          display: flex;
-          gap: 7px;
-          overflow-x: auto;
-          background: #fff;
-          border: 1px solid #dce9df;
-          padding: 7px;
-          border-radius: 16px;
-          margin-bottom: 18px;
-        }
-
-        .tab {
-          border: 0;
-          background: transparent;
-          padding: 11px 14px;
-          border-radius: 11px;
-          color: #66736c;
-          cursor: pointer;
-          white-space: nowrap;
-          font-weight: 800;
-        }
-
-        .tab.active {
-          background: #eaf8ee;
-          color: #15803d;
-        }
-
-        .grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 18px;
-        }
-
-        .card {
-          background: #fff;
-          border: 1px solid #dce9df;
-          border-radius: 20px;
-          padding: 20px;
-          box-shadow: 0 6px 24px rgba(
-            20,
-            60,
-            35,
-            0.035
-          );
-        }
-
-        .cardTitle {
-          margin-bottom: 18px;
-        }
-
-        .cardTitle h2 {
-          margin: 0;
-          font-size: 20px;
-        }
-
-        .cardTitle p {
-          margin: 6px 0 0;
-          color: #718078;
-          font-size: 14px;
-        }
-
-        .profileHero {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          padding-bottom: 18px;
-          border-bottom: 1px solid #edf2ee;
-        }
-
-        .avatar {
-          width: 64px;
-          height: 64px;
-          border-radius: 18px;
-          display: grid;
-          place-items: center;
-          background: #dcfce7;
-          color: #166534;
-          font-weight: 900;
-          font-size: 20px;
-        }
-
-        .profileHero h3 {
-          margin: 0 0 4px;
-          font-size: 20px;
-        }
-
-        .profileHero p {
-          margin: 0;
-          color: #68756e;
-        }
-
-        .badges {
-          display: flex;
-          gap: 7px;
-          margin-top: 8px;
-        }
-
-        .badge {
-          padding: 4px 8px;
-          border-radius: 999px;
-          background: #f1f5f2;
-          color: #55625b;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .badge.green {
-          background: #dcfce7;
-          color: #166534;
-        }
-
-        .infoList {
-          display: grid;
-          gap: 13px;
-          margin-top: 18px;
-        }
-
-        .infoList div {
-          display: flex;
-          justify-content: space-between;
-          gap: 15px;
-        }
-
-        .infoList span {
-          color: #7a867f;
-        }
-
-        .infoList strong {
-          text-align: left;
-          max-width: 65%;
-        }
-
-        .securityBox {
-          display: flex;
-          gap: 12px;
-          padding: 16px;
-          background: #effdf4;
-          border: 1px solid #bbf7d0;
-          border-radius: 16px;
-        }
-
-        .securityIcon {
-          width: 34px;
-          height: 34px;
-          border-radius: 50%;
-          background: #16a34a;
-          color: #fff;
-          display: grid;
-          place-items: center;
-          font-weight: 900;
-        }
-
-        .securityBox strong {
-          display: block;
-          margin-bottom: 5px;
-        }
-
-        .securityBox p {
-          margin: 0;
-          color: #64746a;
-          line-height: 1.7;
-          font-size: 13px;
-        }
-
-        .securityRules {
-          margin-top: 16px;
-          display: grid;
-          gap: 9px;
-        }
-
-        .securityRules div {
-          display: flex;
-          justify-content: space-between;
-          padding: 11px 0;
-          border-bottom: 1px solid #edf2ee;
-        }
-
-        .securityRules span {
-          color: #536159;
-        }
-
-        .securityRules b {
-          font-size: 12px;
-          color: #9a6700;
-        }
-
-        .securityRules .allowed {
-          color: #15803d;
-        }
-
-        .capabilities {
-          display: grid;
-          gap: 10px;
-        }
-
-        .capability {
-          display: flex;
-          justify-content: space-between;
-          gap: 18px;
-          align-items: center;
-          padding: 15px;
-          border: 1px solid #e3ece6;
-          border-radius: 15px;
-          background: #fbfdfb;
-        }
-
-        .capability p {
-          margin: 5px 0;
-          color: #69766e;
-          font-size: 13px;
-        }
-
-        .capability small {
-          color: #8a968f;
-        }
-
-        .capName {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .risk,
-        .status {
-          display: inline-flex;
-          align-items: center;
-          border-radius: 999px;
-          padding: 4px 8px;
-          font-size: 11px;
-          font-weight: 800;
-          white-space: nowrap;
-        }
-
-        .risk.low {
-          background: #ecfdf3;
-          color: #15803d;
-        }
-
-        .risk.medium {
-          background: #fff7df;
-          color: #9a6700;
-        }
-
-        .risk.warning {
-          background: #fff7df;
-          color: #9a6700;
-        }
-
-        .risk.danger {
-          background: #fef2f2;
-          color: #b91c1c;
-        }
-
-        .status.pending {
-          background: #fff7df;
-          color: #9a6700;
-        }
-
-        .status.running {
-          background: #eff6ff;
-          color: #1d4ed8;
-        }
-
-        .status.success {
-          background: #ecfdf3;
-          color: #15803d;
-        }
-
-        .status.danger {
-          background: #fef2f2;
-          color: #b91c1c;
-        }
-
-        .status.muted {
-          background: #f1f5f2;
-          color: #64746a;
-        }
-
-        .toggle {
-          flex: 0 0 auto;
-          width: 48px;
-          height: 28px;
-          border: 0;
-          border-radius: 999px;
-          background: #d5ded8;
-          padding: 3px;
-          cursor: pointer;
-        }
-
-        .toggle span {
-          display: block;
-          width: 22px;
-          height: 22px;
-          background: #fff;
-          border-radius: 50%;
-          transition: 0.2s;
-        }
-
-        .toggle.on {
-          background: #16a34a;
-        }
-
-        .toggle.on span {
-          transform: translateX(20px);
-        }
-
-        .commandHeader {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-        }
-
-        .commandStats {
-          color: #15803d;
-          font-weight: 800;
-          font-size: 13px;
-        }
-
-        .filters {
-          display: grid;
-          grid-template-columns: 1fr 180px;
-          gap: 10px;
-          margin-bottom: 15px;
-        }
-
-        .filters input,
-        .filters select,
-        .modal textarea {
-          width: 100%;
-          border: 1px solid #d8e5dc;
-          background: #fff;
-          border-radius: 12px;
-          padding: 11px 13px;
-          outline: none;
-          font-family: inherit;
-        }
-
-        .filters input:focus,
-        .filters select:focus,
-        .modal textarea:focus {
-          border-color: #22c55e;
-        }
-
-        .commands {
-          display: grid;
-          gap: 12px;
-        }
-
-        .command {
-          border: 1px solid #e1ebe4;
-          border-radius: 17px;
-          padding: 16px;
-          display: flex;
-          justify-content: space-between;
-          gap: 18px;
-        }
-
-        .commandMain {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .commandTop {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .commandTop h3 {
-          margin: 0;
-          font-size: 16px;
-        }
-
-        .commandMeta {
-          display: flex;
-          gap: 14px;
-          flex-wrap: wrap;
-          margin-top: 10px;
-          color: #77837c;
-          font-size: 12px;
-        }
-
-        .commandActions {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          min-width: 145px;
-        }
-
-        .primaryButton,
-        .executeButton,
-        .approveButton,
-        .rejectButton,
-        .secondaryButton {
-          border: 0;
-          border-radius: 11px;
-          padding: 10px 13px;
-          font-family: inherit;
-          font-weight: 800;
-          cursor: pointer;
-        }
-
-        .primaryButton {
-          background: #15803d;
-          color: #fff;
-        }
-
-        .executeButton {
-          background: #166534;
-          color: #fff;
-          box-shadow: 0 5px 15px rgba(
-            22,
-            101,
-            52,
-            0.18
-          );
-        }
-
-        .approveButton {
-          background: #16a34a;
-          color: #fff;
-        }
-
-        .rejectButton {
-          background: #fee2e2;
-          color: #b91c1c;
-        }
-
-        .secondaryButton {
-          background: #f1f5f2;
-          color: #526059;
-        }
-
-        .primaryButton:disabled,
-        .executeButton:disabled,
-        .approveButton:disabled,
-        .rejectButton:disabled,
-        .secondaryButton:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .waiting {
-          color: #9a6700;
-          font-size: 12px;
-          line-height: 1.5;
-        }
-
-        .completedText {
-          color: #15803d;
-          font-weight: 800;
-          font-size: 13px;
-        }
-
-        .failedText {
-          color: #b91c1c;
-          font-weight: 800;
-          font-size: 13px;
-        }
-
-        .commandError {
-          margin-top: 12px;
-          padding: 10px;
-          border-radius: 10px;
-          background: #fef2f2;
-          color: #991b1b;
-          font-size: 13px;
-        }
-
-        .resultBox {
-          margin-top: 12px;
-          padding: 12px;
-          border-radius: 12px;
-          background: #f5faf6;
-          border: 1px solid #dce9df;
-        }
-
-        .resultBox strong {
-          display: block;
-          margin-bottom: 5px;
-        }
-
-        .resultBox p {
-          margin: 0;
-          color: #58655e;
-          white-space: pre-wrap;
-          line-height: 1.6;
-          font-size: 13px;
-        }
-
-        .timeline {
-          margin-top: 14px;
-          padding-top: 13px;
-          border-top: 1px solid #edf2ee;
-        }
-
-        .timeline > strong {
-          display: block;
-          margin-bottom: 10px;
-        }
-
-        .timelineItem {
-          display: flex;
-          gap: 9px;
-          align-items: flex-start;
-          margin: 7px 0;
-        }
-
-        .timelineDot {
-          width: 7px;
-          height: 7px;
-          margin-top: 6px;
-          border-radius: 50%;
-          background: #16a34a;
-        }
-
-        .timelineItem b {
-          display: block;
-          font-size: 12px;
-        }
-
-        .timelineItem small {
-          color: #87928b;
-        }
-
-        .approvals {
-          display: grid;
-          gap: 12px;
-        }
-
-        .approval {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 16px;
-          border: 1px solid #e1ebe4;
-          border-radius: 16px;
-        }
-
-        .approvalTop {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-
-        .approval p {
-          margin: 8px 0 3px;
-          color: #68756e;
-          font-size: 13px;
-        }
-
-        .approval small {
-          color: #89948e;
-        }
-
-        .approvalActions {
-          display: flex;
-          gap: 7px;
-          align-items: center;
-        }
-
-        .reason {
-          margin-top: 9px;
-          padding: 9px;
-          background: #f7faf8;
-          border-radius: 9px;
-          color: #59665f;
-          font-size: 12px;
-        }
-
-        .textBlock {
-          margin-bottom: 15px;
-        }
-
-        .textBlock label {
-          display: block;
-          color: #7a867f;
-          font-size: 12px;
-          margin-bottom: 5px;
-        }
-
-        .textBlock div {
-          background: #f8fbf9;
-          border: 1px solid #e1ebe4;
-          border-radius: 12px;
-          padding: 12px;
-          line-height: 1.7;
-        }
-
-        .instructions {
-          background: #f8fbf9;
-          border: 1px solid #e1ebe4;
-          border-radius: 14px;
-          padding: 16px;
-          line-height: 1.9;
-          white-space: pre-wrap;
-          min-height: 180px;
-        }
-
-        .empty {
-          padding: 35px;
-          text-align: center;
-          color: #7b877f;
-          background: #f8fbf9;
-          border-radius: 15px;
-        }
-
-        .modalBackdrop {
-          position: fixed;
-          inset: 0;
-          background: rgba(15, 23, 18, 0.42);
-          display: grid;
-          place-items: center;
-          padding: 20px;
-          z-index: 100;
-        }
-
-        .modal {
-          width: min(500px, 100%);
-          background: #fff;
-          border-radius: 20px;
-          padding: 22px;
-          box-shadow: 0 20px 70px rgba(
-            0,
-            0,
-            0,
-            0.18
-          );
-        }
-
-        .modal h2 {
-          margin: 0;
-        }
-
-        .modal p {
-          color: #68756e;
-          line-height: 1.7;
-        }
-
-        .modal textarea {
-          resize: vertical;
-        }
-
-        .modalActions {
-          display: flex;
-          justify-content: flex-end;
-          gap: 8px;
-          margin-top: 14px;
-        }
-
-        @media (max-width: 1100px) {
-          .kpis {
-            grid-template-columns: repeat(
-              4,
-              1fr
-            );
-          }
-        }
-
-        @media (max-width: 800px) {
-          .page {
-            padding: 14px;
-          }
-
-          .header {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-
-          .grid {
-            grid-template-columns: 1fr;
-          }
-
-          .kpis {
-            grid-template-columns: repeat(
-              2,
-              1fr
-            );
-          }
-
-          .command {
-            flex-direction: column;
-          }
-
-          .commandActions {
-            justify-content: flex-start;
-            min-width: 0;
-          }
-
-          .filters {
-            grid-template-columns: 1fr;
-          }
-
-          .approval {
-            flex-direction: column;
-          }
-
-          .approvalActions {
-            justify-content: flex-start;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .kpis {
-            grid-template-columns: 1fr 1fr;
-          }
-
-          h1 {
-            font-size: 28px;
-          }
-
-          .infoList div {
-            flex-direction: column;
-            gap: 3px;
-          }
-
-          .infoList strong {
-            max-width: 100%;
-            text-align: right;
-          }
-        }
-      `}</style>
     </main>
   );
 }
