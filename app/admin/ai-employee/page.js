@@ -151,17 +151,21 @@ export default function AiEmployeePage() {
 
   const capabilityMap = useMemo(() => {
     const map = {};
+
     for (const capability of capabilities) {
       map[capability.capability_key] = capability;
     }
+
     return map;
   }, [capabilities]);
 
   const commandMap = useMemo(() => {
     const map = {};
+
     for (const command of commands) {
       map[command.id] = command;
     }
+
     return map;
   }, [commands]);
 
@@ -182,22 +186,31 @@ export default function AiEmployeePage() {
           .includes(normalized);
 
       const matchesStatus =
-        statusFilter === "all" || command.status === statusFilter;
+        statusFilter === "all" ||
+        command.status === statusFilter;
 
       return matchesSearch && matchesStatus;
     });
   }, [commands, search, statusFilter]);
 
   const pendingApprovals = useMemo(() => {
-    return approvals.filter((approval) => approval.status === "pending");
+    return approvals.filter(
+      (approval) => approval.status === "pending"
+    );
   }, [approvals]);
 
   const stats = useMemo(() => {
     return {
       total: commands.length,
-      running: commands.filter((x) => x.status === "running").length,
-      completed: commands.filter((x) => x.status === "completed").length,
-      failed: commands.filter((x) => x.status === "failed").length,
+      running: commands.filter(
+        (x) => x.status === "running"
+      ).length,
+      completed: commands.filter(
+        (x) => x.status === "completed"
+      ).length,
+      failed: commands.filter(
+        (x) => x.status === "failed"
+      ).length,
       pendingApprovals: pendingApprovals.length,
     };
   }, [commands, pendingApprovals]);
@@ -220,10 +233,15 @@ export default function AiEmployeePage() {
       }
 
       if (!user) {
-        throw new Error("لم يتم العثور على المستخدم الحالي.");
+        throw new Error(
+          "لم يتم العثور على المستخدم الحالي."
+        );
       }
 
-      const { data: profileData, error: profileError } = await supabase
+      const {
+        data: profileData,
+        error: profileError,
+      } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
@@ -234,7 +252,9 @@ export default function AiEmployeePage() {
       }
 
       if (!profileData?.is_super_admin) {
-        throw new Error("هذه الصفحة متاحة للـ Super Admin فقط.");
+        throw new Error(
+          "هذه الصفحة متاحة للـ Super Admin فقط."
+        );
       }
 
       setProfile(profileData);
@@ -253,35 +273,54 @@ export default function AiEmployeePage() {
       }
 
       if (!employeeData) {
-        throw new Error("لم يتم العثور على موظف AI باسم والم.");
+        throw new Error(
+          "لم يتم العثور على موظف AI باسم والم."
+        );
       }
 
       setEmployee(employeeData);
 
       const [
-        { data: capabilityData, error: capabilityError },
-        { data: commandData, error: commandError },
-        { data: approvalData, error: approvalError },
+        {
+          data: capabilityData,
+          error: capabilityError,
+        },
+        {
+          data: commandData,
+          error: commandError,
+        },
+        {
+          data: approvalData,
+          error: approvalError,
+        },
       ] = await Promise.all([
         supabase
           .from("ai_employee_capabilities")
           .select("*")
           .eq("ai_employee_id", employeeData.id)
-          .order("risk_level", { ascending: true })
-          .order("capability_name", { ascending: true }),
+          .order("risk_level", {
+            ascending: true,
+          })
+          .order("capability_name", {
+            ascending: true,
+          }),
 
         supabase
           .from("ai_employee_commands")
           .select("*")
           .eq("ai_employee_id", employeeData.id)
-          .order("created_at", { ascending: false })
+          .order("created_at", {
+            ascending: false,
+          })
           .limit(100),
 
         supabase
           .from("ai_employee_approvals")
           .select("*")
           .eq("ai_employee_id", employeeData.id)
-          .order("created_at", { ascending: false })
+          .order("created_at", {
+            ascending: false,
+          })
           .limit(100),
       ]);
 
@@ -299,8 +338,16 @@ export default function AiEmployeePage() {
         approvals: approvalData || [],
       };
     } catch (error) {
-      console.error("AI employee load error:", error);
-      setActionError(error?.message || "حدث خطأ أثناء تحميل البيانات.");
+      console.error(
+        "AI employee load error:",
+        error
+      );
+
+      setActionError(
+        error?.message ||
+          "حدث خطأ أثناء تحميل البيانات."
+      );
+
       return null;
     } finally {
       if (showLoader) {
@@ -313,32 +360,48 @@ export default function AiEmployeePage() {
     if (!employee?.id) return null;
 
     const [
-      { data: commandData, error: commandError },
-      { data: approvalData, error: approvalError },
+      {
+        data: commandData,
+        error: commandError,
+      },
+      {
+        data: approvalData,
+        error: approvalError,
+      },
     ] = await Promise.all([
       supabase
         .from("ai_employee_commands")
         .select("*")
         .eq("ai_employee_id", employee.id)
-        .order("created_at", { ascending: false })
+        .order("created_at", {
+          ascending: false,
+        })
         .limit(100),
 
       supabase
         .from("ai_employee_approvals")
         .select("*")
         .eq("ai_employee_id", employee.id)
-        .order("created_at", { ascending: false })
+        .order("created_at", {
+          ascending: false,
+        })
         .limit(100),
     ]);
 
     if (commandError) {
-      console.error("Command refresh error:", commandError);
+      console.error(
+        "Command refresh error:",
+        commandError
+      );
     } else {
       setCommands(commandData || []);
     }
 
     if (approvalError) {
-      console.error("Approval refresh error:", approvalError);
+      console.error(
+        "Approval refresh error:",
+        approvalError
+      );
     } else {
       setApprovals(approvalData || []);
     }
@@ -374,19 +437,31 @@ export default function AiEmployeePage() {
       setCapabilities((current) =>
         current.map((item) =>
           item.id === capability.id
-            ? { ...item, enabled: !item.enabled }
+            ? {
+                ...item,
+                enabled: !item.enabled,
+              }
             : item
         )
       );
 
       setActionMessage(
         `${capability.capability_name} أصبحت ${
-          !capability.enabled ? "مفعّلة" : "متوقفة"
+          !capability.enabled
+            ? "مفعّلة"
+            : "متوقفة"
         }.`
       );
     } catch (error) {
-      console.error("Capability update error:", error);
-      setActionError(error?.message || "تعذر تحديث الصلاحية.");
+      console.error(
+        "Capability update error:",
+        error
+      );
+
+      setActionError(
+        error?.message ||
+          "تعذر تحديث الصلاحية."
+      );
     } finally {
       setSaving(false);
     }
@@ -408,27 +483,39 @@ export default function AiEmployeePage() {
     setActionMessage("");
 
     try {
-      const capability = capabilityMap[commandType];
+      const capability =
+        capabilityMap[commandType];
 
       if (!capability) {
-        throw new Error("نوع الأمر غير موجود ضمن صلاحيات والم.");
+        throw new Error(
+          "نوع الأمر غير موجود ضمن صلاحيات والم."
+        );
       }
 
       if (!capability.enabled) {
-        throw new Error("هذه الصلاحية غير مفعلة حاليًا.");
+        throw new Error(
+          "هذه الصلاحية غير مفعلة حاليًا."
+        );
       }
 
-      const requiresApproval = getCapabilityApproval(capability);
-      const riskLevel = getCapabilityRisk(capability);
+      const requiresApproval =
+        getCapabilityApproval(capability);
+
+      const riskLevel =
+        getCapabilityRisk(capability);
 
       const inputData = {
-        path: commandPath.trim() || null,
-        notes: commandNotes.trim() || null,
+        path:
+          commandPath.trim() || null,
+        notes:
+          commandNotes.trim() || null,
       };
 
       if (commandType === "edit_files") {
         if (!commandPath.trim()) {
-          throw new Error("يجب تحديد مسار الملف.");
+          throw new Error(
+            "يجب تحديد مسار الملف."
+          );
         }
 
         inputData.dry_run = true;
@@ -436,30 +523,41 @@ export default function AiEmployeePage() {
       }
 
       const {
-        data: {
-          user,
-        },
+        data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        throw new Error("انتهت جلسة المستخدم.");
+        throw new Error(
+          "انتهت جلسة المستخدم."
+        );
       }
 
-      const { data: command, error: commandError } = await supabase
+      const {
+        data: command,
+        error: commandError,
+      } = await supabase
         .from("ai_employee_commands")
         .insert({
           ai_employee_id: employee.id,
           created_by: user.id,
           command:
             commandName.trim() ||
-            commandTypeLabels[commandType] ||
+            commandTypeLabels[
+              commandType
+            ] ||
             "أمر جديد",
           command_type: commandType,
           status: "pending",
           risk_level: riskLevel,
-          requires_approval: requiresApproval,
-          approval_status: requiresApproval ? "pending" : "approved",
-          requested_capabilities: [commandType],
+          requires_approval:
+            requiresApproval,
+          approval_status:
+            requiresApproval
+              ? "pending"
+              : "approved",
+          requested_capabilities: [
+            commandType,
+          ],
           input_data: inputData,
           output_data: {},
           points_cost: 0,
@@ -474,7 +572,9 @@ export default function AiEmployeePage() {
       }
 
       if (requiresApproval) {
-        const { error: approvalError } = await supabase
+        const {
+          error: approvalError,
+        } = await supabase
           .from("ai_employee_approvals")
           .insert({
             command_id: command.id,
@@ -483,7 +583,9 @@ export default function AiEmployeePage() {
             status: "pending",
             decision: null,
             reason: null,
-            requested_capabilities: [commandType],
+            requested_capabilities: [
+              commandType,
+            ],
             risk_level: riskLevel,
           });
 
@@ -508,8 +610,15 @@ export default function AiEmployeePage() {
           : "تم إنشاء الأمر. يمكنك تشغيله الآن."
       );
     } catch (error) {
-      console.error("Create command error:", error);
-      setActionError(error?.message || "تعذر إنشاء الأمر.");
+      console.error(
+        "Create command error:",
+        error
+      );
+
+      setActionError(
+        error?.message ||
+          "تعذر إنشاء الأمر."
+      );
     } finally {
       setSaving(false);
     }
@@ -523,12 +632,13 @@ export default function AiEmployeePage() {
     setActionMessage("");
 
     try {
-      const { data, error } = await supabase.rpc(
-        "start_ai_employee_command",
-        {
-          p_command_id: command.id,
-        }
-      );
+      const { data, error } =
+        await supabase.rpc(
+          "start_ai_employee_command",
+          {
+            p_command_id: command.id,
+          }
+        );
 
       if (error) {
         throw error;
@@ -536,7 +646,8 @@ export default function AiEmployeePage() {
 
       if (data?.authorized === false) {
         throw new Error(
-          data?.message || "الأمر غير مصرح له بالبدء."
+          data?.message ||
+            "الأمر غير مصرح له بالبدء."
         );
       }
 
@@ -546,16 +657,28 @@ export default function AiEmployeePage() {
         "تم بدء الأمر. أصبح الآن جاهزًا لطبقة التنفيذ."
       );
     } catch (error) {
-      console.error("Start command error:", error);
-      setActionError(error?.message || "تعذر بدء الأمر.");
+      console.error(
+        "Start command error:",
+        error
+      );
+
+      setActionError(
+        error?.message ||
+          "تعذر بدء الأمر."
+      );
     } finally {
       setSaving(false);
     }
   }
 
   async function parseApiResponse(response) {
-    const contentType = response.headers.get("content-type") || "";
-    const rawText = await response.text();
+    const contentType =
+      response.headers.get(
+        "content-type"
+      ) || "";
+
+    const rawText =
+      await response.text();
 
     if (!rawText) {
       return {
@@ -566,7 +689,11 @@ export default function AiEmployeePage() {
       };
     }
 
-    if (contentType.includes("application/json")) {
+    if (
+      contentType.includes(
+        "application/json"
+      )
+    ) {
       try {
         return {
           ok: response.ok,
@@ -601,16 +728,30 @@ export default function AiEmployeePage() {
     }
   }
 
-  async function waitForCommandToFinish(commandId, maxAttempts = 45) {
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const result = await refreshCommandData();
+  async function waitForCommandToFinish(
+    commandId,
+    maxAttempts = 45
+  ) {
+    for (
+      let attempt = 0;
+      attempt < maxAttempts;
+      attempt += 1
+    ) {
+      const result =
+        await refreshCommandData();
 
-      const command = result?.commands?.find(
-        (item) => item.id === commandId
-      );
+      const command =
+        result?.commands?.find(
+          (item) =>
+            item.id === commandId
+        );
 
       if (!command) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise(
+          (resolve) =>
+            setTimeout(resolve, 1000)
+        );
+
         continue;
       }
 
@@ -622,17 +763,27 @@ export default function AiEmployeePage() {
         return command;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise(
+        (resolve) =>
+          setTimeout(resolve, 1000)
+      );
     }
 
     return null;
   }
 
   async function executeCommand(command) {
-    if (!command?.id) return;
+    if (!command?.id) {
+      setActionError(
+        "command_id مطلوب."
+      );
+      return;
+    }
 
     if (executingId) {
-      setActionError("يوجد أمر آخر قيد التنفيذ من الواجهة.");
+      setActionError(
+        "يوجد أمر آخر قيد التنفيذ من الواجهة."
+      );
       return;
     }
 
@@ -643,7 +794,11 @@ export default function AiEmployeePage() {
       return;
     }
 
-    if (!executableCommandTypes.includes(command.command_type)) {
+    if (
+      !executableCommandTypes.includes(
+        command.command_type
+      )
+    ) {
       setActionError(
         `نوع الأمر ${command.command_type} غير مدعوم في محرك التنفيذ الحالي.`
       );
@@ -651,34 +806,49 @@ export default function AiEmployeePage() {
     }
 
     setExecutingId(command.id);
-    setExecutionMessage("جارٍ الاتصال بمحرك تنفيذ والم...");
+    setExecutionMessage(
+      "جارٍ الاتصال بمحرك تنفيذ والم..."
+    );
     setActionError("");
     setActionMessage("");
 
-    const controller = new AbortController();
+    const controller =
+      new AbortController();
 
     const timeout = setTimeout(() => {
       controller.abort();
     }, 60000);
 
     try {
-      const response = await fetch("/api/admin/ai-employee/execute", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "follow",
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
-        body: JSON.stringify({
-          commandId: command.id,
-        }),
-        signal: controller.signal,
-      });
+      /*
+       * مهم:
+       * API ينتظر command_id وليس commandId.
+       */
+      const response = await fetch(
+        "/api/admin/ai-employee/execute",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "follow",
+          headers: {
+            "Content-Type":
+              "application/json",
+            "Cache-Control":
+              "no-cache",
+            Pragma: "no-cache",
+          },
+          body: JSON.stringify({
+            command_id: command.id,
+          }),
+          signal: controller.signal,
+        }
+      );
 
-      const parsed = await parseApiResponse(response);
+      const parsed =
+        await parseApiResponse(
+          response
+        );
 
       if (!parsed.ok) {
         const serverMessage =
@@ -688,14 +858,19 @@ export default function AiEmployeePage() {
           parsed.rawText ||
           `فشل محرك التنفيذ. HTTP ${parsed.status}`;
 
-        throw new Error(serverMessage);
+        throw new Error(
+          serverMessage
+        );
       }
 
       setExecutionMessage(
         "تم الاتصال بمحرك التنفيذ. جارٍ انتظار نتيجة والم..."
       );
 
-      const finishedCommand = await waitForCommandToFinish(command.id);
+      const finishedCommand =
+        await waitForCommandToFinish(
+          command.id
+        );
 
       if (!finishedCommand) {
         setExecutionMessage("");
@@ -705,10 +880,18 @@ export default function AiEmployeePage() {
         return;
       }
 
-      if (finishedCommand.status === "completed") {
-        setActionMessage("اكتمل تنفيذ الأمر بنجاح.");
+      if (
+        finishedCommand.status ===
+        "completed"
+      ) {
+        setActionMessage(
+          "اكتمل تنفيذ الأمر بنجاح."
+        );
         setExecutionMessage("");
-      } else if (finishedCommand.status === "failed") {
+      } else if (
+        finishedCommand.status ===
+        "failed"
+      ) {
         setActionError(
           finishedCommand.error_message ||
             "محرك التنفيذ أنهى الأمر بحالة فشل."
@@ -717,18 +900,28 @@ export default function AiEmployeePage() {
       } else {
         setActionMessage(
           `انتهى تنفيذ الأمر بالحالة: ${
-            statusLabels[finishedCommand.status] ||
+            statusLabels[
+              finishedCommand.status
+            ] ||
             finishedCommand.status
           }`
         );
         setExecutionMessage("");
       }
 
-      setSelectedCommand(finishedCommand);
+      setSelectedCommand(
+        finishedCommand
+      );
     } catch (error) {
-      console.error("Execute command error:", error);
+      console.error(
+        "Execute command error:",
+        error
+      );
 
-      if (error?.name === "AbortError") {
+      if (
+        error?.name ===
+        "AbortError"
+      ) {
         setActionError(
           "انتهت مهلة الاتصال بمحرك التنفيذ بعد 60 ثانية. لم يتم تغيير حالة الأمر من الواجهة."
         );
@@ -740,6 +933,7 @@ export default function AiEmployeePage() {
       }
 
       setExecutionMessage("");
+
       await refreshCommandData();
     } finally {
       clearTimeout(timeout);
@@ -747,8 +941,16 @@ export default function AiEmployeePage() {
     }
   }
 
-  async function reviewApproval(approval, decision) {
-    if (!approval?.id || !approval?.command_id) return;
+  async function reviewApproval(
+    approval,
+    decision
+  ) {
+    if (
+      !approval?.id ||
+      !approval?.command_id
+    ) {
+      return;
+    }
 
     setSaving(true);
     setActionError("");
@@ -760,19 +962,29 @@ export default function AiEmployeePage() {
           ? "approve_ai_employee_command"
           : "reject_ai_employee_command";
 
-      const { data, error } = await supabase.rpc(rpcName, {
-        p_command_id: approval.command_id,
-        p_reason:
-          decision === "approve"
-            ? "تم اعتماد الأمر من Super Admin."
-            : "تم رفض الأمر من Super Admin.",
-      });
+      const {
+        data,
+        error,
+      } = await supabase.rpc(
+        rpcName,
+        {
+          p_command_id:
+            approval.command_id,
+          p_reason:
+            decision === "approve"
+              ? "تم اعتماد الأمر من Super Admin."
+              : "تم رفض الأمر من Super Admin.",
+        }
+      );
 
       if (error) {
         throw error;
       }
 
-      if (data?.approved === false || data?.rejected === false) {
+      if (
+        data?.approved === false ||
+        data?.rejected === false
+      ) {
         throw new Error(
           data?.message ||
             "تعذر تحديث حالة الموافقة."
@@ -789,21 +1001,31 @@ export default function AiEmployeePage() {
           : "تم رفض الأمر."
       );
     } catch (error) {
-      console.error("Approval error:", error);
+      console.error(
+        "Approval error:",
+        error
+      );
+
       setActionError(
-        error?.message || "تعذر تحديث الموافقة."
+        error?.message ||
+          "تعذر تحديث الموافقة."
       );
     } finally {
       setSaving(false);
     }
   }
 
-  async function openCommandDetails(command) {
+  async function openCommandDetails(
+    command
+  ) {
     setDetailsLoading(true);
     setSelectedCommand(command);
 
     try {
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("ai_employee_commands")
         .select("*")
         .eq("id", command.id)
@@ -813,7 +1035,10 @@ export default function AiEmployeePage() {
         setSelectedCommand(data);
       }
     } catch (error) {
-      console.error("Command details error:", error);
+      console.error(
+        "Command details error:",
+        error
+      );
     } finally {
       setDetailsLoading(false);
     }
@@ -828,15 +1053,19 @@ export default function AiEmployeePage() {
 
     try {
       const nextStatus =
-        employee.status === "active" ? "stopped" : "active";
+        employee.status === "active"
+          ? "stopped"
+          : "active";
 
-      const { error } = await supabase
-        .from("ai_employees")
-        .update({
-          status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", employee.id);
+      const { error } =
+        await supabase
+          .from("ai_employees")
+          .update({
+            status: nextStatus,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq("id", employee.id);
 
       if (error) throw error;
 
@@ -851,9 +1080,14 @@ export default function AiEmployeePage() {
           : "تم إيقاف والم."
       );
     } catch (error) {
-      console.error("Employee status error:", error);
+      console.error(
+        "Employee status error:",
+        error
+      );
+
       setActionError(
-        error?.message || "تعذر تغيير حالة والم."
+        error?.message ||
+          "تعذر تغيير حالة والم."
       );
     } finally {
       setSaving(false);
@@ -879,7 +1113,8 @@ export default function AiEmployeePage() {
             background: "#fff",
             borderRadius: 18,
             padding: 30,
-            border: "1px solid #e5e7eb",
+            border:
+              "1px solid #e5e7eb",
           }}
         >
           جاري تحميل لوحة والم...
@@ -907,11 +1142,13 @@ export default function AiEmployeePage() {
             background: "#fff",
             borderRadius: 18,
             padding: 30,
-            border: "1px solid #fecaca",
+            border:
+              "1px solid #fecaca",
             color: "#991b1b",
           }}
         >
-          {actionError || "تعذر تحميل والم."}
+          {actionError ||
+            "تعذر تحميل والم."}
         </div>
       </main>
     );
@@ -938,7 +1175,8 @@ export default function AiEmployeePage() {
         <header
           style={{
             background: "#fff",
-            border: "1px solid #e5e7eb",
+            border:
+              "1px solid #e5e7eb",
             borderRadius: 20,
             padding: 22,
             marginBottom: 16,
@@ -949,7 +1187,8 @@ export default function AiEmployeePage() {
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent:
+                "space-between",
               alignItems: "center",
               gap: 16,
               flexWrap: "wrap",
@@ -970,10 +1209,12 @@ export default function AiEmployeePage() {
                     height: 12,
                     borderRadius: "50%",
                     background:
-                      employee.status === "active"
+                      employee.status ===
+                      "active"
                         ? GREEN
                         : "#9ca3af",
-                    display: "inline-block",
+                    display:
+                      "inline-block",
                   }}
                 />
 
@@ -1007,39 +1248,48 @@ export default function AiEmployeePage() {
             >
               <span
                 style={{
-                  padding: "8px 12px",
+                  padding:
+                    "8px 12px",
                   borderRadius: 999,
                   background:
-                    employee.status === "active"
+                    employee.status ===
+                    "active"
                       ? "#dcfce7"
                       : "#f3f4f6",
                   color:
-                    employee.status === "active"
+                    employee.status ===
+                    "active"
                       ? "#166534"
                       : "#4b5563",
                   fontWeight: 700,
                   fontSize: 13,
                 }}
               >
-                {employee.status === "active"
+                {employee.status ===
+                "active"
                   ? "نشط"
                   : "متوقف"}
               </span>
 
               <button
-                onClick={toggleEmployeeStatus}
+                onClick={
+                  toggleEmployeeStatus
+                }
                 disabled={saving}
                 style={{
                   border: "none",
                   background:
-                    employee.status === "active"
+                    employee.status ===
+                    "active"
                       ? "#fee2e2"
                       : "#dcfce7",
                   color:
-                    employee.status === "active"
+                    employee.status ===
+                    "active"
                       ? "#991b1b"
                       : "#166534",
-                  padding: "10px 14px",
+                  padding:
+                    "10px 14px",
                   borderRadius: 10,
                   cursor: saving
                     ? "not-allowed"
@@ -1047,19 +1297,26 @@ export default function AiEmployeePage() {
                   fontWeight: 700,
                 }}
               >
-                {employee.status === "active"
+                {employee.status ===
+                "active"
                   ? "إيقاف والم"
                   : "تشغيل والم"}
               </button>
 
               <button
-                onClick={() => loadData(false)}
-                disabled={loading || saving}
+                onClick={() =>
+                  loadData(false)
+                }
+                disabled={
+                  loading || saving
+                }
                 style={{
-                  border: "1px solid #d1d5db",
+                  border:
+                    "1px solid #d1d5db",
                   background: "#fff",
                   color: "#111827",
-                  padding: "10px 14px",
+                  padding:
+                    "10px 14px",
                   borderRadius: 10,
                   cursor: "pointer",
                   fontWeight: 700,
@@ -1076,7 +1333,8 @@ export default function AiEmployeePage() {
             style={{
               background: "#f0fdf4",
               color: "#166534",
-              border: "1px solid #bbf7d0",
+              border:
+                "1px solid #bbf7d0",
               padding: 14,
               borderRadius: 12,
               marginBottom: 12,
@@ -1092,7 +1350,8 @@ export default function AiEmployeePage() {
             style={{
               background: "#fef2f2",
               color: "#991b1b",
-              border: "1px solid #fecaca",
+              border:
+                "1px solid #fecaca",
               padding: 14,
               borderRadius: 12,
               marginBottom: 12,
@@ -1109,7 +1368,8 @@ export default function AiEmployeePage() {
             style={{
               background: "#eff6ff",
               color: "#1d4ed8",
-              border: "1px solid #bfdbfe",
+              border:
+                "1px solid #bfdbfe",
               padding: 14,
               borderRadius: 12,
               marginBottom: 12,
@@ -1132,11 +1392,16 @@ export default function AiEmployeePage() {
             ["overview", "نظرة عامة"],
             ["commands", "الأوامر"],
             ["approvals", "الموافقات"],
-            ["capabilities", "الصلاحيات"],
+            [
+              "capabilities",
+              "الصلاحيات",
+            ],
           ].map(([key, label]) => (
             <button
               key={key}
-              onClick={() => setActiveTab(key)}
+              onClick={() =>
+                setActiveTab(key)
+              }
               style={{
                 border:
                   activeTab === key
@@ -1150,7 +1415,8 @@ export default function AiEmployeePage() {
                   activeTab === key
                     ? "#166534"
                     : "#374151",
-                padding: "11px 16px",
+                padding:
+                  "11px 16px",
                 borderRadius: 11,
                 cursor: "pointer",
                 fontWeight: 700,
@@ -1161,7 +1427,8 @@ export default function AiEmployeePage() {
           ))}
         </nav>
 
-        {activeTab === "overview" && (
+        {activeTab ===
+          "overview" && (
           <section>
             <div
               style={{
@@ -1173,48 +1440,70 @@ export default function AiEmployeePage() {
               }}
             >
               {[
-                ["إجمالي الأوامر", stats.total],
-                ["قيد التنفيذ", stats.running],
-                ["مكتملة", stats.completed],
-                ["فاشلة", stats.failed],
-                ["بانتظار الاعتماد", stats.pendingApprovals],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  style={{
-                    background: "#fff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: 16,
-                    padding: 18,
-                  }}
-                >
+                [
+                  "إجمالي الأوامر",
+                  stats.total,
+                ],
+                [
+                  "قيد التنفيذ",
+                  stats.running,
+                ],
+                [
+                  "مكتملة",
+                  stats.completed,
+                ],
+                [
+                  "فاشلة",
+                  stats.failed,
+                ],
+                [
+                  "بانتظار الاعتماد",
+                  stats.pendingApprovals,
+                ],
+              ].map(
+                ([label, value]) => (
                   <div
+                    key={label}
                     style={{
-                      color: "#6b7280",
-                      fontSize: 13,
-                      marginBottom: 8,
+                      background:
+                        "#fff",
+                      border:
+                        "1px solid #e5e7eb",
+                      borderRadius: 16,
+                      padding: 18,
                     }}
                   >
-                    {label}
-                  </div>
+                    <div
+                      style={{
+                        color:
+                          "#6b7280",
+                        fontSize: 13,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {label}
+                    </div>
 
-                  <div
-                    style={{
-                      fontSize: 28,
-                      fontWeight: 800,
-                      color: "#111827",
-                    }}
-                  >
-                    {value}
+                    <div
+                      style={{
+                        fontSize: 28,
+                        fontWeight: 800,
+                        color:
+                          "#111827",
+                      }}
+                    >
+                      {value}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              )}
             </div>
 
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e5e7eb",
+                border:
+                  "1px solid #e5e7eb",
                 borderRadius: 18,
                 padding: 22,
               }}
@@ -1246,12 +1535,18 @@ export default function AiEmployeePage() {
 
                 <Info
                   label="القسم"
-                  value={employee.department || "الإدارة العامة"}
+                  value={
+                    employee.department ||
+                    "الإدارة العامة"
+                  }
                 />
 
                 <Info
                   label="المستوى"
-                  value={employee.level || "lead"}
+                  value={
+                    employee.level ||
+                    "lead"
+                  }
                 />
 
                 <Info
@@ -1275,30 +1570,38 @@ export default function AiEmployeePage() {
                 style={{
                   marginTop: 22,
                   padding: 16,
-                  background: "#f0fdf4",
-                  border: "1px solid #bbf7d0",
+                  background:
+                    "#f0fdf4",
+                  border:
+                    "1px solid #bbf7d0",
                   borderRadius: 14,
                   color: "#166534",
                   lineHeight: 1.8,
                 }}
               >
-                <strong>مبدأ التشغيل الآمن:</strong>
+                <strong>
+                  مبدأ التشغيل الآمن:
+                </strong>
                 <br />
-                والم لا يتجاوز الصلاحيات المحددة له.
-                العمليات الحساسة مثل تعديل الملفات،
-                Git Commit، النشر، وقاعدة البيانات تحتاج
-                إلى الموافقة المطلوبة حسب مستوى الخطر.
+                والم لا يتجاوز الصلاحيات
+                المحددة له. العمليات
+                الحساسة مثل تعديل الملفات،
+                Git Commit، النشر، وقاعدة
+                البيانات تحتاج إلى الموافقة
+                المطلوبة حسب مستوى الخطر.
               </div>
             </div>
           </section>
         )}
 
-        {activeTab === "capabilities" && (
+        {activeTab ===
+          "capabilities" && (
           <section>
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e5e7eb",
+                border:
+                  "1px solid #e5e7eb",
                 borderRadius: 18,
                 overflow: "hidden",
               }}
@@ -1306,10 +1609,15 @@ export default function AiEmployeePage() {
               <div
                 style={{
                   padding: 20,
-                  borderBottom: "1px solid #e5e7eb",
+                  borderBottom:
+                    "1px solid #e5e7eb",
                 }}
               >
-                <h2 style={{ margin: 0 }}>
+                <h2
+                  style={{
+                    margin: 0,
+                  }}
+                >
                   صلاحيات والم
                 </h2>
               </div>
@@ -1322,116 +1630,178 @@ export default function AiEmployeePage() {
                 <table
                   style={{
                     width: "100%",
-                    borderCollapse: "collapse",
+                    borderCollapse:
+                      "collapse",
                     minWidth: 800,
                   }}
                 >
                   <thead>
                     <tr
                       style={{
-                        background: "#f9fafb",
-                        textAlign: "right",
+                        background:
+                          "#f9fafb",
+                        textAlign:
+                          "right",
                       }}
                     >
-                      <th style={thStyle}>الصلاحية</th>
-                      <th style={thStyle}>الخطر</th>
-                      <th style={thStyle}>الموافقة</th>
-                      <th style={thStyle}>الحالة</th>
-                      <th style={thStyle}>إجراء</th>
+                      <th
+                        style={thStyle}
+                      >
+                        الصلاحية
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الخطر
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الموافقة
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الحالة
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        إجراء
+                      </th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {capabilities.map((capability) => (
-                      <tr key={capability.id}>
-                        <td style={tdStyle}>
-                          <strong>
-                            {capabilityLabels[
-                              capability.capability_key
-                            ] ||
-                              capability.capability_name}
-                          </strong>
-
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#6b7280",
-                              marginTop: 4,
-                            }}
-                          >
-                            {capability.capability_key}
-                          </div>
-                        </td>
-
-                        <td style={tdStyle}>
-                          {riskLabels[
-                            capability.risk_level
-                          ] || capability.risk_level}
-                        </td>
-
-                        <td style={tdStyle}>
-                          {capability.requires_approval
-                            ? "يحتاج موافقة"
-                            : "لا يحتاج"}
-                        </td>
-
-                        <td style={tdStyle}>
-                          <span
-                            style={{
-                              padding:
-                                "5px 9px",
-                              borderRadius: 999,
-                              background:
-                                capability.enabled
-                                  ? "#dcfce7"
-                                  : "#f3f4f6",
-                              color:
-                                capability.enabled
-                                  ? "#166534"
-                                  : "#6b7280",
-                              fontSize: 12,
-                              fontWeight: 700,
-                            }}
-                          >
-                            {capability.enabled
-                              ? "مفعلة"
-                              : "متوقفة"}
-                          </span>
-                        </td>
-
-                        <td style={tdStyle}>
-                          <button
-                            onClick={() =>
-                              toggleCapability(
-                                capability
-                              )
+                    {capabilities.map(
+                      (capability) => (
+                        <tr
+                          key={
+                            capability.id
+                          }
+                        >
+                          <td
+                            style={
+                              tdStyle
                             }
-                            disabled={saving}
-                            style={{
-                              border: "none",
-                              background:
-                                capability.enabled
-                                  ? "#fee2e2"
-                                  : "#dcfce7",
-                              color:
-                                capability.enabled
-                                  ? "#991b1b"
-                                  : "#166534",
-                              padding:
-                                "8px 12px",
-                              borderRadius: 9,
-                              cursor:
-                                "pointer",
-                              fontWeight: 700,
-                            }}
                           >
-                            {capability.enabled
-                              ? "إيقاف"
-                              : "تفعيل"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                            <strong>
+                              {capabilityLabels[
+                                capability
+                                  .capability_key
+                              ] ||
+                                capability.capability_name}
+                            </strong>
+
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color:
+                                  "#6b7280",
+                                marginTop: 4,
+                              }}
+                            >
+                              {
+                                capability.capability_key
+                              }
+                            </div>
+                          </td>
+
+                          <td
+                            style={
+                              tdStyle
+                            }
+                          >
+                            {riskLabels[
+                              capability
+                                .risk_level
+                            ] ||
+                              capability.risk_level}
+                          </td>
+
+                          <td
+                            style={
+                              tdStyle
+                            }
+                          >
+                            {capability.requires_approval
+                              ? "يحتاج موافقة"
+                              : "لا يحتاج"}
+                          </td>
+
+                          <td
+                            style={
+                              tdStyle
+                            }
+                          >
+                            <span
+                              style={{
+                                padding:
+                                  "5px 9px",
+                                borderRadius:
+                                  999,
+                                background:
+                                  capability.enabled
+                                    ? "#dcfce7"
+                                    : "#f3f4f6",
+                                color:
+                                  capability.enabled
+                                    ? "#166534"
+                                    : "#6b7280",
+                                fontSize: 12,
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {capability.enabled
+                                ? "مفعلة"
+                                : "متوقفة"}
+                            </span>
+                          </td>
+
+                          <td
+                            style={
+                              tdStyle
+                            }
+                          >
+                            <button
+                              onClick={() =>
+                                toggleCapability(
+                                  capability
+                                )
+                              }
+                              disabled={
+                                saving
+                              }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  capability.enabled
+                                    ? "#fee2e2"
+                                    : "#dcfce7",
+                                color:
+                                  capability.enabled
+                                    ? "#991b1b"
+                                    : "#166534",
+                                padding:
+                                  "8px 12px",
+                                borderRadius:
+                                  9,
+                                cursor:
+                                  "pointer",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {capability.enabled
+                                ? "إيقاف"
+                                : "تفعيل"}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1439,12 +1809,14 @@ export default function AiEmployeePage() {
           </section>
         )}
 
-        {activeTab === "commands" && (
+        {activeTab ===
+          "commands" && (
           <section>
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e5e7eb",
+                border:
+                  "1px solid #e5e7eb",
                 borderRadius: 18,
                 padding: 18,
                 marginBottom: 14,
@@ -1455,7 +1827,8 @@ export default function AiEmployeePage() {
                   display: "flex",
                   gap: 10,
                   flexWrap: "wrap",
-                  alignItems: "center",
+                  alignItems:
+                    "center",
                   justifyContent:
                     "space-between",
                 }}
@@ -1471,20 +1844,29 @@ export default function AiEmployeePage() {
                   <input
                     value={search}
                     onChange={(e) =>
-                      setSearch(e.target.value)
-                    }
-                    placeholder="بحث في الأوامر..."
-                    style={inputStyle}
-                  />
-
-                  <select
-                    value={statusFilter}
-                    onChange={(e) =>
-                      setStatusFilter(
+                      setSearch(
                         e.target.value
                       )
                     }
-                    style={inputStyle}
+                    placeholder="بحث في الأوامر..."
+                    style={
+                      inputStyle
+                    }
+                  />
+
+                  <select
+                    value={
+                      statusFilter
+                    }
+                    onChange={(e) =>
+                      setStatusFilter(
+                        e.target
+                          .value
+                      )
+                    }
+                    style={
+                      inputStyle
+                    }
                   >
                     <option value="all">
                       كل الحالات
@@ -1510,7 +1892,9 @@ export default function AiEmployeePage() {
                 <button
                   onClick={() => {
                     resetCreateForm();
-                    setShowCreateModal(true);
+                    setShowCreateModal(
+                      true
+                    );
                   }}
                   style={{
                     border: "none",
@@ -1519,7 +1903,8 @@ export default function AiEmployeePage() {
                     padding:
                       "11px 16px",
                     borderRadius: 10,
-                    cursor: "pointer",
+                    cursor:
+                      "pointer",
                     fontWeight: 800,
                   }}
                 >
@@ -1531,38 +1916,75 @@ export default function AiEmployeePage() {
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e5e7eb",
+                border:
+                  "1px solid #e5e7eb",
                 borderRadius: 18,
                 overflow: "hidden",
               }}
             >
               <div
                 style={{
-                  overflowX: "auto",
+                  overflowX:
+                    "auto",
                 }}
               >
                 <table
                   style={{
                     width: "100%",
-                    borderCollapse: "collapse",
+                    borderCollapse:
+                      "collapse",
                     minWidth: 1050,
                   }}
                 >
                   <thead>
                     <tr
                       style={{
-                        background: "#f9fafb",
-                        textAlign: "right",
+                        background:
+                          "#f9fafb",
+                        textAlign:
+                          "right",
                       }}
                     >
-                      <th style={thStyle}>الأمر</th>
-                      <th style={thStyle}>النوع</th>
-                      <th style={thStyle}>الحالة</th>
-                      <th style={thStyle}>الخطر</th>
-                      <th style={thStyle}>الموافقة</th>
-                      <th style={thStyle}>التاريخ</th>
-                      <th style={thStyle}>المدة</th>
-                      <th style={thStyle}>إجراءات</th>
+                      <th
+                        style={thStyle}
+                      >
+                        الأمر
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        النوع
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الحالة
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الخطر
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        الموافقة
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        التاريخ
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        المدة
+                      </th>
+                      <th
+                        style={thStyle}
+                      >
+                        إجراءات
+                      </th>
                     </tr>
                   </thead>
 
@@ -1581,8 +2003,16 @@ export default function AiEmployeePage() {
                           command.id;
 
                         return (
-                          <tr key={command.id}>
-                            <td style={tdStyle}>
+                          <tr
+                            key={
+                              command.id
+                            }
+                          >
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               <strong>
                                 {command.command ||
                                   "أمر بدون اسم"}
@@ -1591,17 +2021,24 @@ export default function AiEmployeePage() {
                               <div
                                 style={{
                                   fontSize: 11,
-                                  color: "#9ca3af",
+                                  color:
+                                    "#9ca3af",
                                   marginTop: 5,
                                   fontFamily:
                                     "monospace",
                                 }}
                               >
-                                {command.id}
+                                {
+                                  command.id
+                                }
                               </div>
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               {commandTypeLabels[
                                 command
                                   .command_type
@@ -1609,14 +2046,19 @@ export default function AiEmployeePage() {
                                 command.command_type}
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               <span
                                 style={{
                                   color:
                                     statusColor(
                                       command.status
                                     ),
-                                  fontWeight: 800,
+                                  fontWeight:
+                                    800,
                                 }}
                               >
                                 {statusLabels[
@@ -1626,7 +2068,11 @@ export default function AiEmployeePage() {
                               </span>
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               {riskLabels[
                                 command
                                   .risk_level
@@ -1634,7 +2080,11 @@ export default function AiEmployeePage() {
                                 command.risk_level}
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               {command.requires_approval
                                 ? command.approval_status ===
                                   "approved"
@@ -1643,22 +2093,35 @@ export default function AiEmployeePage() {
                                 : "لا يحتاج"}
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               {formatDate(
                                 command.created_at
                               )}
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               {formatDuration(
                                 command.duration_seconds
                               )}
                             </td>
 
-                            <td style={tdStyle}>
+                            <td
+                              style={
+                                tdStyle
+                              }
+                            >
                               <div
                                 style={{
-                                  display: "flex",
+                                  display:
+                                    "flex",
                                   gap: 6,
                                   flexWrap:
                                     "wrap",
@@ -1753,11 +2216,14 @@ export default function AiEmployeePage() {
                           colSpan={8}
                           style={{
                             padding: 30,
-                            textAlign: "center",
-                            color: "#6b7280",
+                            textAlign:
+                              "center",
+                            color:
+                              "#6b7280",
                           }}
                         >
-                          لا توجد أوامر مطابقة.
+                          لا توجد أوامر
+                          مطابقة.
                         </td>
                       </tr>
                     )}
@@ -1768,12 +2234,14 @@ export default function AiEmployeePage() {
           </section>
         )}
 
-        {activeTab === "approvals" && (
+        {activeTab ===
+          "approvals" && (
           <section>
             <div
               style={{
                 background: "#fff",
-                border: "1px solid #e5e7eb",
+                border:
+                  "1px solid #e5e7eb",
                 borderRadius: 18,
                 overflow: "hidden",
               }}
@@ -1785,180 +2253,201 @@ export default function AiEmployeePage() {
                     "1px solid #e5e7eb",
                 }}
               >
-                <h2 style={{ margin: 0 }}>
+                <h2
+                  style={{
+                    margin: 0,
+                  }}
+                >
                   طلبات الموافقة
                 </h2>
               </div>
 
-              {approvals.length === 0 ? (
+              {approvals.length ===
+              0 ? (
                 <div
                   style={{
                     padding: 30,
-                    textAlign: "center",
-                    color: "#6b7280",
+                    textAlign:
+                      "center",
+                    color:
+                      "#6b7280",
                   }}
                 >
-                  لا توجد طلبات موافقة.
+                  لا توجد طلبات
+                  موافقة.
                 </div>
               ) : (
                 <div>
-                  {approvals.map((approval) => {
-                    const command =
-                      commandMap[
-                        approval.command_id
-                      ];
+                  {approvals.map(
+                    (approval) => {
+                      const command =
+                        commandMap[
+                          approval.command_id
+                        ];
 
-                    return (
-                      <div
-                        key={approval.id}
-                        style={{
-                          padding: 18,
-                          borderBottom:
-                            "1px solid #f3f4f6",
-                        }}
-                      >
+                      return (
                         <div
+                          key={
+                            approval.id
+                          }
                           style={{
-                            display: "flex",
-                            justifyContent:
-                              "space-between",
-                            gap: 12,
-                            flexWrap: "wrap",
+                            padding: 18,
+                            borderBottom:
+                              "1px solid #f3f4f6",
                           }}
                         >
-                          <div>
-                            <strong>
-                              {command?.command ||
-                                "أمر غير معروف"}
-                            </strong>
-
-                            <div
-                              style={{
-                                marginTop: 6,
-                                color:
-                                  "#6b7280",
-                                fontSize: 13,
-                              }}
-                            >
-                              {commandTypeLabels[
-                                command
-                                  ?.command_type
-                              ] ||
-                                command
-                                  ?.command_type ||
-                                "—"}
-                              {" • "}
-                              {riskLabels[
-                                approval
-                                  .risk_level
-                              ] ||
-                                approval.risk_level}
-                            </div>
-                          </div>
-
-                          <span
-                            style={{
-                              padding:
-                                "7px 10px",
-                              borderRadius: 999,
-                              background:
-                                approval.status ===
-                                "pending"
-                                  ? "#fef3c7"
-                                  : approval.status ===
-                                    "approved"
-                                  ? "#dcfce7"
-                                  : "#fee2e2",
-                              color:
-                                approval.status ===
-                                "pending"
-                                  ? "#92400e"
-                                  : approval.status ===
-                                    "approved"
-                                  ? "#166534"
-                                  : "#991b1b",
-                              fontWeight: 800,
-                              fontSize: 12,
-                            }}
-                          >
-                            {approval.status ===
-                            "pending"
-                              ? "بانتظار الموافقة"
-                              : approval.status ===
-                                "approved"
-                              ? "معتمد"
-                              : "مرفوض"}
-                          </span>
-                        </div>
-
-                        {approval.status ===
-                          "pending" && (
                           <div
                             style={{
-                              display: "flex",
-                              gap: 8,
-                              marginTop: 14,
+                              display:
+                                "flex",
+                              justifyContent:
+                                "space-between",
+                              gap: 12,
+                              flexWrap:
+                                "wrap",
                             }}
                           >
-                            <button
-                              onClick={() =>
-                                reviewApproval(
-                                  approval,
-                                  "approve"
-                                )
-                              }
-                              disabled={saving}
-                              style={{
-                                ...smallButton,
-                                background:
-                                  "#dcfce7",
-                                color:
-                                  "#166534",
-                              }}
-                            >
-                              اعتماد
-                            </button>
+                            <div>
+                              <strong>
+                                {command?.command ||
+                                  "أمر غير معروف"}
+                              </strong>
 
-                            <button
-                              onClick={() =>
-                                reviewApproval(
-                                  approval,
-                                  "reject"
-                                )
-                              }
-                              disabled={saving}
-                              style={{
-                                ...smallButton,
-                                background:
-                                  "#fee2e2",
-                                color:
-                                  "#991b1b",
-                              }}
-                            >
-                              رفض
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                setSelectedApproval(
+                              <div
+                                style={{
+                                  marginTop: 6,
+                                  color:
+                                    "#6b7280",
+                                  fontSize: 13,
+                                }}
+                              >
+                                {commandTypeLabels[
+                                  command
+                                    ?.command_type
+                                ] ||
+                                  command
+                                    ?.command_type ||
+                                  "—"}
+                                {" • "}
+                                {riskLabels[
                                   approval
-                                )
-                              }
+                                    .risk_level
+                                ] ||
+                                  approval.risk_level}
+                              </div>
+                            </div>
+
+                            <span
                               style={{
-                                ...smallButton,
+                                padding:
+                                  "7px 10px",
+                                borderRadius:
+                                  999,
                                 background:
-                                  "#f3f4f6",
+                                  approval.status ===
+                                  "pending"
+                                    ? "#fef3c7"
+                                    : approval.status ===
+                                      "approved"
+                                    ? "#dcfce7"
+                                    : "#fee2e2",
                                 color:
-                                  "#374151",
+                                  approval.status ===
+                                  "pending"
+                                    ? "#92400e"
+                                    : approval.status ===
+                                      "approved"
+                                    ? "#166534"
+                                    : "#991b1b",
+                                fontWeight:
+                                  800,
+                                fontSize: 12,
                               }}
                             >
-                              التفاصيل
-                            </button>
+                              {approval.status ===
+                              "pending"
+                                ? "بانتظار الموافقة"
+                                : approval.status ===
+                                  "approved"
+                                ? "معتمد"
+                                : "مرفوض"}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+
+                          {approval.status ===
+                            "pending" && (
+                            <div
+                              style={{
+                                display:
+                                  "flex",
+                                gap: 8,
+                                marginTop: 14,
+                              }}
+                            >
+                              <button
+                                onClick={() =>
+                                  reviewApproval(
+                                    approval,
+                                    "approve"
+                                  )
+                                }
+                                disabled={
+                                  saving
+                                }
+                                style={{
+                                  ...smallButton,
+                                  background:
+                                    "#dcfce7",
+                                  color:
+                                    "#166534",
+                                }}
+                              >
+                                اعتماد
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  reviewApproval(
+                                    approval,
+                                    "reject"
+                                  )
+                                }
+                                disabled={
+                                  saving
+                                }
+                                style={{
+                                  ...smallButton,
+                                  background:
+                                    "#fee2e2",
+                                  color:
+                                    "#991b1b",
+                                }}
+                              >
+                                رفض
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setSelectedApproval(
+                                    approval
+                                  )
+                                }
+                                style={{
+                                  ...smallButton,
+                                  background:
+                                    "#f3f4f6",
+                                  color:
+                                    "#374151",
+                                }}
+                              >
+                                التفاصيل
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  )}
                 </div>
               )}
             </div>
@@ -1969,11 +2458,15 @@ export default function AiEmployeePage() {
           <Modal
             title="تفاصيل طلب الموافقة"
             onClose={() =>
-              setSelectedApproval(null)
+              setSelectedApproval(
+                null
+              )
             }
           >
             <pre style={preStyle}>
-              {prettyJson(selectedApproval)}
+              {prettyJson(
+                selectedApproval
+              )}
             </pre>
           </Modal>
         )}
@@ -1982,12 +2475,16 @@ export default function AiEmployeePage() {
           <Modal
             title="تفاصيل الأمر"
             onClose={() =>
-              setSelectedCommand(null)
+              setSelectedCommand(
+                null
+              )
             }
             wide
           >
             {detailsLoading ? (
-              <div>جاري تحميل التفاصيل...</div>
+              <div>
+                جاري تحميل التفاصيل...
+              </div>
             ) : (
               <>
                 <div
@@ -2016,7 +2513,7 @@ export default function AiEmployeePage() {
                         selectedCommand
                           .command_type
                       ] ||
-                      selectedCommand.command_type
+                        selectedCommand.command_type
                     }
                   />
 
@@ -2027,7 +2524,7 @@ export default function AiEmployeePage() {
                         selectedCommand
                           .risk_level
                       ] ||
-                      selectedCommand.risk_level
+                        selectedCommand.risk_level
                     }
                   />
 
@@ -2039,14 +2536,20 @@ export default function AiEmployeePage() {
                   />
                 </div>
 
-                <h3>Input Data</h3>
+                <h3>
+                  Input Data
+                </h3>
+
                 <pre style={preStyle}>
                   {prettyJson(
                     selectedCommand.input_data
                   )}
                 </pre>
 
-                <h3>Output Data</h3>
+                <h3>
+                  Output Data
+                </h3>
+
                 <pre style={preStyle}>
                   {prettyJson(
                     selectedCommand.output_data
@@ -2054,12 +2557,14 @@ export default function AiEmployeePage() {
                 </pre>
 
                 <h3>Result</h3>
+
                 <pre style={preStyle}>
                   {selectedCommand.result ||
                     "لا توجد نتيجة حتى الآن."}
                 </pre>
 
                 <h3>Error</h3>
+
                 <pre
                   style={{
                     ...preStyle,
@@ -2073,7 +2578,10 @@ export default function AiEmployeePage() {
                     "لا يوجد خطأ مسجل."}
                 </pre>
 
-                <h3>Execution Log</h3>
+                <h3>
+                  Execution Log
+                </h3>
+
                 <pre style={preStyle}>
                   {prettyJson(
                     selectedCommand.execution_log ||
@@ -2089,7 +2597,9 @@ export default function AiEmployeePage() {
           <Modal
             title="إنشاء أمر جديد"
             onClose={() =>
-              setShowCreateModal(false)
+              setShowCreateModal(
+                false
+              )
             }
             wide
           >
@@ -2133,7 +2643,9 @@ export default function AiEmployeePage() {
                   {executableCommandTypes.map(
                     (type) => {
                       const capability =
-                        capabilityMap[type];
+                        capabilityMap[
+                          type
+                        ];
 
                       return (
                         <option
@@ -2176,7 +2688,9 @@ export default function AiEmployeePage() {
               {commandType ===
                 "edit_files" && (
                 <label>
-                  <div style={labelStyle}>
+                  <div
+                    style={labelStyle}
+                  >
                     المحتوى الجديد — Dry Run
                   </div>
 
@@ -2191,7 +2705,8 @@ export default function AiEmployeePage() {
                     placeholder="المحتوى الذي سيتم معاينته فقط..."
                     style={{
                       ...inputStyle,
-                      resize: "vertical",
+                      resize:
+                        "vertical",
                       fontFamily:
                         "monospace",
                     }}
@@ -2200,13 +2715,15 @@ export default function AiEmployeePage() {
                   <div
                     style={{
                       marginTop: 6,
-                      color: "#92400e",
+                      color:
+                        "#92400e",
                       fontSize: 12,
                     }}
                   >
-                    تعديل الملفات يعمل حاليًا
-                    كـ Dry Run فقط، بدون كتابة
-                    فعلية على GitHub.
+                    تعديل الملفات يعمل
+                    حاليًا كـ Dry Run فقط،
+                    بدون كتابة فعلية على
+                    GitHub.
                   </div>
                 </label>
               )}
@@ -2227,7 +2744,8 @@ export default function AiEmployeePage() {
                   placeholder="ملاحظات تنفيذ الأمر..."
                   style={{
                     ...inputStyle,
-                    resize: "vertical",
+                    resize:
+                      "vertical",
                   }}
                 />
               </label>
@@ -2235,7 +2753,8 @@ export default function AiEmployeePage() {
               <div
                 style={{
                   padding: 14,
-                  background: "#f9fafb",
+                  background:
+                    "#f9fafb",
                   borderRadius: 12,
                   border:
                     "1px solid #e5e7eb",
@@ -2250,11 +2769,13 @@ export default function AiEmployeePage() {
                   ]?.risk_level
                 ] || "—"}
                 <br />
+
                 <strong>
                   الموافقة:
                 </strong>{" "}
-                {capabilityMap[commandType]
-                  ?.requires_approval
+                {capabilityMap[
+                  commandType
+                ]?.requires_approval
                   ? "مطلوبة"
                   : "غير مطلوبة"}
               </div>
@@ -2269,7 +2790,9 @@ export default function AiEmployeePage() {
                 }}
               >
                 <button
-                  onClick={createCommand}
+                  onClick={
+                    createCommand
+                  }
                   disabled={saving}
                   style={{
                     border: "none",
@@ -2291,7 +2814,9 @@ export default function AiEmployeePage() {
 
                 <button
                   onClick={() =>
-                    setShowCreateModal(false)
+                    setShowCreateModal(
+                      false
+                    )
                   }
                   style={{
                     border:
@@ -2301,7 +2826,8 @@ export default function AiEmployeePage() {
                     padding:
                       "11px 18px",
                     borderRadius: 10,
-                    cursor: "pointer",
+                    cursor:
+                      "pointer",
                     fontWeight: 700,
                   }}
                 >
@@ -2323,7 +2849,8 @@ function Info({ label, value }) {
         padding: 14,
         background: "#f9fafb",
         borderRadius: 12,
-        border: "1px solid #e5e7eb",
+        border:
+          "1px solid #e5e7eb",
       }}
     >
       <div
@@ -2357,6 +2884,7 @@ function Modal({
 }) {
   return (
     <div
+      dir="rtl"
       style={{
         position: "fixed",
         inset: 0,
@@ -2365,11 +2893,15 @@ function Modal({
         zIndex: 1000,
         display: "flex",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent:
+          "center",
         padding: 18,
       }}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) {
+        if (
+          e.target ===
+          e.currentTarget
+        ) {
           onClose();
         }
       }}
@@ -2377,7 +2909,9 @@ function Modal({
       <div
         style={{
           width: "100%",
-          maxWidth: wide ? 1050 : 700,
+          maxWidth: wide
+            ? 1050
+            : 700,
           maxHeight: "90vh",
           overflow: "auto",
           background: "#fff",
@@ -2390,8 +2924,10 @@ function Modal({
         <div
           style={{
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            justifyContent:
+              "space-between",
+            alignItems:
+              "center",
             gap: 10,
             marginBottom: 18,
           }}
@@ -2409,11 +2945,13 @@ function Modal({
             onClick={onClose}
             style={{
               border: "none",
-              background: "#f3f4f6",
+              background:
+                "#f3f4f6",
               width: 36,
               height: 36,
               borderRadius: 9,
-              cursor: "pointer",
+              cursor:
+                "pointer",
               fontSize: 20,
             }}
           >
@@ -2440,17 +2978,21 @@ const tdStyle = {
   padding: 13,
   borderBottom:
     "1px solid #f3f4f6",
-  verticalAlign: "top",
+  verticalAlign:
+    "top",
   fontSize: 13,
 };
 
 const inputStyle = {
   width: "100%",
-  boxSizing: "border-box",
-  border: "1px solid #d1d5db",
+  boxSizing:
+    "border-box",
+  border:
+    "1px solid #d1d5db",
   background: "#fff",
   borderRadius: 10,
-  padding: "11px 12px",
+  padding:
+    "11px 12px",
   fontSize: 14,
   outline: "none",
 };
@@ -2464,9 +3006,11 @@ const labelStyle = {
 
 const smallButton = {
   border: "none",
-  padding: "8px 11px",
+  padding:
+    "8px 11px",
   borderRadius: 8,
-  cursor: "pointer",
+  cursor:
+    "pointer",
   fontWeight: 700,
   fontSize: 12,
 };
@@ -2477,8 +3021,10 @@ const preStyle = {
   padding: 14,
   borderRadius: 10,
   overflowX: "auto",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
+  whiteSpace:
+    "pre-wrap",
+  wordBreak:
+    "break-word",
   fontSize: 12,
   lineHeight: 1.6,
   direction: "ltr",
