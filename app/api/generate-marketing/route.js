@@ -151,6 +151,77 @@ async function refundMarketingPoints({
 }
 
 // =========================================================
+// Resolve transaction safely
+// =========================================================
+
+async function resolvePointsTransaction({
+  userId,
+  referenceType,
+  referenceId,
+}) {
+  if (!userId || !referenceType || !referenceId) {
+    return null;
+  }
+
+  try {
+    const {
+      data,
+      error,
+    } = await supabaseAdmin
+      .from("point_transactions")
+      .select(
+        "id, user_id, amount, type, reference_type, reference_id, provider"
+      )
+      .eq(
+        "user_id",
+        userId
+      )
+      .eq(
+        "reference_type",
+        referenceType
+      )
+      .eq(
+        "reference_id",
+        referenceId
+      )
+      .eq(
+        "type",
+        "debit"
+      )
+      .eq(
+        "provider",
+        "suq_ai_points"
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false,
+        }
+      )
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "RESOLVE POINT TRANSACTION ERROR:",
+        error
+      );
+
+      return null;
+    }
+
+    return data || null;
+  } catch (error) {
+    console.error(
+      "RESOLVE POINT TRANSACTION UNEXPECTED ERROR:",
+      error
+    );
+
+    return null;
+  }
+}
+
+// =========================================================
 // POST
 // =========================================================
 
@@ -168,9 +239,11 @@ export async function POST(request) {
   let product = null;
   let unclear = false;
 
+  let operationReferenceId = null;
+
   try {
     // =====================================================
-    // 1. جلسة المستخدم
+    // 1. User session
     // =====================================================
 
     const cookieStore = await cookies();
@@ -222,7 +295,7 @@ export async function POST(request) {
     userId = user.id;
 
     // =====================================================
-    // 2. قراءة الطلب
+    // 2. Read request
     // =====================================================
 
     const body =
@@ -249,7 +322,7 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 3. قراءة المنتج
+    // 3. Load product
     // =====================================================
 
     const {
@@ -322,7 +395,7 @@ export async function POST(request) {
     product = productData;
 
     // =====================================================
-    // 4. التحقق من المتجر
+    // 4. Validate shop
     // =====================================================
 
     shopId =
@@ -385,7 +458,7 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 5. ملكية المتجر
+    // 5. Shop ownership
     // =====================================================
 
     if (shop.owner_id !== user.id) {
@@ -401,7 +474,7 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 6. حماية المنتج
+    // 6. Product protection
     // =====================================================
 
     if (
@@ -421,14 +494,14 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 7. وضوح المنتج
+    // 7. Product clarity
     // =====================================================
 
     unclear =
       isProductUnclear(product);
 
     // =====================================================
-    // 8. مسؤولية التاجر
+    // 8. Trader responsibility
     // =====================================================
 
     if (unclear) {
@@ -498,19 +571,14 @@ export async function POST(request) {
     }
 
     // =====================================================
-    // 9. إنشاء معرف مستقل لهذه العملية
-    //
-    // مهم:
-    // لا نستخدم product.id كـ reference_id
-    // حتى يستطيع المستخدم إنشاء محتوى جديد لنفس المنتج
-    // لاحقاً بدون اعتبار العملية مكررة.
+    // 9. Independent operation reference
     // =====================================================
 
-    const operationReferenceId =
+    operationReferenceId =
       crypto.randomUUID();
 
     // =====================================================
-    // 10. خصم النقاط
+    // 10. Charge points
     // =====================================================
 
     const {
@@ -600,6 +668,10 @@ export async function POST(request) {
       );
     }
 
+    // =====================================================
+    // 11. Validate charge result
+    // =====================================================
+
     if (
       !pointsResult ||
       pointsResult.success !== true
@@ -608,6 +680,76 @@ export async function POST(request) {
         "MARKETING POINTS CHARGE INVALID RESULT:",
         pointsResult
       );
+
+      // ---------------------------------------------------
+      // محاولة العثور على عملية الخصم من قاعدة البيانات
+      // باستخدام المرجع الفريد للعملية.
+      // ---------------------------------------------------
+
+      const recoveredTransaction =
+        await resolvePointsTransaction({
+          userId:
+            user.id,
+
+          referenceType:
+            "marketing_generation",
+
+          referenceId:
+            operationReferenceId,
+        });
+
+      if (recoveredTransaction?.id) {
+        pointsTransactionId =
+          recoveredTransaction.id;
+
+        pointsCharged =
+          Number(
+            recoveredTransaction.amount ||
+              0
+          );
+
+        // في هذه الحالة تم العثور على الخصم فعليًا،
+        // لذلك نسترجعه قبل إنهاء العملية.
+
+        const refundResult =
+          await refundMarketingPoints({
+            supabaseAuth,
+            transactionId:
+              pointsTransactionId,
+            userId,
+            shopId,
+            productId,
+            reason:
+              "استرجاع نقاط بسبب نتيجة غير صالحة من عملية خصم نقاط التسويق.",
+            stage:
+              "invalid_charge_result_recovered",
+            errorMessage:
+              "Charge RPC returned an invalid result after a debit transaction was found.",
+          });
+
+        return Response.json(
+          {
+            error:
+              "تعذر تأكيد عملية النقاط وتم استرجاع النقاط تلقائيًا.",
+
+            code:
+              "POINTS_CHARGE_INVALID_RESULT",
+
+            pointsRefunded:
+              !!refundResult?.refunded,
+
+            refundTransactionId:
+              refundResult?.refund_transaction_id ||
+              null,
+          },
+          {
+            status: 500,
+          }
+        );
+      }
+
+      // إذا لم نجد أي عملية خصم فعلية،
+      // نوقف العملية بدون محاولة استرجاع وهمي.
 
       return Response.json(
         {
@@ -623,13 +765,82 @@ export async function POST(request) {
       );
     }
 
+    // =====================================================
+    // 12. Resolve transaction ID
+    // =====================================================
+
     pointsTransactionId =
       pointsResult.transaction_id ||
       null;
 
+    // -----------------------------------------------------
+    // إذا لم يرجع RPC رقم العملية، نبحث عنه بالمرجع.
+    // -----------------------------------------------------
+
+    if (!pointsTransactionId) {
+      const recoveredTransaction =
+        await resolvePointsTransaction({
+          userId:
+            user.id,
+
+          referenceType:
+            "marketing_generation",
+
+          referenceId:
+            operationReferenceId,
+        });
+
+      if (recoveredTransaction?.id) {
+        pointsTransactionId =
+          recoveredTransaction.id;
+
+        pointsCharged =
+          Number(
+            recoveredTransaction.amount ||
+              0
+          );
+      }
+    }
+
+    // -----------------------------------------------------
+    // إذا لم نستطع الحصول على transaction ID،
+    // لا نكمل إلى OpenAI.
+    // -----------------------------------------------------
+
+    if (!pointsTransactionId) {
+      console.error(
+        "MARKETING POINTS TRANSACTION ID MISSING:",
+        {
+          pointsResult,
+          operationReferenceId,
+          userId,
+          shopId,
+          productId,
+        }
+      );
+
+      return Response.json(
+        {
+          error:
+            "تعذر تأكيد مرجع عملية النقاط، ولم يتم تشغيل الذكاء الاصطناعي.",
+
+          code:
+            "POINTS_TRANSACTION_REFERENCE_MISSING",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 13. Points values
+    // =====================================================
+
     pointsCharged =
       Number(
-        pointsResult.points_charged ||
+        pointsResult.points_charged ??
+          pointsCharged ??
           0
       );
 
@@ -640,7 +851,7 @@ export async function POST(request) {
       );
 
     // =====================================================
-    // 11. Prompt
+    // 14. Prompt
     // =====================================================
 
     const prompt = `
@@ -740,7 +951,7 @@ ${product.model_number || ""}
 `;
 
     // =====================================================
-    // 12. OpenAI
+    // 15. OpenAI
     // =====================================================
 
     let response;
@@ -748,8 +959,11 @@ ${product.model_number || ""}
     try {
       response =
         await openai.responses.create({
-          model: "gpt-5-mini",
-          input: prompt,
+          model:
+            "gpt-5-mini",
+
+          input:
+            prompt,
         });
     } catch (openaiError) {
       console.error(
@@ -788,20 +1002,29 @@ ${product.model_number || ""}
           metadata: {
             source:
               "generate-marketing",
+
             stage:
               "openai_request",
+
             error:
               openaiError?.message ||
               "OpenAI request failed",
+
             points_transaction_id:
               pointsTransactionId,
+
             points_charged:
               pointsCharged,
+
             points_refunded:
               !!refundResult?.refunded,
+
             refund_transaction_id:
               refundResult?.refund_transaction_id ||
               null,
+
+            operation_reference_id:
+              operationReferenceId,
           },
         });
       } catch (usageError) {
@@ -830,7 +1053,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // 13. Usage
+    // 16. Usage
     // =====================================================
 
     const usage =
@@ -858,7 +1081,7 @@ ${product.model_number || ""}
       "";
 
     // =====================================================
-    // 14. التأكد من وجود نتيجة
+    // 17. Empty response
     // =====================================================
 
     if (!text.trim()) {
@@ -895,14 +1118,22 @@ ${product.model_number || ""}
           metadata: {
             source:
               "generate-marketing",
+
             stage:
               "empty_openai_response",
+
             points_transaction_id:
               pointsTransactionId,
+
             points_charged:
               pointsCharged,
+
             points_refunded:
               !!refundResult?.refunded,
+
+            refund_transaction_id:
+              refundResult?.refund_transaction_id ||
+              null,
           },
         });
       } catch (usageError) {
@@ -931,7 +1162,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // 15. Parse JSON
+    // 18. Parse JSON
     // =====================================================
 
     let content;
@@ -979,14 +1210,19 @@ ${product.model_number || ""}
           metadata: {
             source:
               "generate-marketing",
+
             stage:
               "json_parse",
+
             points_transaction_id:
               pointsTransactionId,
+
             points_charged:
               pointsCharged,
+
             points_refunded:
               !!refundResult?.refunded,
+
             refund_transaction_id:
               refundResult?.refund_transaction_id ||
               null,
@@ -1018,7 +1254,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // 16. التأكد من أن النتيجة Object
+    // 19. Validate content object
     // =====================================================
 
     if (
@@ -1059,14 +1295,22 @@ ${product.model_number || ""}
           metadata: {
             source:
               "generate-marketing",
+
             stage:
               "invalid_content",
+
             points_transaction_id:
               pointsTransactionId,
+
             points_charged:
               pointsCharged,
+
             points_refunded:
               !!refundResult?.refunded,
+
+            refund_transaction_id:
+              refundResult?.refund_transaction_id ||
+              null,
           },
         });
       } catch (usageError) {
@@ -1095,7 +1339,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // 17. تسجيل الاستخدام الناجح
+    // 20. Successful usage log
     // =====================================================
 
     try {
@@ -1141,7 +1385,6 @@ ${product.model_number || ""}
         },
       });
     } catch (usageError) {
-      // لا نفشل عملية التسويق إذا فشل سجل الاستخدام.
       console.error(
         "AI USAGE LOG ERROR:",
         usageError
@@ -1149,7 +1392,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // 18. النتيجة
+    // 21. Result
     // =====================================================
 
     return Response.json({
@@ -1177,7 +1420,7 @@ ${product.model_number || ""}
     );
 
     // =====================================================
-    // استرجاع النقاط في أي خطأ غير متوقع
+    // Unexpected refund
     // =====================================================
 
     let refundResult = null;
@@ -1205,7 +1448,7 @@ ${product.model_number || ""}
     }
 
     // =====================================================
-    // تسجيل فشل الاستخدام
+    // Failed usage log
     // =====================================================
 
     try {
@@ -1249,6 +1492,9 @@ ${product.model_number || ""}
           refund_transaction_id:
             refundResult?.refund_transaction_id ||
             null,
+
+          operation_reference_id:
+            operationReferenceId,
         },
       });
     } catch (usageError) {
