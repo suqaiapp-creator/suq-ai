@@ -5,21 +5,6 @@ import { createClient } from "../../../lib/supabase/client";
 
 const supabase = createClient();
 
-const capabilityLabels = {
-  read_project_files: "قراءة ملفات المشروع",
-  analyze_code: "تحليل الكود",
-  suggest_changes: "اقتراح التعديلات",
-  create_files: "إنشاء الملفات",
-  edit_files: "تعديل الملفات",
-  run_build: "تشغيل Build",
-  run_tests: "تشغيل الاختبارات",
-  database_review: "مراجعة قاعدة البيانات",
-  database_modify: "تعديل قاعدة البيانات",
-  prepare_git_commit: "تجهيز Git Commit",
-  deploy_vercel: "النشر إلى Vercel",
-  rollback: "Rollback",
-};
-
 const riskLabels = {
   low: "منخفض",
   medium: "متوسط",
@@ -101,6 +86,9 @@ export default function AiEmployeeControlPage() {
   const [commandSearch, setCommandSearch] = useState("");
   const [commandFilter, setCommandFilter] = useState("all");
 
+  const [decisionApproval, setDecisionApproval] = useState(null);
+  const [decisionReason, setDecisionReason] = useState("");
+
   const loadData = async () => {
     setLoading(true);
     setMessage("");
@@ -123,43 +111,46 @@ export default function AiEmployeeControlPage() {
       if (profileError) throw profileError;
 
       if (!profile?.is_super_admin) {
-        throw new Error("غير مصرح. هذه الصفحة متاحة للـ Super Admin فقط.");
+        throw new Error(
+          "غير مصرح. هذه الصفحة متاحة للـ Super Admin فقط."
+        );
       }
 
-      const { data: employeeData, error: employeeError } = await supabase
-        .from("ai_employees")
-        .select(
-          `
-            id,
-            name,
-            description,
-            specialization,
-            personality,
-            tone,
-            avatar_url,
-            status,
-            level,
-            permissions,
-            instructions,
-            tasks_completed,
-            tasks_failed,
-            success_rate,
-            average_rating,
-            average_speed_seconds,
-            total_cost,
-            last_active_at,
-            created_at,
-            updated_at,
-            department_id,
-            departments (
+      const { data: employeeData, error: employeeError } =
+        await supabase
+          .from("ai_employees")
+          .select(
+            `
               id,
-              name
-            )
-          `
-        )
-        .eq("name", "والم")
-        .limit(1)
-        .maybeSingle();
+              name,
+              description,
+              specialization,
+              personality,
+              tone,
+              avatar_url,
+              status,
+              level,
+              permissions,
+              instructions,
+              tasks_completed,
+              tasks_failed,
+              success_rate,
+              average_rating,
+              average_speed_seconds,
+              total_cost,
+              last_active_at,
+              created_at,
+              updated_at,
+              department_id,
+              departments (
+                id,
+                name
+              )
+            `
+          )
+          .eq("name", "والم")
+          .limit(1)
+          .maybeSingle();
 
       if (employeeError) throw employeeError;
 
@@ -212,7 +203,9 @@ export default function AiEmployeeControlPage() {
       setCommands(commandsResult.data || []);
       setApprovals(approvalsResult.data || []);
     } catch (error) {
-      setMessage(error?.message || "حدث خطأ أثناء تحميل البيانات.");
+      setMessage(
+        error?.message || "حدث خطأ أثناء تحميل البيانات."
+      );
     } finally {
       setLoading(false);
     }
@@ -253,7 +246,9 @@ export default function AiEmployeeControlPage() {
           : "تم إيقاف والم."
       );
     } catch (error) {
-      setMessage(error?.message || "تعذر تغيير حالة والم.");
+      setMessage(
+        error?.message || "تعذر تغيير حالة والم."
+      );
     } finally {
       setSaving(false);
     }
@@ -296,7 +291,115 @@ export default function AiEmployeeControlPage() {
           : `تم تعطيل: ${capability.capability_name}`
       );
     } catch (error) {
-      setMessage(error?.message || "تعذر تحديث الصلاحية.");
+      setMessage(
+        error?.message || "تعذر تحديث الصلاحية."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openDecision = (approval) => {
+    setDecisionApproval(approval);
+    setDecisionReason("");
+    setMessage("");
+  };
+
+  const closeDecision = () => {
+    if (saving) return;
+
+    setDecisionApproval(null);
+    setDecisionReason("");
+  };
+
+  const submitDecision = async (decision) => {
+    if (!decisionApproval) return;
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const reason = decisionReason.trim() || null;
+
+      const rpcName =
+        decision === "approve"
+          ? "approve_ai_employee_command"
+          : "reject_ai_employee_command";
+
+      const { data, error } = await supabase.rpc(
+        rpcName,
+        {
+          p_approval_id: decisionApproval.id,
+          p_reason: reason,
+        }
+      );
+
+      if (error) throw error;
+
+      if (!data?.success) {
+        throw new Error(
+          "تعذر معالجة قرار الموافقة."
+        );
+      }
+
+      setApprovals((current) =>
+        current.map((item) =>
+          item.id === decisionApproval.id
+            ? {
+                ...item,
+                status:
+                  decision === "approve"
+                    ? "approved"
+                    : "rejected",
+                decision:
+                  decision === "approve"
+                    ? "approved"
+                    : "rejected",
+                reason,
+                decided_at: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+
+      if (data.command_id) {
+        setCommands((current) =>
+          current.map((item) =>
+            item.id === data.command_id
+              ? {
+                  ...item,
+                  approval_status:
+                    decision === "approve"
+                      ? "approved"
+                      : "rejected",
+                  status:
+                    decision === "approve"
+                      ? item.status
+                      : "cancelled",
+                  error_message:
+                    decision === "approve"
+                      ? item.error_message
+                      : reason ||
+                        "تم رفض الأمر من Super Admin",
+                }
+              : item
+          )
+        );
+      }
+
+      setMessage(
+        decision === "approve"
+          ? "تمت الموافقة على الأمر بنجاح. الموافقة لا تشغّل الأمر تلقائيًا."
+          : "تم رفض الأمر ومنع انتقاله للتنفيذ."
+      );
+
+      setDecisionApproval(null);
+      setDecisionReason("");
+    } catch (error) {
+      setMessage(
+        error?.message ||
+          "حدث خطأ أثناء معالجة القرار."
+      );
     } finally {
       setSaving(false);
     }
@@ -328,13 +431,6 @@ export default function AiEmployeeControlPage() {
     (item) => item.enabled
   ).length;
 
-  const sensitiveCapabilities = capabilities.filter(
-    (item) =>
-      item.requires_approval ||
-      item.risk_level === "high" ||
-      item.risk_level === "critical"
-  ).length;
-
   const completedCommands = commands.filter(
     (item) => item.status === "completed"
   ).length;
@@ -352,6 +448,7 @@ export default function AiEmployeeControlPage() {
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
           <div className="animate-pulse space-y-6">
             <div className="h-24 rounded-3xl bg-white" />
+
             <div className="grid gap-4 md:grid-cols-4">
               {[1, 2, 3, 4].map((item) => (
                 <div
@@ -360,6 +457,7 @@ export default function AiEmployeeControlPage() {
                 />
               ))}
             </div>
+
             <div className="h-96 rounded-3xl bg-white" />
           </div>
         </div>
@@ -445,8 +543,8 @@ export default function AiEmployeeControlPage() {
                   </p>
 
                   <p className="mt-2 text-xs text-slate-400">
-                    هذا المركز للمراقبة والتحكم. التنفيذ البرمجي
-                    الفعلي غير مربوط بهذه الصفحة حاليًا.
+                    مركز تحكم ومراقبة. التنفيذ البرمجي الفعلي
+                    غير مربوط بهذه الصفحة حاليًا.
                   </p>
                 </div>
               </div>
@@ -570,6 +668,7 @@ export default function AiEmployeeControlPage() {
                 <h2 className="text-lg font-black">
                   ملف والم
                 </h2>
+
                 <p className="mt-1 text-sm text-slate-500">
                   معلومات الموظف وحالته الحالية.
                 </p>
@@ -754,6 +853,7 @@ export default function AiEmployeeControlPage() {
                 <h2 className="text-lg font-black">
                   صلاحيات وقدرات والم
                 </h2>
+
                 <p className="mt-1 text-sm text-slate-500">
                   تفعيل وتعطيل القدرات بشكل مستقل.
                 </p>
@@ -775,9 +875,6 @@ export default function AiEmployeeControlPage() {
                     <div className="min-w-0">
                       <h3 className="font-bold text-slate-900">
                         {capability.capability_name ||
-                          capabilityLabels[
-                            capability.capability_key
-                          ] ||
                           capability.capability_key}
                       </h3>
 
@@ -796,11 +893,6 @@ export default function AiEmployeeControlPage() {
                           ? "bg-emerald-500"
                           : "bg-slate-300"
                       }`}
-                      aria-label={
-                        capability.enabled
-                          ? "تعطيل"
-                          : "تفعيل"
-                      }
                     >
                       <span
                         className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
@@ -854,10 +946,10 @@ export default function AiEmployeeControlPage() {
               <div className="text-sm font-black text-amber-800">
                 تنبيه أمني
               </div>
+
               <p className="mt-1 text-xs leading-6 text-amber-700">
                 تفعيل الصلاحية هنا لا يعني أن التنفيذ البرمجي
-                أصبح متاحًا تلقائيًا. طبقة التنفيذ والموافقة
-                ستُبنى بشكل مستقل.
+                أصبح متاحًا تلقائيًا.
               </p>
             </div>
           </section>
@@ -871,6 +963,7 @@ export default function AiEmployeeControlPage() {
                 <h2 className="text-lg font-black">
                   أوامر والم
                 </h2>
+
                 <p className="mt-1 text-sm text-slate-500">
                   سجل الأوامر وحالات تنفيذها.
                 </p>
@@ -1018,8 +1111,8 @@ export default function AiEmployeeControlPage() {
                   key={approval.id}
                   className="rounded-2xl border border-slate-200 p-4"
                 >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
                       <div className="flex flex-wrap gap-2">
                         <span
                           className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${statusClass(
@@ -1048,9 +1141,11 @@ export default function AiEmployeeControlPage() {
                         </span>
                       </div>
 
-                      <div className="mt-3 text-sm font-bold text-slate-900">
-                        أمر مرتبط:{" "}
-                        {approval.command_id}
+                      <div className="mt-3 break-all text-sm font-bold text-slate-900">
+                        أمر مرتبط:
+                        <span className="mr-2 font-mono text-xs text-slate-500">
+                          {approval.command_id}
+                        </span>
                       </div>
 
                       <div className="mt-1 text-xs text-slate-400">
@@ -1058,20 +1153,53 @@ export default function AiEmployeeControlPage() {
                           approval.created_at
                         )}
                       </div>
+
+                      {approval.reason && (
+                        <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-6 text-slate-600">
+                          <span className="font-bold">
+                            السبب:
+                          </span>{" "}
+                          {approval.reason}
+                        </div>
+                      )}
+
+                      {approval.decided_at && (
+                        <div className="mt-2 text-xs text-slate-400">
+                          وقت القرار:{" "}
+                          {formatDate(
+                            approval.decided_at
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {approval.status === "pending" && (
-                      <div className="rounded-xl bg-amber-50 px-4 py-3 text-xs font-bold text-amber-700">
-                        يحتاج قرار Super Admin
+                      <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                        <button
+                          onClick={() =>
+                            openDecision(approval)
+                          }
+                          disabled={saving}
+                          className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50"
+                        >
+                          ✓ موافقة
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            openDecision({
+                              ...approval,
+                              initialDecision: "reject",
+                            })
+                          }
+                          disabled={saving}
+                          className="rounded-xl bg-red-600 px-5 py-2.5 text-sm font-black text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          ✕ رفض
+                        </button>
                       </div>
                     )}
                   </div>
-
-                  {approval.reason && (
-                    <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-                      {approval.reason}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -1123,9 +1251,9 @@ export default function AiEmployeeControlPage() {
               </h2>
 
               <p className="mt-4 text-sm leading-8 text-emerald-800">
-                والم موظف مساعد لسوق AI، هدفه تجهيز المهمة وفهمها
-                ومراجعة العمل قبل تنفيذه، وليس تنفيذ عمليات حساسة
-                بدون صلاحية أو موافقة.
+                والم موظف مساعد لسوق AI، هدفه تجهيز المهمة
+                وفهمها ومراجعة العمل قبل تنفيذه، وليس تنفيذ
+                عمليات حساسة بدون صلاحية أو موافقة.
               </p>
 
               <div className="mt-5 space-y-2 text-sm text-emerald-800">
@@ -1139,8 +1267,106 @@ export default function AiEmployeeControlPage() {
             </section>
           </div>
         )}
-
       </div>
+
+      {/* Decision Modal */}
+      {decisionApproval && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-900">
+                  قرار Super Admin
+                </h2>
+
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  راجع الأمر قبل اتخاذ القرار.
+                </p>
+              </div>
+
+              <button
+                onClick={closeDecision}
+                disabled={saving}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs font-bold text-slate-400">
+                مستوى الخطورة
+              </div>
+
+              <div
+                className={`mt-2 inline-flex rounded-full border px-3 py-1 text-xs font-black ${riskClass(
+                  decisionApproval.risk_level
+                )}`}
+              >
+                {riskLabels[
+                  decisionApproval.risk_level
+                ] || decisionApproval.risk_level}
+              </div>
+
+              <div className="mt-4 text-xs font-bold text-slate-400">
+                الأمر
+              </div>
+
+              <div className="mt-2 break-all text-sm font-bold leading-7 text-slate-800">
+                {decisionApproval.command_id}
+              </div>
+            </div>
+
+            <label className="mt-5 block">
+              <span className="text-sm font-bold text-slate-700">
+                سبب القرار
+              </span>
+
+              <textarea
+                value={decisionReason}
+                onChange={(event) =>
+                  setDecisionReason(event.target.value)
+                }
+                rows={4}
+                placeholder="اكتب ملاحظة أو سبب القرار..."
+                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-emerald-400"
+              />
+            </label>
+
+            <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs leading-6 text-amber-700">
+              <strong>مهم:</strong> الموافقة لا تشغّل الأمر
+              مباشرة. هي فقط تسمح له بالانتقال إلى طبقة
+              التنفيذ التي سنبنيها لاحقًا.
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row">
+              <button
+                onClick={closeDecision}
+                disabled={saving}
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                إلغاء
+              </button>
+
+              <button
+                onClick={() => submitDecision("reject")}
+                disabled={saving}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-black text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {saving ? "جارٍ المعالجة..." : "رفض الأمر"}
+              </button>
+
+              <button
+                onClick={() => submitDecision("approve")}
+                disabled={saving}
+                className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {saving ? "جارٍ المعالجة..." : "الموافقة"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
