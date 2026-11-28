@@ -188,7 +188,8 @@ function analyzeCode(content, path) {
     issues.push({
       type: "console",
       level: "low",
-      message: "يوجد استخدام لـ console.* داخل الملف؛ يفضّل تنظيف سجلات الإنتاج.",
+      message:
+        "يوجد استخدام لـ console.* داخل الملف؛ يفضّل تنظيف سجلات الإنتاج.",
     });
   }
 
@@ -336,6 +337,52 @@ function suggestChanges(content, path) {
   };
 }
 
+function buildEditPreview(currentContent, newContent, path) {
+  const currentLines = currentContent.split(/\r?\n/);
+  const newLines = newContent.split(/\r?\n/);
+
+  let firstDifference = -1;
+  const maxLength = Math.max(
+    currentLines.length,
+    newLines.length
+  );
+
+  for (let index = 0; index < maxLength; index += 1) {
+    if (currentLines[index] !== newLines[index]) {
+      firstDifference = index;
+      break;
+    }
+  }
+
+  const changed =
+    currentContent !== newContent;
+
+  return {
+    path,
+    changed,
+    current_size_bytes: Buffer.byteLength(currentContent, "utf8"),
+    proposed_size_bytes: Buffer.byteLength(newContent, "utf8"),
+    current_lines: currentLines.length,
+    proposed_lines: newLines.length,
+    first_difference_line:
+      firstDifference === -1 ? null : firstDifference + 1,
+    preview: {
+      old_content: currentContent,
+      new_content: newContent,
+    },
+    safety: {
+      files_modified: false,
+      files_created: false,
+      github_write_used: false,
+      dry_run: true,
+      openai_used: false,
+      runway_used: false,
+      points_charged: 0,
+      estimated_cost_usd: 0,
+    },
+  };
+}
+
 function appendExecutionLog(existing, event, data = {}) {
   const current = Array.isArray(existing) ? existing : [];
 
@@ -410,11 +457,12 @@ export async function POST(request) {
       );
     }
 
-    const { data: profile, error: profileError } = await serviceClient
-      .from("profiles")
-      .select("id,is_super_admin,account_status")
-      .eq("id", user.id)
-      .single();
+    const { data: profile, error: profileError } =
+      await serviceClient
+        .from("profiles")
+        .select("id,is_super_admin,account_status")
+        .eq("id", user.id)
+        .single();
 
     if (
       profileError ||
@@ -445,11 +493,12 @@ export async function POST(request) {
       );
     }
 
-    const { data: command, error: commandError } = await serviceClient
-      .from("ai_employee_commands")
-      .select("*")
-      .eq("id", commandId)
-      .single();
+    const { data: command, error: commandError } =
+      await serviceClient
+        .from("ai_employee_commands")
+        .select("*")
+        .eq("id", commandId)
+        .single();
 
     if (commandError || !command) {
       return json(
@@ -477,6 +526,7 @@ export async function POST(request) {
       read_project_files: "read_project_files",
       analyze_code: "analyze_code",
       suggest_changes: "suggest_changes",
+      edit_files: "edit_files",
     };
 
     const requiredCapability = capabilityMap[commandType];
@@ -499,14 +549,17 @@ export async function POST(request) {
       );
     }
 
-    const { data: employee, error: employeeError } = await serviceClient
-      .from("ai_employees")
-      .select("id,name,status")
-      .eq("id", command.ai_employee_id)
-      .single();
+    const { data: employee, error: employeeError } =
+      await serviceClient
+        .from("ai_employees")
+        .select("id,name,status")
+        .eq("id", command.ai_employee_id)
+        .single();
 
     if (employeeError || !employee) {
-      throw new Error("لم يتم العثور على موظف AI المرتبط بالأمر.");
+      throw new Error(
+        "لم يتم العثور على موظف AI المرتبط بالأمر."
+      );
     }
 
     if (employee.status !== "active") {
@@ -514,19 +567,24 @@ export async function POST(request) {
     }
 
     const { data: authorization, error: authorizationError } =
-      await authenticatedClient.rpc("authorize_ai_employee_command", {
-        p_command_id: commandId,
-      });
+      await authenticatedClient.rpc(
+        "authorize_ai_employee_command",
+        {
+          p_command_id: commandId,
+        }
+      );
 
     if (authorizationError) {
       throw new Error(
-        authorizationError.message || "تعذر تفويض تنفيذ الأمر."
+        authorizationError.message ||
+          "تعذر تفويض تنفيذ الأمر."
       );
     }
 
     if (!authorization?.authorized) {
       throw new Error(
-        authorization?.reason || "الأمر غير مصرح بتنفيذه."
+        authorization?.reason ||
+          "الأمر غير مصرح بتنفيذه."
       );
     }
 
@@ -546,16 +604,24 @@ export async function POST(request) {
       .eq("id", commandId);
 
     const inputData =
-      command.input_data && typeof command.input_data === "object"
+      command.input_data &&
+      typeof command.input_data === "object"
         ? command.input_data
         : {};
 
     const path = normalizePath(inputData.path || "");
 
     if (!path) {
-      throw new Error("يجب تحديد input_data.path للملف المطلوب.");
+      throw new Error(
+        "يجب تحديد input_data.path للملف المطلوب."
+      );
     }
 
+    /*
+     * ---------------------------------------------------------
+     * READ PROJECT FILES
+     * ---------------------------------------------------------
+     */
     if (commandType === "read_project_files") {
       const startLog = appendExecutionLog(
         logAfterAuthorization,
@@ -584,20 +650,25 @@ export async function POST(request) {
       );
 
       const { error: completeError } =
-        await authenticatedClient.rpc("complete_ai_employee_command", {
-          p_command_id: commandId,
-          p_result: `تمت قراءة الملف ${file.path} بنجاح.`,
-          p_output_data: {
-            path: file.path,
-            size: file.size,
-            sha: file.sha,
-            content: file.content,
-          },
-        });
+        await authenticatedClient.rpc(
+          "complete_ai_employee_command",
+          {
+            p_command_id: commandId,
+            p_result:
+              `تمت قراءة الملف ${file.path} بنجاح.`,
+            p_output_data: {
+              path: file.path,
+              size: file.size,
+              sha: file.sha,
+              content: file.content,
+            },
+          }
+        );
 
       if (completeError) {
         throw new Error(
-          completeError.message || "تعذر إكمال الأمر."
+          completeError.message ||
+            "تعذر إكمال الأمر."
         );
       }
 
@@ -615,10 +686,16 @@ export async function POST(request) {
         success: true,
         command_id: commandId,
         command_type: commandType,
-        result: `تمت قراءة الملف ${file.path} بنجاح.`,
+        result:
+          `تمت قراءة الملف ${file.path} بنجاح.`,
       });
     }
 
+    /*
+     * ---------------------------------------------------------
+     * ANALYZE CODE
+     * ---------------------------------------------------------
+     */
     if (commandType === "analyze_code") {
       const startLog = appendExecutionLog(
         logAfterAuthorization,
@@ -646,7 +723,10 @@ export async function POST(request) {
         }
       );
 
-      const analysis = analyzeCode(file.content, file.path);
+      const analysis = analyzeCode(
+        file.content,
+        file.path
+      );
 
       const analysisLog = appendExecutionLog(
         readCompletedLog,
@@ -658,17 +738,21 @@ export async function POST(request) {
       );
 
       const { error: completeError } =
-        await authenticatedClient.rpc("complete_ai_employee_command", {
-          p_command_id: commandId,
-          p_result:
-            `تم تحليل الملف ${file.path} بنجاح. ` +
-            `عدد الأسطر: ${analysis.total_lines}.`,
-          p_output_data: analysis,
-        });
+        await authenticatedClient.rpc(
+          "complete_ai_employee_command",
+          {
+            p_command_id: commandId,
+            p_result:
+              `تم تحليل الملف ${file.path} بنجاح. ` +
+              `عدد الأسطر: ${analysis.total_lines}.`,
+            p_output_data: analysis,
+          }
+        );
 
       if (completeError) {
         throw new Error(
-          completeError.message || "تعذر إكمال تحليل الكود."
+          completeError.message ||
+            "تعذر إكمال تحليل الكود."
         );
       }
 
@@ -693,6 +777,11 @@ export async function POST(request) {
       });
     }
 
+    /*
+     * ---------------------------------------------------------
+     * SUGGEST CHANGES
+     * ---------------------------------------------------------
+     */
     if (commandType === "suggest_changes") {
       const startLog = appendExecutionLog(
         logAfterAuthorization,
@@ -720,30 +809,38 @@ export async function POST(request) {
         }
       );
 
-      const suggestions = suggestChanges(file.content, file.path);
+      const suggestions = suggestChanges(
+        file.content,
+        file.path
+      );
 
       const suggestionsLog = appendExecutionLog(
         readCompletedLog,
         "code_suggestions_completed",
         {
           path: file.path,
-          suggestions_count: suggestions.suggestions.length,
+          suggestions_count:
+            suggestions.suggestions.length,
           files_modified: false,
         }
       );
 
       const { error: completeError } =
-        await authenticatedClient.rpc("complete_ai_employee_command", {
-          p_command_id: commandId,
-          p_result:
-            `تم تحليل ${file.path} وإعداد ` +
-            `${suggestions.suggestions.length} اقتراحات تحسين بدون تعديل الملف.`,
-          p_output_data: suggestions,
-        });
+        await authenticatedClient.rpc(
+          "complete_ai_employee_command",
+          {
+            p_command_id: commandId,
+            p_result:
+              `تم تحليل ${file.path} وإعداد ` +
+              `${suggestions.suggestions.length} اقتراحات تحسين بدون تعديل الملف.`,
+            p_output_data: suggestions,
+          }
+        );
 
       if (completeError) {
         throw new Error(
-          completeError.message || "تعذر إكمال اقتراح التعديلات."
+          completeError.message ||
+            "تعذر إكمال اقتراح التعديلات."
         );
       }
 
@@ -768,17 +865,168 @@ export async function POST(request) {
       });
     }
 
-    throw new Error(`نوع الأمر ${commandType} غير مدعوم.`);
+    /*
+     * ---------------------------------------------------------
+     * EDIT FILES - SAFE DRY RUN ONLY
+     * ---------------------------------------------------------
+     *
+     * المرحلة الحالية لا تكتب إلى GitHub.
+     *
+     * يجب إرسال:
+     *
+     * input_data: {
+     *   path: "app/example.js",
+     *   new_content: "...",
+     *   dry_run: true
+     * }
+     *
+     * إذا لم يكن dry_run = true سيتم رفض العملية.
+     */
+    if (commandType === "edit_files") {
+      const dryRun = inputData.dry_run === true;
+
+      if (!dryRun) {
+        throw new Error(
+          "التعديل الفعلي على GitHub غير مفعّل في هذه المرحلة. يجب استخدام dry_run=true أولًا."
+        );
+      }
+
+      const newContent =
+        typeof inputData.new_content === "string"
+          ? inputData.new_content
+          : typeof inputData.content === "string"
+          ? inputData.content
+          : null;
+
+      if (newContent === null) {
+        throw new Error(
+          "يجب تحديد input_data.new_content لاختبار تعديل الملف."
+        );
+      }
+
+      const newContentSize = Buffer.byteLength(
+        newContent,
+        "utf8"
+      );
+
+      if (newContentSize > MAX_FILE_SIZE) {
+        throw new Error(
+          "المحتوى الجديد أكبر من الحد المسموح."
+        );
+      }
+
+      const startLog = appendExecutionLog(
+        logAfterAuthorization,
+        "github_edit_preview_started",
+        {
+          path,
+          dry_run: true,
+        }
+      );
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: startLog,
+        })
+        .eq("id", commandId);
+
+      const file = await readGithubFile(path);
+
+      const readCompletedLog = appendExecutionLog(
+        startLog,
+        "github_file_read_completed",
+        {
+          path: file.path,
+          size: file.size,
+          sha: file.sha,
+        }
+      );
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: readCompletedLog,
+        })
+        .eq("id", commandId);
+
+      const preview = buildEditPreview(
+        file.content,
+        newContent,
+        file.path
+      );
+
+      const previewLog = appendExecutionLog(
+        readCompletedLog,
+        "edit_dry_run_completed",
+        {
+          path: file.path,
+          changed: preview.changed,
+          files_modified: false,
+          github_write_used: false,
+        }
+      );
+
+      const resultMessage = preview.changed
+        ? `تم اختبار تعديل الملف ${file.path} بنجاح بدون الكتابة على GitHub.`
+        : `تم اختبار الملف ${file.path} ولم يتم العثور على أي تغيير.`;
+
+      const { error: completeError } =
+        await authenticatedClient.rpc(
+          "complete_ai_employee_command",
+          {
+            p_command_id: commandId,
+            p_result: resultMessage,
+            p_output_data: preview,
+          }
+        );
+
+      if (completeError) {
+        throw new Error(
+          completeError.message ||
+            "تعذر إكمال اختبار تعديل الملف."
+        );
+      }
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: appendExecutionLog(
+            previewLog,
+            "execution_completed",
+            {
+              dry_run: true,
+            }
+          ),
+        })
+        .eq("id", commandId);
+
+      return json({
+        success: true,
+        command_id: commandId,
+        command_type: commandType,
+        result: resultMessage,
+        output_data: preview,
+      });
+    }
+
+    throw new Error(
+      `نوع الأمر ${commandType} غير مدعوم.`
+    );
   } catch (error) {
     const message =
-      error?.message || "حدث خطأ غير معروف أثناء تنفيذ الأمر.";
+      error?.message ||
+      "حدث خطأ غير معروف أثناء تنفيذ الأمر.";
 
     if (commandId && authenticatedClient) {
       try {
-        await authenticatedClient.rpc("fail_ai_employee_command", {
-          p_command_id: commandId,
-          p_error_message: message,
-        });
+        await authenticatedClient.rpc(
+          "fail_ai_employee_command",
+          {
+            p_command_id: commandId,
+            p_error_message: message,
+          }
+        );
       } catch {
         // fallback below
       }
@@ -786,11 +1034,12 @@ export async function POST(request) {
 
     if (commandId && serviceClient) {
       try {
-        const { data: currentCommand } = await serviceClient
-          .from("ai_employee_commands")
-          .select("execution_log")
-          .eq("id", commandId)
-          .single();
+        const { data: currentCommand } =
+          await serviceClient
+            .from("ai_employee_commands")
+            .select("execution_log")
+            .eq("id", commandId)
+            .single();
 
         await serviceClient
           .from("ai_employee_commands")
