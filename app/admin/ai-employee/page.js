@@ -547,6 +547,15 @@ export default function AIEmployeePage() {
     }
   };
 
+  /*
+   * محرك التنفيذ:
+   * - يتأكد من وجود جلسة المستخدم.
+   * - يرسل Bearer token للـ API.
+   * - يستخدم credentials: include.
+   * - يضع timeout حتى لا يبقى الطلب معلقاً بلا نهاية.
+   * - يقرأ الرد كنص أولاً ثم يحاول تحويله إلى JSON.
+   * - لا يستخدم OpenAI أو Runway.
+   */
   const executeCommand = async (command) => {
     const executionButton = getExecutionButton(command);
 
@@ -560,24 +569,79 @@ export default function AIEmployeePage() {
       return;
     }
 
+    if (executingId === command.id) {
+      return;
+    }
+
     setExecutingId(command.id);
     setError("");
     setMessage("");
 
+    let timeoutId = null;
+
     try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      if (!session?.access_token) {
+        throw new Error(
+          "انتهت جلسة تسجيل الدخول. أعد تسجيل الدخول ثم حاول مرة أخرى."
+        );
+      }
+
+      const controller = new AbortController();
+
+      timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 60_000);
+
       const response = await fetch("/api/admin/ai-employee/execute", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
+        credentials: "include",
+        signal: controller.signal,
         body: JSON.stringify({
           commandId: command.id,
         }),
       });
 
-      const data = await response.json();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
 
-      if (!response.ok || !data?.success) {
+      const responseText = await response.text();
+
+      let data = null;
+
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        data = {
+          success: false,
+          error:
+            responseText || "استجاب الخادم برد غير مفهوم.",
+        };
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ||
+            data?.message ||
+            `فشل تنفيذ الأمر. HTTP ${response.status}`
+        );
+      }
+
+      if (!data?.success) {
         throw new Error(
           data?.error ||
             data?.message ||
@@ -601,10 +665,22 @@ export default function AIEmployeePage() {
 
       await loadData();
     } catch (err) {
-      console.error(err);
-      setError(err?.message || "تعذر تنفيذ الأمر.");
+      console.error("AI Employee execution error:", err);
+
+      if (err?.name === "AbortError") {
+        setError(
+          "انتهت مهلة الاتصال بمحرك تنفيذ والم بعد 60 ثانية. لم يتم تشغيل أمر جديد."
+        );
+      } else {
+        setError(err?.message || "تعذر تنفيذ الأمر.");
+      }
+
       await loadData();
     } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
       setExecutingId(null);
     }
   };
@@ -923,8 +999,10 @@ export default function AIEmployeePage() {
 
                   <tbody>
                     {commands.map((command) => {
-                      const executionButton = getExecutionButton(command);
-                      const expanded = expandedCommand === command.id;
+                      const executionButton =
+                        getExecutionButton(command);
+                      const expanded =
+                        expandedCommand === command.id;
 
                       return (
                         <tr key={command.id}>
@@ -969,11 +1047,15 @@ export default function AIEmployeePage() {
                               >
                                 {JSON.stringify(
                                   {
-                                    input_data: command.input_data,
-                                    output_data: command.output_data,
+                                    input_data:
+                                      command.input_data,
+                                    output_data:
+                                      command.output_data,
                                     result: command.result,
-                                    error_message: command.error_message,
-                                    execution_log: command.execution_log,
+                                    error_message:
+                                      command.error_message,
+                                    execution_log:
+                                      command.execution_log,
                                   },
                                   null,
                                   2
@@ -985,54 +1067,65 @@ export default function AIEmployeePage() {
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                             }}
                           >
-                            {commandTypeLabels[command.command_type] ||
-                              command.command_type}
+                            {commandTypeLabels[
+                              command.command_type
+                            ] || command.command_type}
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                             }}
                           >
                             <span
                               style={{
-                                color: statusColor(command.status),
+                                color: statusColor(
+                                  command.status
+                                ),
                                 fontWeight: 800,
                               }}
                             >
-                              {statusLabels[command.status] ||
-                                command.status}
+                              {statusLabels[
+                                command.status
+                              ] || command.status}
                             </span>
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                             }}
                           >
                             <span
                               style={{
-                                color: riskColor(command.risk_level),
+                                color: riskColor(
+                                  command.risk_level
+                                ),
                                 fontWeight: 800,
                               }}
                             >
-                              {riskLabels[command.risk_level] ||
-                                command.risk_level}
+                              {riskLabels[
+                                command.risk_level
+                              ] || command.risk_level}
                             </span>
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                             }}
                           >
@@ -1040,13 +1133,15 @@ export default function AIEmployeePage() {
                               <span
                                 style={{
                                   color:
-                                    command.approval_status === "approved"
+                                    command.approval_status ===
+                                    "approved"
                                       ? GREEN
                                       : "#d97706",
                                   fontWeight: 800,
                                 }}
                               >
-                                {command.approval_status === "approved"
+                                {command.approval_status ===
+                                "approved"
                                   ? "تمت الموافقة"
                                   : "بانتظار الموافقة"}
                               </span>
@@ -1065,29 +1160,36 @@ export default function AIEmployeePage() {
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {formatDate(command.created_at)}
+                            {formatDate(
+                              command.created_at
+                            )}
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {formatDuration(command.duration_seconds)}
+                            {formatDuration(
+                              command.duration_seconds
+                            )}
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               verticalAlign: "top",
                             }}
                           >
@@ -1100,11 +1202,15 @@ export default function AIEmployeePage() {
                             >
                               {command.status === "pending" &&
                                 (!command.requires_approval ||
-                                  command.approval_status === "approved") && (
+                                  command.approval_status ===
+                                    "approved") && (
                                   <button
-                                    onClick={() => startCommand(command)}
+                                    onClick={() =>
+                                      startCommand(command)
+                                    }
                                     style={{
-                                      border: "1px solid #bbf7d0",
+                                      border:
+                                        "1px solid #bbf7d0",
                                       background: "#f0fdf4",
                                       color: "#166534",
                                       borderRadius: 8,
@@ -1119,7 +1225,8 @@ export default function AIEmployeePage() {
 
                               {command.status === "pending" &&
                                 command.requires_approval &&
-                                command.approval_status !== "approved" && (
+                                command.approval_status !==
+                                  "approved" && (
                                   <span
                                     style={{
                                       color: "#d97706",
@@ -1135,8 +1242,13 @@ export default function AIEmployeePage() {
                               {command.status === "running" &&
                                 executionButton && (
                                   <button
-                                    onClick={() => executeCommand(command)}
-                                    disabled={executingId === command.id}
+                                    onClick={() =>
+                                      executeCommand(command)
+                                    }
+                                    disabled={
+                                      executingId ===
+                                      command.id
+                                    }
                                     style={{
                                       border: "none",
                                       background: GREEN,
@@ -1144,15 +1256,20 @@ export default function AIEmployeePage() {
                                       borderRadius: 8,
                                       padding: "7px 10px",
                                       cursor:
-                                        executingId === command.id
+                                        executingId ===
+                                        command.id
                                           ? "not-allowed"
                                           : "pointer",
                                       fontWeight: 700,
                                       opacity:
-                                        executingId === command.id ? 0.65 : 1,
+                                        executingId ===
+                                        command.id
+                                          ? 0.65
+                                          : 1,
                                     }}
                                   >
-                                    {executingId === command.id
+                                    {executingId ===
+                                    command.id
                                       ? executionButton.loadingLabel
                                       : executionButton.label}
                                   </button>
@@ -1161,11 +1278,14 @@ export default function AIEmployeePage() {
                               <button
                                 onClick={() =>
                                   setExpandedCommand(
-                                    expanded ? null : command.id
+                                    expanded
+                                      ? null
+                                      : command.id
                                   )
                                 }
                                 style={{
-                                  border: "1px solid #d1d5db",
+                                  border:
+                                    "1px solid #d1d5db",
                                   background: "#fff",
                                   color: "#374151",
                                   borderRadius: 8,
@@ -1174,7 +1294,9 @@ export default function AIEmployeePage() {
                                   fontWeight: 700,
                                 }}
                               >
-                                {expanded ? "إخفاء" : "التفاصيل"}
+                                {expanded
+                                  ? "إخفاء"
+                                  : "التفاصيل"}
                               </button>
                             </div>
                           </td>
@@ -1257,7 +1379,8 @@ export default function AIEmployeePage() {
                             textAlign: "right",
                             color: "#6b7280",
                             fontSize: 13,
-                            borderBottom: "1px solid #e5e7eb",
+                            borderBottom:
+                              "1px solid #e5e7eb",
                           }}
                         >
                           {heading}
@@ -1268,14 +1391,16 @@ export default function AIEmployeePage() {
 
                   <tbody>
                     {approvals.map((approval) => {
-                      const command = commandMap[approval.command_id];
+                      const command =
+                        commandMap[approval.command_id];
 
                       return (
                         <tr key={approval.id}>
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                             }}
                           >
                             <div
@@ -1283,7 +1408,8 @@ export default function AIEmployeePage() {
                                 fontWeight: 800,
                               }}
                             >
-                              {command?.command || "أمر غير معروف"}
+                              {command?.command ||
+                                "أمر غير معروف"}
                             </div>
 
                             <div
@@ -1300,13 +1426,18 @@ export default function AIEmployeePage() {
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                             }}
                           >
-                            {(approval.requested_capabilities || [])
+                            {(
+                              approval.requested_capabilities ||
+                              []
+                            )
                               .map(
                                 (item) =>
-                                  capabilityLabels[item] || item
+                                  capabilityLabels[item] ||
+                                  item
                               )
                               .join("، ")}
                           </td>
@@ -1314,40 +1445,49 @@ export default function AIEmployeePage() {
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                             }}
                           >
                             <span
                               style={{
-                                color: riskColor(approval.risk_level),
+                                color: riskColor(
+                                  approval.risk_level
+                                ),
                                 fontWeight: 800,
                               }}
                             >
-                              {riskLabels[approval.risk_level] ||
-                                approval.risk_level}
+                              {riskLabels[
+                                approval.risk_level
+                              ] || approval.risk_level}
                             </span>
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                             }}
                           >
                             <span
                               style={{
                                 color:
-                                  approval.status === "approved"
+                                  approval.status ===
+                                  "approved"
                                     ? GREEN
-                                    : approval.status === "rejected"
+                                    : approval.status ===
+                                      "rejected"
                                     ? "#dc2626"
                                     : "#d97706",
                                 fontWeight: 800,
                               }}
                             >
-                              {approval.status === "approved"
+                              {approval.status ===
+                              "approved"
                                 ? "تمت الموافقة"
-                                : approval.status === "rejected"
+                                : approval.status ===
+                                  "rejected"
                                 ? "مرفوض"
                                 : "بانتظار الموافقة"}
                             </span>
@@ -1356,43 +1496,50 @@ export default function AIEmployeePage() {
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {formatDate(approval.created_at)}
+                            {formatDate(
+                              approval.created_at
+                            )}
                           </td>
 
                           <td
                             style={{
                               padding: 13,
-                              borderBottom: "1px solid #f1f5f9",
+                              borderBottom:
+                                "1px solid #f1f5f9",
                             }}
                           >
-                            {approval.status === "pending" && command && (
-                              <button
-                                onClick={() => {
-                                  setApprovalModal({
-                                    ...approval,
-                                    command,
-                                  });
-                                  setApprovalReason("");
-                                }}
-                                style={{
-                                  border: "none",
-                                  background: GREEN,
-                                  color: "#fff",
-                                  borderRadius: 8,
-                                  padding: "8px 12px",
-                                  cursor: "pointer",
-                                  fontWeight: 800,
-                                }}
-                              >
-                                مراجعة
-                              </button>
-                            )}
+                            {approval.status ===
+                              "pending" &&
+                              command && (
+                                <button
+                                  onClick={() => {
+                                    setApprovalModal({
+                                      ...approval,
+                                      command,
+                                    });
+                                    setApprovalReason("");
+                                  }}
+                                  style={{
+                                    border: "none",
+                                    background: GREEN,
+                                    color: "#fff",
+                                    borderRadius: 8,
+                                    padding: "8px 12px",
+                                    cursor: "pointer",
+                                    fontWeight: 800,
+                                  }}
+                                >
+                                  مراجعة
+                                </button>
+                              )}
 
-                            {approval.status !== "pending" && (
+                            {approval.status !==
+                              "pending" && (
                               <span
                                 style={{
                                   color: "#9ca3af",
@@ -1425,7 +1572,8 @@ export default function AIEmployeePage() {
             <div
               style={{
                 padding: 18,
-                borderBottom: "1px solid #e5e7eb",
+                borderBottom:
+                  "1px solid #e5e7eb",
               }}
             >
               <h2
@@ -1470,7 +1618,8 @@ export default function AIEmployeePage() {
                           textAlign: "right",
                           color: "#6b7280",
                           fontSize: 13,
-                          borderBottom: "1px solid #e5e7eb",
+                          borderBottom:
+                            "1px solid #e5e7eb",
                         }}
                       >
                         {heading}
@@ -1485,11 +1634,14 @@ export default function AIEmployeePage() {
                       <td
                         style={{
                           padding: 13,
-                          borderBottom: "1px solid #f1f5f9",
+                          borderBottom:
+                            "1px solid #f1f5f9",
                           fontWeight: 800,
                         }}
                       >
-                        {capabilityLabels[capability.capability_key] ||
+                        {capabilityLabels[
+                          capability.capability_key
+                        ] ||
                           capability.capability_name ||
                           capability.capability_key}
                       </td>
@@ -1497,7 +1649,8 @@ export default function AIEmployeePage() {
                       <td
                         style={{
                           padding: 13,
-                          borderBottom: "1px solid #f1f5f9",
+                          borderBottom:
+                            "1px solid #f1f5f9",
                           color: "#6b7280",
                         }}
                       >
@@ -1507,42 +1660,54 @@ export default function AIEmployeePage() {
                       <td
                         style={{
                           padding: 13,
-                          borderBottom: "1px solid #f1f5f9",
+                          borderBottom:
+                            "1px solid #f1f5f9",
                         }}
                       >
                         <span
                           style={{
-                            color: capability.enabled ? GREEN : "#dc2626",
+                            color: capability.enabled
+                              ? GREEN
+                              : "#dc2626",
                             fontWeight: 800,
                           }}
                         >
-                          {capability.enabled ? "مفعّلة" : "موقوفة"}
+                          {capability.enabled
+                            ? "مفعّلة"
+                            : "موقوفة"}
                         </span>
                       </td>
 
                       <td
                         style={{
                           padding: 13,
-                          borderBottom: "1px solid #f1f5f9",
+                          borderBottom:
+                            "1px solid #f1f5f9",
                         }}
                       >
-                        {capability.requires_approval ? "نعم" : "لا"}
+                        {capability.requires_approval
+                          ? "نعم"
+                          : "لا"}
                       </td>
 
                       <td
                         style={{
                           padding: 13,
-                          borderBottom: "1px solid #f1f5f9",
+                          borderBottom:
+                            "1px solid #f1f5f9",
                         }}
                       >
                         <span
                           style={{
-                            color: riskColor(capability.risk_level),
+                            color: riskColor(
+                              capability.risk_level
+                            ),
                             fontWeight: 800,
                           }}
                         >
-                          {riskLabels[capability.risk_level] ||
-                            capability.risk_level}
+                          {riskLabels[
+                            capability.risk_level
+                          ] || capability.risk_level}
                         </span>
                       </td>
                     </tr>
@@ -1576,7 +1741,8 @@ export default function AIEmployeePage() {
               background: "#fff",
               borderRadius: 18,
               padding: 22,
-              boxShadow: "0 25px 70px rgba(0,0,0,.25)",
+              boxShadow:
+                "0 25px 70px rgba(0,0,0,.25)",
             }}
           >
             <div
@@ -1710,18 +1876,21 @@ export default function AIEmployeePage() {
                   }}
                 >
                   الخطورة:{" "}
-                  {riskLabels[selectedCapability.risk_level] ||
-                    selectedCapability.risk_level}
+                  {riskLabels[
+                    selectedCapability.risk_level
+                  ] || selectedCapability.risk_level}
                 </span>
 
                 <span
                   style={{
-                    background: selectedCapability.requires_approval
-                      ? "#fff7ed"
-                      : "#ecfdf5",
-                    color: selectedCapability.requires_approval
-                      ? "#9a3412"
-                      : "#166534",
+                    background:
+                      selectedCapability.requires_approval
+                        ? "#fff7ed"
+                        : "#ecfdf5",
+                    color:
+                      selectedCapability.requires_approval
+                        ? "#9a3412"
+                        : "#166534",
                     borderRadius: 999,
                     padding: "6px 10px",
                     fontSize: 12,
@@ -1775,7 +1944,8 @@ export default function AIEmployeePage() {
               }}
             />
 
-            {newCommand.command_type === "edit_files" && (
+            {newCommand.command_type ===
+              "edit_files" && (
               <>
                 <label
                   style={{
@@ -1815,7 +1985,8 @@ export default function AIEmployeePage() {
                   style={{
                     background: "#ecfdf5",
                     color: "#166534",
-                    border: "1px solid #bbf7d0",
+                    border:
+                      "1px solid #bbf7d0",
                     borderRadius: 10,
                     padding: 11,
                     marginBottom: 15,
@@ -1823,8 +1994,8 @@ export default function AIEmployeePage() {
                     fontWeight: 700,
                   }}
                 >
-                  🛡️ التعديل سيكون Dry Run فقط في هذه المرحلة. لن تتم
-                  الكتابة الفعلية على GitHub.
+                  🛡️ التعديل سيكون Dry Run فقط في هذه
+                  المرحلة. لن تتم الكتابة الفعلية على GitHub.
                 </div>
               </>
             )}
@@ -1901,12 +2072,16 @@ export default function AIEmployeePage() {
                   color: "#fff",
                   borderRadius: 9,
                   padding: "10px 18px",
-                  cursor: savingCommand ? "not-allowed" : "pointer",
+                  cursor: savingCommand
+                    ? "not-allowed"
+                    : "pointer",
                   fontWeight: 800,
                   opacity: savingCommand ? 0.7 : 1,
                 }}
               >
-                {savingCommand ? "جارٍ إنشاء الأمر..." : "إنشاء الأمر"}
+                {savingCommand
+                  ? "جارٍ إنشاء الأمر..."
+                  : "إنشاء الأمر"}
               </button>
             </div>
           </div>
@@ -1933,7 +2108,8 @@ export default function AIEmployeePage() {
               background: "#fff",
               borderRadius: 18,
               padding: 22,
-              boxShadow: "0 25px 70px rgba(0,0,0,.25)",
+              boxShadow:
+                "0 25px 70px rgba(0,0,0,.25)",
             }}
           >
             <h2
@@ -1969,7 +2145,8 @@ export default function AIEmployeePage() {
                   marginBottom: 8,
                 }}
               >
-                {approvalModal.command?.command || "أمر"}
+                {approvalModal.command?.command ||
+                  "أمر"}
               </div>
 
               <div
@@ -1982,16 +2159,20 @@ export default function AIEmployeePage() {
                 النوع:{" "}
                 {commandTypeLabels[
                   approvalModal.command?.command_type
-                ] || approvalModal.command?.command_type}
+                ] ||
+                  approvalModal.command?.command_type}
                 <br />
                 الخطورة:{" "}
-                {riskLabels[approvalModal.risk_level] ||
-                  approvalModal.risk_level}
+                {riskLabels[
+                  approvalModal.risk_level
+                ] || approvalModal.risk_level}
                 <br />
                 الصلاحية:{" "}
-                {(approvalModal.requested_capabilities || [])
+                {(approvalModal.requested_capabilities ||
+                  [])
                   .map(
-                    (item) => capabilityLabels[item] || item
+                    (item) =>
+                      capabilityLabels[item] || item
                   )
                   .join("، ")}
               </div>
@@ -2009,7 +2190,9 @@ export default function AIEmployeePage() {
 
             <textarea
               value={approvalReason}
-              onChange={(e) => setApprovalReason(e.target.value)}
+              onChange={(e) =>
+                setApprovalReason(e.target.value)
+              }
               placeholder="اختياري"
               rows={4}
               style={{
