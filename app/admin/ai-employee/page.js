@@ -178,6 +178,13 @@ function getExecutionButton(command) {
     };
   }
 
+  if (command.command_type === "edit_files") {
+    return {
+      label: "🛡️ تنفيذ التعديل الآمن",
+      loadingLabel: "🛡️ جارٍ إعداد معاينة التعديل...",
+    };
+  }
+
   return null;
 }
 
@@ -523,6 +530,12 @@ export default function SuperAdminAIEmployeePage() {
       ) {
         setMessage(
           "🟢 تم إعداد اقتراحات تحسين كود مشروع سوق AI بدون تعديل الملفات."
+        );
+      } else if (
+        command.command_type === "edit_files"
+      ) {
+        setMessage(
+          "🟢 تمت معاينة تعديل الملف بأمان. لم يتم تعديل أي ملف في GitHub."
         );
       } else {
         setMessage(
