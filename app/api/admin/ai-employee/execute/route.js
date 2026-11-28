@@ -2,32 +2,23 @@ import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-
 export const runtime = "nodejs";
-
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER = process.env.GITHUB_OWNER || "suqaiapp-creator";
 const GITHUB_REPO = process.env.GITHUB_REPO || "suq-ai";
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || "main";
-
 const MAX_FILE_SIZE = 500_000;
-
 function json(data, status = 200) {
   return NextResponse.json(data, { status });
 }
-
 function normalizePath(inputPath) {
   if (!inputPath) return "";
-
   let value = String(inputPath).trim().replaceAll("\\", "/");
-
   while (value.startsWith("/")) {
     value = value.slice(1);
   }
-
   if (
     value.includes("..") ||
     value.startsWith(".git") ||
@@ -38,73 +29,59 @@ function normalizePath(inputPath) {
   ) {
     throw new Error("مسار الملف غير مسموح.");
   }
-
   return value;
 }
-
 function githubHeaders() {
   if (!GITHUB_TOKEN) {
     throw new Error("GITHUB_TOKEN غير موجود في إعدادات Vercel.");
   }
-
   return {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${GITHUB_TOKEN}`,
     "X-GitHub-Api-Version": "2022-11-28",
   };
 }
-
 async function githubGet(url) {
   const response = await fetch(url, {
     method: "GET",
     headers: githubHeaders(),
     cache: "no-store",
   });
-
   const data = await response.json().catch(() => null);
-
   if (!response.ok) {
     throw new Error(
       data?.message ||
         `GitHub request failed with status ${response.status}`
     );
   }
-
   return data;
 }
-
 async function readGithubFile(path) {
   const safePath = normalizePath(path);
-
   if (!safePath) {
     throw new Error("يجب تحديد مسار الملف.");
   }
-
   const encodedPath = safePath
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
-
   const url =
     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}` +
     `/contents/${encodedPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
-
   const data = await githubGet(url);
-
   if (Array.isArray(data)) {
     throw new Error("المسار يشير إلى مجلد وليس ملفًا.");
   }
-
   if (!data?.content) {
     throw new Error("لم يتم العثور على محتوى الملف.");
   }
-
-  const buffer = Buffer.from(data.content.replace(/\s/g, ""), "base64");
-
+  const buffer = Buffer.from(
+    data.content.replace(/\s/g, ""),
+    "base64"
+  );
   if (buffer.length > MAX_FILE_SIZE) {
     throw new Error("حجم الملف أكبر من الحد المسموح للتحليل.");
   }
-
   return {
     path: safePath,
     sha: data.sha || null,
@@ -112,10 +89,8 @@ async function readGithubFile(path) {
     content: buffer.toString("utf8"),
   };
 }
-
 function detectLanguage(path) {
   const lower = path.toLowerCase();
-
   if (lower.endsWith(".js")) return "JavaScript";
   if (lower.endsWith(".jsx")) return "JavaScript JSX";
   if (lower.endsWith(".ts")) return "TypeScript";
@@ -125,23 +100,18 @@ function detectLanguage(path) {
   if (lower.endsWith(".json")) return "JSON";
   if (lower.endsWith(".md")) return "Markdown";
   if (lower.endsWith(".sql")) return "SQL";
-
   return "غير محدد";
 }
-
 function analyzeCode(content, path) {
   const lines = content.split(/\r?\n/);
-
   const imports = [];
   const exports = [];
   const functions = [];
   const hooks = [];
   const todos = [];
   const issues = [];
-
   for (const line of lines) {
     const trimmed = line.trim();
-
     if (
       trimmed.startsWith("import ") ||
       trimmed.startsWith("import{") ||
@@ -149,7 +119,6 @@ function analyzeCode(content, path) {
     ) {
       imports.push(trimmed);
     }
-
     if (
       trimmed.startsWith("export ") ||
       trimmed.startsWith("export{") ||
@@ -157,7 +126,6 @@ function analyzeCode(content, path) {
     ) {
       exports.push(trimmed);
     }
-
     if (
       /\bfunction\s+[A-Za-z0-9_$]+\s*\(/.test(trimmed) ||
       /\bconst\s+[A-Za-z0-9_$]+\s*=\s*(async\s*)?\(/.test(trimmed) ||
@@ -167,7 +135,6 @@ function analyzeCode(content, path) {
     ) {
       functions.push(trimmed);
     }
-
     if (
       trimmed.includes("useState(") ||
       trimmed.includes("useEffect(") ||
@@ -178,12 +145,10 @@ function analyzeCode(content, path) {
     ) {
       hooks.push(trimmed);
     }
-
     if (/\bTODO\b|\bFIXME\b/i.test(trimmed)) {
       todos.push(trimmed);
     }
   }
-
   if (/console\.(log|warn|error)\s*\(/.test(content)) {
     issues.push({
       type: "console",
@@ -192,7 +157,6 @@ function analyzeCode(content, path) {
         "يوجد استخدام لـ console.* داخل الملف؛ يفضّل تنظيف سجلات الإنتاج.",
     });
   }
-
   if (content.includes("dangerouslySetInnerHTML")) {
     issues.push({
       type: "security",
@@ -201,13 +165,10 @@ function analyzeCode(content, path) {
         "تم العثور على dangerouslySetInnerHTML؛ يجب التأكد من أن المحتوى آمن ومُنقّى.",
     });
   }
-
   const envMatches = content.match(/process\.env\.([A-Z0-9_]+)/g) || [];
-
   const publicEnvIssues = envMatches.filter(
     (item) => !item.includes("NEXT_PUBLIC_")
   );
-
   if (publicEnvIssues.length > 0) {
     issues.push({
       type: "environment",
@@ -216,7 +177,6 @@ function analyzeCode(content, path) {
         "تم العثور على متغيرات process.env غير مسبوقة بـ NEXT_PUBLIC_. يجب التأكد أنها لا تصل إلى Client Component.",
     });
   }
-
   return {
     path,
     language: detectLanguage(path),
@@ -234,12 +194,9 @@ function analyzeCode(content, path) {
     issues,
   };
 }
-
 function suggestChanges(content, path) {
   const analysis = analyzeCode(content, path);
-
   const suggestions = [];
-
   if (analysis.total_lines > 1500) {
     suggestions.push({
       priority: "medium",
@@ -249,7 +206,6 @@ function suggestChanges(content, path) {
         "الملف يحتوي على عدد كبير من الأسطر. يفضّل تقسيمه إلى مكونات وHooks وملفات مساعدة مستقلة لتسهيل الصيانة وتقليل مخاطر التعديل.",
     });
   }
-
   if (analysis.functions_count > 30) {
     suggestions.push({
       priority: "medium",
@@ -259,7 +215,6 @@ function suggestChanges(content, path) {
         "عدد الدوال مرتفع داخل الملف. يمكن نقل الدوال العامة أو المتكررة إلى ملفات utilities أو hooks مستقلة.",
     });
   }
-
   if (analysis.hooks_count > 20) {
     suggestions.push({
       priority: "medium",
@@ -269,7 +224,6 @@ function suggestChanges(content, path) {
         "عدد استخدامات React Hooks مرتفع. يفضّل مراجعة مسؤوليات المكون والتأكد من عدم وجود state أو effects يمكن فصلها.",
     });
   }
-
   if (analysis.issues.some((issue) => issue.type === "console")) {
     suggestions.push({
       priority: "low",
@@ -279,7 +233,6 @@ function suggestChanges(content, path) {
         "يفضّل إزالة أو تنظيم سجلات console قبل الإنتاج، أو استخدام نظام logging مركزي عند الحاجة.",
     });
   }
-
   if (analysis.issues.some((issue) => issue.type === "security")) {
     suggestions.push({
       priority: "high",
@@ -289,7 +242,6 @@ function suggestChanges(content, path) {
         "يجب مراجعة مصدر المحتوى المستخدم مع dangerouslySetInnerHTML والتأكد من تعقيمه قبل العرض.",
     });
   }
-
   if (analysis.issues.some((issue) => issue.type === "environment")) {
     suggestions.push({
       priority: "medium",
@@ -299,7 +251,6 @@ function suggestChanges(content, path) {
         "يجب التأكد أن الأسرار ومفاتيح الخدمات لا يتم استخدامها داخل كود يصل إلى المتصفح.",
     });
   }
-
   if (analysis.todos_count > 0) {
     suggestions.push({
       priority: "low",
@@ -309,7 +260,6 @@ function suggestChanges(content, path) {
         `يوجد ${analysis.todos_count} عنصر TODO/FIXME داخل الملف ويستحسن مراجعتها لاحقًا.`,
     });
   }
-
   if (suggestions.length === 0) {
     suggestions.push({
       priority: "low",
@@ -319,7 +269,6 @@ function suggestChanges(content, path) {
         "لم يجد التحليل المحلي مؤشرات واضحة تستدعي تعديلًا مباشرًا. يمكن إجراء مراجعة أعمق لاحقًا.",
     });
   }
-
   return {
     path,
     summary: `تمت مراجعة الملف ${path} واقتراح تحسينات بدون تعديل الملف.`,
@@ -336,32 +285,32 @@ function suggestChanges(content, path) {
     },
   };
 }
-
 function buildEditPreview(currentContent, newContent, path) {
   const currentLines = currentContent.split(/\r?\n/);
   const newLines = newContent.split(/\r?\n/);
-
   let firstDifference = -1;
   const maxLength = Math.max(
     currentLines.length,
     newLines.length
   );
-
   for (let index = 0; index < maxLength; index += 1) {
     if (currentLines[index] !== newLines[index]) {
       firstDifference = index;
       break;
     }
   }
-
-  const changed =
-    currentContent !== newContent;
-
+  const changed = currentContent !== newContent;
   return {
     path,
     changed,
-    current_size_bytes: Buffer.byteLength(currentContent, "utf8"),
-    proposed_size_bytes: Buffer.byteLength(newContent, "utf8"),
+    current_size_bytes: Buffer.byteLength(
+      currentContent,
+      "utf8"
+    ),
+    proposed_size_bytes: Buffer.byteLength(
+      newContent,
+      "utf8"
+    ),
     current_lines: currentLines.length,
     proposed_lines: newLines.length,
     first_difference_line:
@@ -382,10 +331,8 @@ function buildEditPreview(currentContent, newContent, path) {
     },
   };
 }
-
 function appendExecutionLog(existing, event, data = {}) {
   const current = Array.isArray(existing) ? existing : [];
-
   return [
     ...current,
     {
@@ -395,10 +342,8 @@ function appendExecutionLog(existing, event, data = {}) {
     },
   ];
 }
-
 async function getAuthenticatedClient() {
   const cookieStore = await cookies();
-
   return createServerClient(
     SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
@@ -412,12 +357,10 @@ async function getAuthenticatedClient() {
     }
   );
 }
-
 export async function POST(request) {
   let commandId = null;
   let serviceClient = null;
   let authenticatedClient = null;
-
   try {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       return json(
@@ -428,7 +371,6 @@ export async function POST(request) {
         500
       );
     }
-
     serviceClient = createSupabaseClient(
       SUPABASE_URL,
       SUPABASE_SERVICE_ROLE_KEY,
@@ -439,14 +381,11 @@ export async function POST(request) {
         },
       }
     );
-
     authenticatedClient = await getAuthenticatedClient();
-
     const {
       data: { user },
       error: userError,
     } = await authenticatedClient.auth.getUser();
-
     if (userError || !user) {
       return json(
         {
@@ -456,14 +395,12 @@ export async function POST(request) {
         401
       );
     }
-
     const { data: profile, error: profileError } =
       await serviceClient
         .from("profiles")
         .select("id,is_super_admin,account_status")
         .eq("id", user.id)
         .single();
-
     if (
       profileError ||
       !profile ||
@@ -478,11 +415,8 @@ export async function POST(request) {
         403
       );
     }
-
     const body = await request.json().catch(() => ({}));
-
     commandId = body?.command_id;
-
     if (!commandId) {
       return json(
         {
@@ -492,14 +426,12 @@ export async function POST(request) {
         400
       );
     }
-
     const { data: command, error: commandError } =
       await serviceClient
         .from("ai_employee_commands")
         .select("*")
         .eq("id", commandId)
         .single();
-
     if (commandError || !command) {
       return json(
         {
@@ -509,7 +441,6 @@ export async function POST(request) {
         404
       );
     }
-
     if (command.status !== "running") {
       return json(
         {
@@ -519,104 +450,84 @@ export async function POST(request) {
         409
       );
     }
-
     const commandType = command.command_type;
-
     const capabilityMap = {
       read_project_files: "read_project_files",
       analyze_code: "analyze_code",
       suggest_changes: "suggest_changes",
       edit_files: "edit_files",
     };
-
     const requiredCapability = capabilityMap[commandType];
-
     if (!requiredCapability) {
       throw new Error(
         `نوع الأمر ${commandType} غير مدعوم حاليًا في محرك التنفيذ.`
       );
     }
-
     const requestedCapabilities = Array.isArray(
       command.requested_capabilities
     )
       ? command.requested_capabilities
       : [];
-
     if (!requestedCapabilities.includes(requiredCapability)) {
       throw new Error(
         `الصلاحية المطلوبة ${requiredCapability} غير موجودة ضمن الأمر.`
       );
     }
-
     const { data: employee, error: employeeError } =
       await serviceClient
         .from("ai_employees")
         .select("id,name,status")
         .eq("id", command.ai_employee_id)
         .single();
-
     if (employeeError || !employee) {
       throw new Error(
         "لم يتم العثور على موظف AI المرتبط بالأمر."
       );
     }
-
     if (employee.status !== "active") {
       throw new Error("موظف AI غير نشط.");
     }
-
-    const { data: authorization, error: authorizationError } =
-      await authenticatedClient.rpc(
-        "authorize_ai_employee_command",
-        {
-          p_command_id: commandId,
-        }
-      );
-
-    if (authorizationError) {
-      throw new Error(
-        authorizationError.message ||
-          "تعذر تفويض تنفيذ الأمر."
-      );
-    }
-
-    if (!authorization?.authorized) {
-      throw new Error(
-        authorization?.reason ||
-          "الأمر غير مصرح بتنفيذه."
-      );
-    }
-
+    /*
+     * مهم:
+     * start_ai_employee_command قام بالفعل بتفويض الأمر
+     * قبل تحويل حالته إلى running.
+     *
+     * لذلك لا نعيد استدعاء authorize_ai_employee_command هنا.
+     * إعادة التفويض كانت تسبب توقف التنفيذ قبل الوصول إلى GitHub.
+     */
     const logAfterAuthorization = appendExecutionLog(
       command.execution_log,
       "execution_authorized",
       {
         capability: requiredCapability,
+        message:
+          "تم التحقق من التفويض مسبقًا عند بدء الأمر.",
       }
     );
-
-    await serviceClient
-      .from("ai_employee_commands")
-      .update({
-        execution_log: logAfterAuthorization,
-      })
-      .eq("id", commandId);
-
+    const { error: executionLogError } =
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: logAfterAuthorization,
+        })
+        .eq("id", commandId);
+    if (executionLogError) {
+      throw new Error(
+        executionLogError.message ||
+          "تعذر تحديث سجل تنفيذ الأمر."
+      );
+    }
     const inputData =
       command.input_data &&
       typeof command.input_data === "object"
         ? command.input_data
         : {};
-
     const path = normalizePath(inputData.path || "");
-
     if (!path) {
       throw new Error(
         "يجب تحديد input_data.path للملف المطلوب."
       );
     }
-
     /*
      * ---------------------------------------------------------
      * READ PROJECT FILES
@@ -630,16 +541,13 @@ export async function POST(request) {
           path,
         }
       );
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
           execution_log: startLog,
         })
         .eq("id", commandId);
-
       const file = await readGithubFile(path);
-
       const completedLog = appendExecutionLog(
         startLog,
         "github_file_read_completed",
@@ -648,7 +556,6 @@ export async function POST(request) {
           size: file.size,
         }
       );
-
       const { error: completeError } =
         await authenticatedClient.rpc(
           "complete_ai_employee_command",
@@ -664,14 +571,12 @@ export async function POST(request) {
             },
           }
         );
-
       if (completeError) {
         throw new Error(
           completeError.message ||
             "تعذر إكمال الأمر."
         );
       }
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
@@ -681,7 +586,6 @@ export async function POST(request) {
           ),
         })
         .eq("id", commandId);
-
       return json({
         success: true,
         command_id: commandId,
@@ -690,7 +594,6 @@ export async function POST(request) {
           `تمت قراءة الملف ${file.path} بنجاح.`,
       });
     }
-
     /*
      * ---------------------------------------------------------
      * ANALYZE CODE
@@ -704,16 +607,20 @@ export async function POST(request) {
           path,
         }
       );
-
-      await serviceClient
-        .from("ai_employee_commands")
-        .update({
-          execution_log: startLog,
-        })
-        .eq("id", commandId);
-
+      const { error: startLogError } =
+        await serviceClient
+          .from("ai_employee_commands")
+          .update({
+            execution_log: startLog,
+          })
+          .eq("id", commandId);
+      if (startLogError) {
+        throw new Error(
+          startLogError.message ||
+            "تعذر تسجيل بدء قراءة الملف."
+        );
+      }
       const file = await readGithubFile(path);
-
       const readCompletedLog = appendExecutionLog(
         startLog,
         "github_file_read_completed",
@@ -722,12 +629,23 @@ export async function POST(request) {
           size: file.size,
         }
       );
-
+      const { error: readLogError } =
+        await serviceClient
+          .from("ai_employee_commands")
+          .update({
+            execution_log: readCompletedLog,
+          })
+          .eq("id", commandId);
+      if (readLogError) {
+        throw new Error(
+          readLogError.message ||
+            "تعذر تسجيل اكتمال قراءة الملف."
+        );
+      }
       const analysis = analyzeCode(
         file.content,
         file.path
       );
-
       const analysisLog = appendExecutionLog(
         readCompletedLog,
         "code_analysis_completed",
@@ -736,7 +654,19 @@ export async function POST(request) {
           lines: analysis.total_lines,
         }
       );
-
+      const { error: analysisLogError } =
+        await serviceClient
+          .from("ai_employee_commands")
+          .update({
+            execution_log: analysisLog,
+          })
+          .eq("id", commandId);
+      if (analysisLogError) {
+        throw new Error(
+          analysisLogError.message ||
+            "تعذر تسجيل اكتمال تحليل الكود."
+        );
+      }
       const { error: completeError } =
         await authenticatedClient.rpc(
           "complete_ai_employee_command",
@@ -748,14 +678,12 @@ export async function POST(request) {
             p_output_data: analysis,
           }
         );
-
       if (completeError) {
         throw new Error(
           completeError.message ||
             "تعذر إكمال تحليل الكود."
         );
       }
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
@@ -765,7 +693,6 @@ export async function POST(request) {
           ),
         })
         .eq("id", commandId);
-
       return json({
         success: true,
         command_id: commandId,
@@ -776,7 +703,6 @@ export async function POST(request) {
         output_data: analysis,
       });
     }
-
     /*
      * ---------------------------------------------------------
      * SUGGEST CHANGES
@@ -790,16 +716,13 @@ export async function POST(request) {
           path,
         }
       );
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
           execution_log: startLog,
         })
         .eq("id", commandId);
-
       const file = await readGithubFile(path);
-
       const readCompletedLog = appendExecutionLog(
         startLog,
         "github_file_read_completed",
@@ -808,12 +731,16 @@ export async function POST(request) {
           size: file.size,
         }
       );
-
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: readCompletedLog,
+        })
+        .eq("id", commandId);
       const suggestions = suggestChanges(
         file.content,
         file.path
       );
-
       const suggestionsLog = appendExecutionLog(
         readCompletedLog,
         "code_suggestions_completed",
@@ -824,7 +751,12 @@ export async function POST(request) {
           files_modified: false,
         }
       );
-
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: suggestionsLog,
+        })
+        .eq("id", commandId);
       const { error: completeError } =
         await authenticatedClient.rpc(
           "complete_ai_employee_command",
@@ -836,14 +768,12 @@ export async function POST(request) {
             p_output_data: suggestions,
           }
         );
-
       if (completeError) {
         throw new Error(
           completeError.message ||
             "تعذر إكمال اقتراح التعديلات."
         );
       }
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
@@ -853,7 +783,6 @@ export async function POST(request) {
           ),
         })
         .eq("id", commandId);
-
       return json({
         success: true,
         command_id: commandId,
@@ -864,57 +793,38 @@ export async function POST(request) {
         output_data: suggestions,
       });
     }
-
     /*
      * ---------------------------------------------------------
      * EDIT FILES - SAFE DRY RUN ONLY
      * ---------------------------------------------------------
-     *
-     * المرحلة الحالية لا تكتب إلى GitHub.
-     *
-     * يجب إرسال:
-     *
-     * input_data: {
-     *   path: "app/example.js",
-     *   new_content: "...",
-     *   dry_run: true
-     * }
-     *
-     * إذا لم يكن dry_run = true سيتم رفض العملية.
      */
     if (commandType === "edit_files") {
       const dryRun = inputData.dry_run === true;
-
       if (!dryRun) {
         throw new Error(
           "التعديل الفعلي على GitHub غير مفعّل في هذه المرحلة. يجب استخدام dry_run=true أولًا."
         );
       }
-
       const newContent =
         typeof inputData.new_content === "string"
           ? inputData.new_content
           : typeof inputData.content === "string"
           ? inputData.content
           : null;
-
       if (newContent === null) {
         throw new Error(
           "يجب تحديد input_data.new_content لاختبار تعديل الملف."
         );
       }
-
       const newContentSize = Buffer.byteLength(
         newContent,
         "utf8"
       );
-
       if (newContentSize > MAX_FILE_SIZE) {
         throw new Error(
           "المحتوى الجديد أكبر من الحد المسموح."
         );
       }
-
       const startLog = appendExecutionLog(
         logAfterAuthorization,
         "github_edit_preview_started",
@@ -923,16 +833,13 @@ export async function POST(request) {
           dry_run: true,
         }
       );
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
           execution_log: startLog,
         })
         .eq("id", commandId);
-
       const file = await readGithubFile(path);
-
       const readCompletedLog = appendExecutionLog(
         startLog,
         "github_file_read_completed",
@@ -942,20 +849,17 @@ export async function POST(request) {
           sha: file.sha,
         }
       );
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
           execution_log: readCompletedLog,
         })
         .eq("id", commandId);
-
       const preview = buildEditPreview(
         file.content,
         newContent,
         file.path
       );
-
       const previewLog = appendExecutionLog(
         readCompletedLog,
         "edit_dry_run_completed",
@@ -966,11 +870,9 @@ export async function POST(request) {
           github_write_used: false,
         }
       );
-
       const resultMessage = preview.changed
         ? `تم اختبار تعديل الملف ${file.path} بنجاح بدون الكتابة على GitHub.`
         : `تم اختبار الملف ${file.path} ولم يتم العثور على أي تغيير.`;
-
       const { error: completeError } =
         await authenticatedClient.rpc(
           "complete_ai_employee_command",
@@ -980,14 +882,12 @@ export async function POST(request) {
             p_output_data: preview,
           }
         );
-
       if (completeError) {
         throw new Error(
           completeError.message ||
             "تعذر إكمال اختبار تعديل الملف."
         );
       }
-
       await serviceClient
         .from("ai_employee_commands")
         .update({
@@ -1000,7 +900,6 @@ export async function POST(request) {
           ),
         })
         .eq("id", commandId);
-
       return json({
         success: true,
         command_id: commandId,
@@ -1009,7 +908,6 @@ export async function POST(request) {
         output_data: preview,
       });
     }
-
     throw new Error(
       `نوع الأمر ${commandType} غير مدعوم.`
     );
@@ -1017,7 +915,6 @@ export async function POST(request) {
     const message =
       error?.message ||
       "حدث خطأ غير معروف أثناء تنفيذ الأمر.";
-
     if (commandId && authenticatedClient) {
       try {
         await authenticatedClient.rpc(
@@ -1031,7 +928,6 @@ export async function POST(request) {
         // fallback below
       }
     }
-
     if (commandId && serviceClient) {
       try {
         const { data: currentCommand } =
@@ -1040,7 +936,6 @@ export async function POST(request) {
             .select("execution_log")
             .eq("id", commandId)
             .single();
-
         await serviceClient
           .from("ai_employee_commands")
           .update({
@@ -1060,7 +955,6 @@ export async function POST(request) {
         // ignore fallback failure
       }
     }
-
     return json(
       {
         success: false,
