@@ -1,840 +1,824 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export const runtime = "nodejs";
 
-const GITHUB_API = "https://api.github.com";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const GITHUB_OWNER =
-  process.env.GITHUB_REPOSITORY_OWNER || "suqaiapp-creator";
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_OWNER = process.env.GITHUB_OWNER || "suqaiapp-creator";
+const GITHUB_REPO = process.env.GITHUB_REPO || "suq-ai";
+const GITHUB_BRANCH = process.env.GITHUB_BRANCH || "main";
 
-const GITHUB_REPO =
-  process.env.GITHUB_REPOSITORY_NAME || "suq-ai";
+const MAX_FILE_SIZE = 500_000;
 
-const GITHUB_BRANCH =
-  process.env.GITHUB_REPOSITORY_BRANCH || "main";
+function json(data, status = 200) {
+  return NextResponse.json(data, { status });
+}
+
+function normalizePath(inputPath) {
+  if (!inputPath) return "";
+
+  let value = String(inputPath).trim().replaceAll("\\", "/");
+
+  while (value.startsWith("/")) {
+    value = value.slice(1);
+  }
+
+  if (
+    value.includes("..") ||
+    value.startsWith(".git") ||
+    value.startsWith(".vercel") ||
+    value.startsWith("node_modules") ||
+    value === ".env" ||
+    value.startsWith(".env.")
+  ) {
+    throw new Error("مسار الملف غير مسموح.");
+  }
+
+  return value;
+}
 
 function githubHeaders() {
+  if (!GITHUB_TOKEN) {
+    throw new Error("GITHUB_TOKEN غير موجود في إعدادات Vercel.");
+  }
+
   return {
     Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "Suq-AI-Walm",
   };
 }
 
-function normalizePath(value) {
-  const raw = String(value || "").trim();
+async function githubGet(url) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: githubHeaders(),
+    cache: "no-store",
+  });
 
-  if (!raw) return "";
-
-  const normalized = raw
-    .replaceAll("\\", "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+/g, "/");
-
-  if (
-    normalized.split("/").some(
-      (part) => part === ".."
-    )
-  ) {
-    throw new Error("المسار غير مسموح");
-  }
-
-  const lower = normalized.toLowerCase();
-
-  const blocked = [
-    ".env",
-    ".env.local",
-    ".env.production",
-    ".env.development",
-    ".env.test",
-    "node_modules",
-    ".git",
-    ".vercel",
-  ];
-
-  for (const item of blocked) {
-    if (
-      lower === item ||
-      lower.startsWith(`${item}/`) ||
-      lower.includes(`/${item}/`)
-    ) {
-      throw new Error(
-        "هذا المسار محظور لأسباب أمنية"
-      );
-    }
-  }
-
-  return normalized;
-}
-
-async function githubRequest(path) {
-  if (!process.env.GITHUB_TOKEN) {
-    throw new Error(
-      "GITHUB_TOKEN غير موجود في Vercel"
-    );
-  }
-
-  const response = await fetch(
-    `${GITHUB_API}${path}`,
-    {
-      method: "GET",
-      headers: githubHeaders(),
-      cache: "no-store",
-    }
-  );
-
-  const text = await response.text();
-
-  let data = null;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(
       data?.message ||
-        `GitHub API error ${response.status}`
+        `GitHub request failed with status ${response.status}`
     );
   }
 
   return data;
 }
 
-async function readRepositoryFile(path) {
-  const normalizedPath =
-    normalizePath(path);
+async function readGithubFile(path) {
+  const safePath = normalizePath(path);
 
-  if (!normalizedPath) {
-    throw new Error(
-      "يجب تحديد مسار الملف لتحليل الكود"
-    );
+  if (!safePath) {
+    throw new Error("يجب تحديد مسار الملف.");
   }
 
-  const data = await githubRequest(
-    `/repos/${encodeURIComponent(
-      GITHUB_OWNER
-    )}/${encodeURIComponent(
-      GITHUB_REPO
-    )}/contents/${normalizedPath}?ref=${encodeURIComponent(
-      GITHUB_BRANCH
-    )}`
-  );
+  const encodedPath = safePath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+
+  const url =
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}` +
+    `/contents/${encodedPath}?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
+
+  const data = await githubGet(url);
 
   if (Array.isArray(data)) {
-    throw new Error(
-      "المسار المطلوب مجلد وليس ملفاً"
-    );
+    throw new Error("المسار يشير إلى مجلد وليس ملفًا.");
   }
 
-  if (data?.type !== "file") {
-    throw new Error(
-      "المسار المطلوب ليس ملفاً"
-    );
+  if (!data?.content) {
+    throw new Error("لم يتم العثور على محتوى الملف.");
   }
 
-  const size = Number(
-    data.size || 0
-  );
+  const buffer = Buffer.from(data.content.replace(/\s/g, ""), "base64");
 
-  if (size > 500000) {
-    throw new Error(
-      "الملف أكبر من الحد المسموح للتحليل"
-    );
+  if (buffer.length > MAX_FILE_SIZE) {
+    throw new Error("حجم الملف أكبر من الحد المسموح للتحليل.");
   }
-
-  if (!data.content) {
-    throw new Error(
-      "GitHub لم يرجع محتوى الملف"
-    );
-  }
-
-  const content = Buffer.from(
-    data.content.replace(/\n/g, ""),
-    "base64"
-  ).toString("utf8");
 
   return {
-    repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
-    branch: GITHUB_BRANCH,
-    path: normalizedPath,
-    size,
+    path: safePath,
     sha: data.sha || null,
-    content,
+    size: buffer.length,
+    content: buffer.toString("utf8"),
   };
 }
 
-function analyzeCodeStructure(
-  content,
-  path
-) {
-  const lines =
-    content.split("\n");
+function detectLanguage(path) {
+  const lower = path.toLowerCase();
+
+  if (lower.endsWith(".js")) return "JavaScript";
+  if (lower.endsWith(".jsx")) return "JavaScript JSX";
+  if (lower.endsWith(".ts")) return "TypeScript";
+  if (lower.endsWith(".tsx")) return "TypeScript TSX";
+  if (lower.endsWith(".css")) return "CSS";
+  if (lower.endsWith(".scss")) return "SCSS";
+  if (lower.endsWith(".json")) return "JSON";
+  if (lower.endsWith(".md")) return "Markdown";
+  if (lower.endsWith(".sql")) return "SQL";
+
+  return "غير محدد";
+}
+
+function analyzeCode(content, path) {
+  const lines = content.split(/\r?\n/);
 
   const imports = [];
   const exports = [];
   const functions = [];
   const hooks = [];
   const todos = [];
-  const possibleIssues = [];
+  const issues = [];
 
-  for (
-    let i = 0;
-    i < lines.length;
-    i++
-  ) {
-    const line = lines[i];
+  for (const line of lines) {
+    const trimmed = line.trim();
 
-    const importMatch =
-      line.match(
-        /^\s*import\s+(.+?)\s+from\s+["'](.+?)["']/
-      );
-
-    if (importMatch) {
-      imports.push({
-        line: i + 1,
-        source: importMatch[2],
-      });
+    if (
+      trimmed.startsWith("import ") ||
+      trimmed.startsWith("import{") ||
+      trimmed.startsWith("import(")
+    ) {
+      imports.push(trimmed);
     }
 
     if (
-      /^\s*export\s+(default\s+)?/.test(
-        line
-      )
+      trimmed.startsWith("export ") ||
+      trimmed.startsWith("export{") ||
+      trimmed.startsWith("export default")
     ) {
-      exports.push({
-        line: i + 1,
-        code: line.trim().slice(0, 300),
-      });
-    }
-
-    const functionMatch =
-      line.match(
-        /^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)/
-      );
-
-    if (functionMatch) {
-      functions.push({
-        line: i + 1,
-        name: functionMatch[1],
-      });
-    }
-
-    const hookMatch =
-      line.match(
-        /\b(use[A-Z][A-Za-z0-9_$]*)\s*\(/
-      );
-
-    if (hookMatch) {
-      hooks.push({
-        line: i + 1,
-        name: hookMatch[1],
-      });
+      exports.push(trimmed);
     }
 
     if (
-      /\bTODO\b|\bFIXME\b/i.test(
-        line
+      /\bfunction\s+[A-Za-z0-9_$]+\s*\(/.test(trimmed) ||
+      /\bconst\s+[A-Za-z0-9_$]+\s*=\s*(async\s*)?\(/.test(trimmed) ||
+      /\bconst\s+[A-Za-z0-9_$]+\s*=\s*(async\s*)?[A-Za-z0-9_$]+\s*=>/.test(
+        trimmed
       )
     ) {
-      todos.push({
-        line: i + 1,
-        text: line.trim().slice(0, 300),
-      });
+      functions.push(trimmed);
     }
 
     if (
-      /console\.log\s*\(/.test(
-        line
-      )
+      trimmed.includes("useState(") ||
+      trimmed.includes("useEffect(") ||
+      trimmed.includes("useMemo(") ||
+      trimmed.includes("useCallback(") ||
+      trimmed.includes("useRef(") ||
+      trimmed.includes("useContext(")
     ) {
-      possibleIssues.push({
-        line: i + 1,
-        type: "console_log",
-        message:
-          "يوجد console.log داخل الملف. يفضل مراجعته قبل الإنتاج.",
-      });
+      hooks.push(trimmed);
     }
 
-    if (
-      /dangerouslySetInnerHTML/.test(
-        line
-      )
-    ) {
-      possibleIssues.push({
-        line: i + 1,
-        type: "dangerous_html",
-        message:
-          "استخدام dangerouslySetInnerHTML يحتاج مراجعة أمنية.",
-      });
-    }
-
-    if (
-      /process\.env\./.test(
-        line
-      ) &&
-      !/NEXT_PUBLIC_/.test(
-        line
-      )
-    ) {
-      possibleIssues.push({
-        line: i + 1,
-        type: "server_env_reference",
-        message:
-          "تم العثور على متغير بيئة غير NEXT_PUBLIC_. يجب التأكد أن الملف يعمل على الخادم فقط إذا كان يعتمد عليه.",
-      });
+    if (/\bTODO\b|\bFIXME\b/i.test(trimmed)) {
+      todos.push(trimmed);
     }
   }
 
+  if (/console\.(log|warn|error)\s*\(/.test(content)) {
+    issues.push({
+      type: "console",
+      level: "low",
+      message: "يوجد استخدام لـ console.* داخل الملف؛ يفضّل تنظيف سجلات الإنتاج.",
+    });
+  }
+
+  if (content.includes("dangerouslySetInnerHTML")) {
+    issues.push({
+      type: "security",
+      level: "high",
+      message:
+        "تم العثور على dangerouslySetInnerHTML؛ يجب التأكد من أن المحتوى آمن ومُنقّى.",
+    });
+  }
+
+  const envMatches = content.match(/process\.env\.([A-Z0-9_]+)/g) || [];
+
+  const publicEnvIssues = envMatches.filter(
+    (item) => !item.includes("NEXT_PUBLIC_")
+  );
+
+  if (publicEnvIssues.length > 0) {
+    issues.push({
+      type: "environment",
+      level: "medium",
+      message:
+        "تم العثور على متغيرات process.env غير مسبوقة بـ NEXT_PUBLIC_. يجب التأكد أنها لا تصل إلى Client Component.",
+    });
+  }
+
   return {
-    file: path,
-    language:
-      path.endsWith(".js") ||
-      path.endsWith(".jsx")
-        ? "JavaScript"
-        : path.endsWith(".ts") ||
-          path.endsWith(".tsx")
-        ? "TypeScript"
-        : "Unknown",
+    path,
+    language: detectLanguage(path),
     total_lines: lines.length,
-    imports,
-    exports,
-    functions,
-    hooks,
-    todos,
-    possible_issues: possibleIssues,
+    imports_count: imports.length,
+    exports_count: exports.length,
+    functions_count: functions.length,
+    hooks_count: hooks.length,
+    todos_count: todos.length,
+    imports: imports.slice(0, 100),
+    exports: exports.slice(0, 100),
+    functions: functions.slice(0, 100),
+    hooks: hooks.slice(0, 100),
+    todos: todos.slice(0, 100),
+    issues,
   };
 }
 
-async function getAuthenticatedSupabase() {
-  const cookieStore =
-    await cookies();
+function suggestChanges(content, path) {
+  const analysis = analyzeCode(content, path);
+
+  const suggestions = [];
+
+  if (analysis.total_lines > 1500) {
+    suggestions.push({
+      priority: "medium",
+      category: "architecture",
+      title: "تقسيم الملف الكبير",
+      description:
+        "الملف يحتوي على عدد كبير من الأسطر. يفضّل تقسيمه إلى مكونات وHooks وملفات مساعدة مستقلة لتسهيل الصيانة وتقليل مخاطر التعديل.",
+    });
+  }
+
+  if (analysis.functions_count > 30) {
+    suggestions.push({
+      priority: "medium",
+      category: "maintainability",
+      title: "تقسيم الدوال",
+      description:
+        "عدد الدوال مرتفع داخل الملف. يمكن نقل الدوال العامة أو المتكررة إلى ملفات utilities أو hooks مستقلة.",
+    });
+  }
+
+  if (analysis.hooks_count > 20) {
+    suggestions.push({
+      priority: "medium",
+      category: "react",
+      title: "مراجعة استخدام Hooks",
+      description:
+        "عدد استخدامات React Hooks مرتفع. يفضّل مراجعة مسؤوليات المكون والتأكد من عدم وجود state أو effects يمكن فصلها.",
+    });
+  }
+
+  if (analysis.issues.some((issue) => issue.type === "console")) {
+    suggestions.push({
+      priority: "low",
+      category: "cleanup",
+      title: "تنظيف console logs",
+      description:
+        "يفضّل إزالة أو تنظيم سجلات console قبل الإنتاج، أو استخدام نظام logging مركزي عند الحاجة.",
+    });
+  }
+
+  if (analysis.issues.some((issue) => issue.type === "security")) {
+    suggestions.push({
+      priority: "high",
+      category: "security",
+      title: "مراجعة المحتوى HTML",
+      description:
+        "يجب مراجعة مصدر المحتوى المستخدم مع dangerouslySetInnerHTML والتأكد من تعقيمه قبل العرض.",
+    });
+  }
+
+  if (analysis.issues.some((issue) => issue.type === "environment")) {
+    suggestions.push({
+      priority: "medium",
+      category: "security",
+      title: "مراجعة متغيرات البيئة",
+      description:
+        "يجب التأكد أن الأسرار ومفاتيح الخدمات لا يتم استخدامها داخل كود يصل إلى المتصفح.",
+    });
+  }
+
+  if (analysis.todos_count > 0) {
+    suggestions.push({
+      priority: "low",
+      category: "maintenance",
+      title: "مراجعة TODO/FIXME",
+      description:
+        `يوجد ${analysis.todos_count} عنصر TODO/FIXME داخل الملف ويستحسن مراجعتها لاحقًا.`,
+    });
+  }
+
+  if (suggestions.length === 0) {
+    suggestions.push({
+      priority: "low",
+      category: "general",
+      title: "لا توجد ملاحظات هيكلية واضحة",
+      description:
+        "لم يجد التحليل المحلي مؤشرات واضحة تستدعي تعديلًا مباشرًا. يمكن إجراء مراجعة أعمق لاحقًا.",
+    });
+  }
+
+  return {
+    path,
+    summary: `تمت مراجعة الملف ${path} واقتراح تحسينات بدون تعديل الملف.`,
+    analysis,
+    suggestions,
+    safety: {
+      files_modified: false,
+      files_created: false,
+      github_write_used: false,
+      openai_used: false,
+      runway_used: false,
+      points_charged: 0,
+      estimated_cost_usd: 0,
+    },
+  };
+}
+
+function appendExecutionLog(existing, event, data = {}) {
+  const current = Array.isArray(existing) ? existing : [];
+
+  return [
+    ...current,
+    {
+      event,
+      at: new Date().toISOString(),
+      ...data,
+    },
+  ];
+}
+
+async function getAuthenticatedClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    SUPABASE_URL,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
     {
       cookies: {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(
-              ({
-                name,
-                value,
-                options,
-              }) => {
-                cookieStore.set(
-                  name,
-                  value,
-                  options
-                );
-              }
-            );
-          } catch {}
-        },
+        setAll() {},
       },
     }
   );
 }
 
-function createAdminSupabase() {
-  return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
-}
-
-async function appendExecutionLog(
-  supabaseAdmin,
-  commandId,
-  event,
-  details = {}
-) {
-  try {
-    const { data: command } =
-      await supabaseAdmin
-        .from(
-          "ai_employee_commands"
-        )
-        .select(
-          "execution_log"
-        )
-        .eq(
-          "id",
-          commandId
-        )
-        .maybeSingle();
-
-    if (!command) return;
-
-    const currentLog =
-      Array.isArray(
-        command.execution_log
-      )
-        ? command.execution_log
-        : [];
-
-    await supabaseAdmin
-      .from(
-        "ai_employee_commands"
-      )
-      .update({
-        execution_log: [
-          ...currentLog,
-          {
-            event,
-            at: new Date().toISOString(),
-            ...details,
-          },
-        ],
-        updated_at:
-          new Date().toISOString(),
-      })
-      .eq(
-        "id",
-        commandId
-      );
-  } catch {}
-}
-
-export async function POST(
-  request
-) {
+export async function POST(request) {
   let commandId = null;
-
-  const supabaseAdmin =
-    createAdminSupabase();
+  let serviceClient = null;
+  let authenticatedClient = null;
 
   try {
-    const supabaseAuth =
-      await getAuthenticatedSupabase();
-
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } =
-      await supabaseAuth.auth.getUser();
-
-    if (
-      userError ||
-      !user
-    ) {
-      return NextResponse.json(
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return json(
         {
           success: false,
-          error:
-            "يجب تسجيل الدخول أولاً",
+          error: "إعدادات Supabase غير مكتملة.",
         },
-        {
-          status: 401,
-        }
+        500
       );
     }
 
+    serviceClient = createSupabaseClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    authenticatedClient = await getAuthenticatedClient();
+
     const {
-      data: profile,
-      error: profileError,
-    } =
-      await supabaseAdmin
-        .from("profiles")
-        .select(
-          "id, is_super_admin, account_status"
-        )
-        .eq(
-          "id",
-          user.id
-        )
-        .maybeSingle();
+      data: { user },
+      error: userError,
+    } = await authenticatedClient.auth.getUser();
+
+    if (userError || !user) {
+      return json(
+        {
+          success: false,
+          error: "غير مصرح. يجب تسجيل الدخول.",
+        },
+        401
+      );
+    }
+
+    const { data: profile, error: profileError } = await serviceClient
+      .from("profiles")
+      .select("id,is_super_admin,account_status")
+      .eq("id", user.id)
+      .single();
 
     if (
       profileError ||
-      !profile?.is_super_admin
+      !profile ||
+      profile.is_super_admin !== true ||
+      profile.account_status === "suspended"
     ) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
-          error:
-            "غير مصرح. هذه العملية متاحة للـ Super Admin فقط",
+          error: "هذه العملية متاحة للـ Super Admin فقط.",
         },
-        {
-          status: 403,
-        }
+        403
       );
     }
 
-    const body =
-      await request.json();
+    const body = await request.json().catch(() => ({}));
 
-    commandId =
-      body?.command_id ||
-      null;
+    commandId = body?.command_id;
 
     if (!commandId) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
-          error:
-            "command_id مطلوب",
+          error: "command_id مطلوب.",
         },
-        {
-          status: 400,
-        }
+        400
       );
     }
 
-    const {
-      data: command,
-      error: commandError,
-    } =
-      await supabaseAdmin
-        .from(
-          "ai_employee_commands"
-        )
-        .select("*")
-        .eq(
-          "id",
-          commandId
-        )
-        .maybeSingle();
+    const { data: command, error: commandError } = await serviceClient
+      .from("ai_employee_commands")
+      .select("*")
+      .eq("id", commandId)
+      .single();
 
-    if (
-      commandError ||
-      !command
-    ) {
-      return NextResponse.json(
+    if (commandError || !command) {
+      return json(
         {
           success: false,
-          error:
-            "الأمر غير موجود",
+          error: "لم يتم العثور على الأمر.",
         },
-        {
-          status: 404,
-        }
+        404
       );
     }
 
-    if (
-      command.command_type !==
-        "read_project_files" &&
-      command.command_type !==
-        "analyze_code"
-    ) {
-      return NextResponse.json(
+    if (command.status !== "running") {
+      return json(
         {
           success: false,
-          error:
-            "نوع الأمر غير مدعوم في طبقة التنفيذ الحالية",
+          error: `حالة الأمر الحالية هي ${command.status} وليست running.`,
         },
-        {
-          status: 400,
-        }
+        409
       );
     }
 
-    if (
-      command.status !==
-      "running"
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "الأمر يجب أن يكون في حالة قيد التنفيذ",
-          status:
-            command.status,
-        },
-        {
-          status: 409,
-        }
-      );
-    }
+    const commandType = command.command_type;
 
-    const requestedCapabilities =
-      Array.isArray(
-        command.requested_capabilities
-      )
-        ? command.requested_capabilities
-        : [];
+    const capabilityMap = {
+      read_project_files: "read_project_files",
+      analyze_code: "analyze_code",
+      suggest_changes: "suggest_changes",
+    };
 
-    const requiredCapability =
-      command.command_type ===
-      "analyze_code"
-        ? "analyze_code"
-        : "read_project_files";
+    const requiredCapability = capabilityMap[commandType];
 
-    if (
-      !requestedCapabilities.includes(
-        requiredCapability
-      )
-    ) {
+    if (!requiredCapability) {
       throw new Error(
-        `الأمر لا يطلب الصلاحية المطلوبة: ${requiredCapability}`
+        `نوع الأمر ${commandType} غير مدعوم حاليًا في محرك التنفيذ.`
       );
     }
 
-    const {
-      data: employee,
-      error: employeeError,
-    } =
-      await supabaseAdmin
-        .from(
-          "ai_employees"
-        )
-        .select(
-          "id, name, status"
-        )
-        .eq(
-          "id",
-          command.ai_employee_id
-        )
-        .maybeSingle();
+    const requestedCapabilities = Array.isArray(
+      command.requested_capabilities
+    )
+      ? command.requested_capabilities
+      : [];
 
-    if (
-      employeeError ||
-      !employee
-    ) {
+    if (!requestedCapabilities.includes(requiredCapability)) {
       throw new Error(
-        "موظف AI غير موجود"
+        `الصلاحية المطلوبة ${requiredCapability} غير موجودة ضمن الأمر.`
       );
     }
 
-    if (
-      employee.status !==
-      "active"
-    ) {
+    const { data: employee, error: employeeError } = await serviceClient
+      .from("ai_employees")
+      .select("id,name,status")
+      .eq("id", command.ai_employee_id)
+      .single();
+
+    if (employeeError || !employee) {
+      throw new Error("لم يتم العثور على موظف AI المرتبط بالأمر.");
+    }
+
+    if (employee.status !== "active") {
+      throw new Error("موظف AI غير نشط.");
+    }
+
+    const { data: authorization, error: authorizationError } =
+      await authenticatedClient.rpc("authorize_ai_employee_command", {
+        p_command_id: commandId,
+      });
+
+    if (authorizationError) {
       throw new Error(
-        "موظف AI غير نشط"
+        authorizationError.message || "تعذر تفويض تنفيذ الأمر."
       );
     }
 
-    const {
-      data: authorization,
-      error:
-        authorizationError,
-    } =
-      await supabaseAuth.rpc(
-        "authorize_ai_employee_command",
-        {
-          p_command_id:
-            commandId,
-        }
-      );
-
-    if (
-      authorizationError
-    ) {
+    if (!authorization?.authorized) {
       throw new Error(
-        `فشل التحقق من بوابة الصلاحيات: ${authorizationError.message}`
+        authorization?.reason || "الأمر غير مصرح بتنفيذه."
       );
     }
 
-    if (
-      !authorization?.authorized
-    ) {
-      throw new Error(
-        authorization?.message ||
-          "الأمر غير مصرح له بالتنفيذ"
-      );
-    }
-
-    await appendExecutionLog(
-      supabaseAdmin,
-      commandId,
+    const logAfterAuthorization = appendExecutionLog(
+      command.execution_log,
       "execution_authorized",
       {
-        capability:
-          requiredCapability,
+        capability: requiredCapability,
       }
     );
 
+    await serviceClient
+      .from("ai_employee_commands")
+      .update({
+        execution_log: logAfterAuthorization,
+      })
+      .eq("id", commandId);
+
     const inputData =
-      command.input_data &&
-      typeof command.input_data ===
-        "object"
+      command.input_data && typeof command.input_data === "object"
         ? command.input_data
         : {};
 
-    const path =
-      normalizePath(
-        inputData.path || ""
-      );
+    const path = normalizePath(inputData.path || "");
 
     if (!path) {
-      throw new Error(
-        "تحليل الكود يحتاج مسار ملف محدد"
-      );
+      throw new Error("يجب تحديد input_data.path للملف المطلوب.");
     }
 
-    await appendExecutionLog(
-      supabaseAdmin,
-      commandId,
-      "github_file_read_started",
-      {
-        repository:
-          `${GITHUB_OWNER}/${GITHUB_REPO}`,
-        branch:
-          GITHUB_BRANCH,
-        path,
-      }
-    );
-
-    const file =
-      await readRepositoryFile(
-        path
-      );
-
-    await appendExecutionLog(
-      supabaseAdmin,
-      commandId,
-      "github_file_read_completed",
-      {
-        path,
-        size:
-          file.size,
-      }
-    );
-
-    const analysis =
-      analyzeCodeStructure(
-        file.content,
-        file.path
-      );
-
-    await appendExecutionLog(
-      supabaseAdmin,
-      commandId,
-      "code_analysis_completed",
-      {
-        path,
-        total_lines:
-          analysis.total_lines,
-        imports:
-          analysis.imports.length,
-        functions:
-          analysis.functions.length,
-        possible_issues:
-          analysis.possible_issues.length,
-      }
-    );
-
-    const {
-      data: completed,
-      error:
-        completeError,
-    } =
-      await supabaseAuth.rpc(
-        "complete_ai_employee_command",
+    if (commandType === "read_project_files") {
+      const startLog = appendExecutionLog(
+        logAfterAuthorization,
+        "github_file_read_started",
         {
-          p_command_id:
-            commandId,
-          p_result:
-            `تم تحليل الملف ${path} بنجاح. عدد الأسطر: ${analysis.total_lines}.`,
-          p_output_data:
-            analysis,
+          path,
         }
       );
 
-    if (
-      completeError
-    ) {
-      throw new Error(
-        `تم التحليل لكن تعذر إكمال الأمر: ${completeError.message}`
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: startLog,
+        })
+        .eq("id", commandId);
+
+      const file = await readGithubFile(path);
+
+      const completedLog = appendExecutionLog(
+        startLog,
+        "github_file_read_completed",
+        {
+          path: file.path,
+          size: file.size,
+        }
       );
+
+      const { error: completeError } =
+        await authenticatedClient.rpc("complete_ai_employee_command", {
+          p_command_id: commandId,
+          p_result: `تمت قراءة الملف ${file.path} بنجاح.`,
+          p_output_data: {
+            path: file.path,
+            size: file.size,
+            sha: file.sha,
+            content: file.content,
+          },
+        });
+
+      if (completeError) {
+        throw new Error(
+          completeError.message || "تعذر إكمال الأمر."
+        );
+      }
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: appendExecutionLog(
+            completedLog,
+            "execution_completed"
+          ),
+        })
+        .eq("id", commandId);
+
+      return json({
+        success: true,
+        command_id: commandId,
+        command_type: commandType,
+        result: `تمت قراءة الملف ${file.path} بنجاح.`,
+      });
     }
 
-    return NextResponse.json({
-      success: true,
-      message:
-        "تم تحليل الكود بنجاح",
-      command_id:
-        commandId,
-      completed: true,
-      analysis,
-      execution:
-        completed || null,
-    });
+    if (commandType === "analyze_code") {
+      const startLog = appendExecutionLog(
+        logAfterAuthorization,
+        "github_file_read_started",
+        {
+          path,
+        }
+      );
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: startLog,
+        })
+        .eq("id", commandId);
+
+      const file = await readGithubFile(path);
+
+      const readCompletedLog = appendExecutionLog(
+        startLog,
+        "github_file_read_completed",
+        {
+          path: file.path,
+          size: file.size,
+        }
+      );
+
+      const analysis = analyzeCode(file.content, file.path);
+
+      const analysisLog = appendExecutionLog(
+        readCompletedLog,
+        "code_analysis_completed",
+        {
+          path: file.path,
+          lines: analysis.total_lines,
+        }
+      );
+
+      const { error: completeError } =
+        await authenticatedClient.rpc("complete_ai_employee_command", {
+          p_command_id: commandId,
+          p_result:
+            `تم تحليل الملف ${file.path} بنجاح. ` +
+            `عدد الأسطر: ${analysis.total_lines}.`,
+          p_output_data: analysis,
+        });
+
+      if (completeError) {
+        throw new Error(
+          completeError.message || "تعذر إكمال تحليل الكود."
+        );
+      }
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: appendExecutionLog(
+            analysisLog,
+            "execution_completed"
+          ),
+        })
+        .eq("id", commandId);
+
+      return json({
+        success: true,
+        command_id: commandId,
+        command_type: commandType,
+        result:
+          `تم تحليل الملف ${file.path} بنجاح. ` +
+          `عدد الأسطر: ${analysis.total_lines}.`,
+        output_data: analysis,
+      });
+    }
+
+    if (commandType === "suggest_changes") {
+      const startLog = appendExecutionLog(
+        logAfterAuthorization,
+        "github_file_read_started",
+        {
+          path,
+        }
+      );
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: startLog,
+        })
+        .eq("id", commandId);
+
+      const file = await readGithubFile(path);
+
+      const readCompletedLog = appendExecutionLog(
+        startLog,
+        "github_file_read_completed",
+        {
+          path: file.path,
+          size: file.size,
+        }
+      );
+
+      const suggestions = suggestChanges(file.content, file.path);
+
+      const suggestionsLog = appendExecutionLog(
+        readCompletedLog,
+        "code_suggestions_completed",
+        {
+          path: file.path,
+          suggestions_count: suggestions.suggestions.length,
+          files_modified: false,
+        }
+      );
+
+      const { error: completeError } =
+        await authenticatedClient.rpc("complete_ai_employee_command", {
+          p_command_id: commandId,
+          p_result:
+            `تم تحليل ${file.path} وإعداد ` +
+            `${suggestions.suggestions.length} اقتراحات تحسين بدون تعديل الملف.`,
+          p_output_data: suggestions,
+        });
+
+      if (completeError) {
+        throw new Error(
+          completeError.message || "تعذر إكمال اقتراح التعديلات."
+        );
+      }
+
+      await serviceClient
+        .from("ai_employee_commands")
+        .update({
+          execution_log: appendExecutionLog(
+            suggestionsLog,
+            "execution_completed"
+          ),
+        })
+        .eq("id", commandId);
+
+      return json({
+        success: true,
+        command_id: commandId,
+        command_type: commandType,
+        result:
+          `تم تحليل ${file.path} وإعداد ` +
+          `${suggestions.suggestions.length} اقتراحات تحسين بدون تعديل الملف.`,
+        output_data: suggestions,
+      });
+    }
+
+    throw new Error(`نوع الأمر ${commandType} غير مدعوم.`);
   } catch (error) {
     const message =
-      error?.message ||
-      "حدث خطأ غير متوقع";
+      error?.message || "حدث خطأ غير معروف أثناء تنفيذ الأمر.";
 
-    if (commandId) {
-      await appendExecutionLog(
-        supabaseAdmin,
-        commandId,
-        "execution_failed",
-        {
-          error:
-            message,
-        }
-      );
-
+    if (commandId && authenticatedClient) {
       try {
-        const supabaseAuth =
-          await getAuthenticatedSupabase();
-
-        await supabaseAuth.rpc(
-          "fail_ai_employee_command",
-          {
-            p_command_id:
-              commandId,
-            p_error_message:
-              message,
-          }
-        );
+        await authenticatedClient.rpc("fail_ai_employee_command", {
+          p_command_id: commandId,
+          p_error_message: message,
+        });
       } catch {
-        try {
-          await supabaseAdmin
-            .from(
-              "ai_employee_commands"
-            )
-            .update({
-              status:
-                "failed",
-              error_message:
-                message,
-              completed_at:
-                new Date().toISOString(),
-              updated_at:
-                new Date().toISOString(),
-            })
-            .eq(
-              "id",
-              commandId
-            );
-        } catch {}
+        // fallback below
       }
     }
 
-    return NextResponse.json(
+    if (commandId && serviceClient) {
+      try {
+        const { data: currentCommand } = await serviceClient
+          .from("ai_employee_commands")
+          .select("execution_log")
+          .eq("id", commandId)
+          .single();
+
+        await serviceClient
+          .from("ai_employee_commands")
+          .update({
+            status: "failed",
+            error_message: message,
+            completed_at: new Date().toISOString(),
+            execution_log: appendExecutionLog(
+              currentCommand?.execution_log,
+              "execution_failed",
+              {
+                error: message,
+              }
+            ),
+          })
+          .eq("id", commandId);
+      } catch {
+        // ignore fallback failure
+      }
+    }
+
+    return json(
       {
         success: false,
-        error:
-          message,
-        command_id:
-          commandId,
+        command_id: commandId,
+        error: message,
       },
-      {
-        status: 500,
-      }
+      500
     );
   }
 }
