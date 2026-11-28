@@ -1,20 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-export const runtime = "nodejs";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
+export const runtime = "nodejs";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -28,63 +18,30 @@ const GITHUB_BRANCH =
   process.env.GITHUB_REPOSITORY_BRANCH || "main";
 
 function githubHeaders() {
-  const token = process.env.GITHUB_TOKEN;
-
-  if (!token) {
-    throw new Error("GITHUB_TOKEN غير مضبوط في Vercel");
-  }
-
   return {
     Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
     "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "Suq-AI-Walm",
   };
 }
 
-async function githubRequest(path) {
-  const response = await fetch(`${GITHUB_API}${path}`, {
-    method: "GET",
-    headers: githubHeaders(),
-    cache: "no-store",
-  });
-
-  const text = await response.text();
-
-  let data = null;
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = text;
-  }
-
-  if (!response.ok) {
-    const message =
-      typeof data === "object" && data?.message
-        ? data.message
-        : `GitHub API error: ${response.status}`;
-
-    throw new Error(message);
-  }
-
-  return data;
-}
-
 function normalizePath(value) {
-  if (!value) return "";
+  const raw = String(value || "").trim();
 
-  let path = String(value).trim();
+  if (!raw) return "";
 
-  path = path.replace(/^\/+/, "");
+  const normalized = raw
+    .replaceAll("\\", "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+/g, "/");
 
-  if (path.includes("..")) {
+  const parts = normalized.split("/");
+
+  if (parts.some((part) => part === "..")) {
     throw new Error("المسار غير مسموح");
   }
 
-  return path;
-}
-
-function isSafeReadablePath(path) {
   const blocked = [
     ".env",
     ".env.local",
@@ -96,71 +53,100 @@ function isSafeReadablePath(path) {
     ".vercel",
   ];
 
-  const normalized = path.toLowerCase();
+  const lower = normalized.toLowerCase();
 
-  return !blocked.some((item) => {
-    return (
-      normalized === item ||
-      normalized.startsWith(`${item}/`)
-    );
-  });
+  for (const item of blocked) {
+    if (
+      lower === item ||
+      lower.startsWith(`${item}/`) ||
+      lower.includes(`/${item}/`)
+    ) {
+      throw new Error("هذا المسار محظور لأسباب أمنية");
+    }
+  }
+
+  return normalized;
 }
 
-async function getCurrentUser() {
-  const cookieStore = await cookies();
+function isSafeFilePath(path) {
+  const normalized = normalizePath(path);
 
-  const supabaseAuth = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  if (!normalized) return false;
+
+  const lower = normalized.toLowerCase();
+
+  const blockedNames = [
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    ".env.test",
+  ];
+
+  if (
+    blockedNames.some(
+      (name) =>
+        lower === name ||
+        lower.endsWith(`/${name}`)
+    )
+  ) {
+    return false;
+  }
+
+  const blockedFolders = [
+    "node_modules/",
+    ".git/",
+    ".vercel/",
+  ];
+
+  if (
+    blockedFolders.some((folder) =>
+      lower.includes(folder)
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function githubRequest(path) {
+  if (!process.env.GITHUB_TOKEN) {
+    throw new Error("GITHUB_TOKEN غير موجود في Vercel");
+  }
+
+  const response = await fetch(
+    `${GITHUB_API}${path}`,
     {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // Route Handler may not allow setting cookies.
-          }
-        },
-      },
+      method: "GET",
+      headers: githubHeaders(),
+      cache: "no-store",
     }
   );
 
-  const {
-    data: { user },
-    error,
-  } = await supabaseAuth.auth.getUser();
+  const text = await response.text();
 
-  if (error || !user) {
-    return null;
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
   }
 
-  return user;
-}
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      `GitHub API error ${response.status}`;
 
-async function readFile(path) {
-  const encodedPath = path
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/");
+    throw new Error(message);
+  }
 
-  return githubRequest(
-    `/repos/${encodeURIComponent(
-      GITHUB_OWNER
-    )}/${encodeURIComponent(
-      GITHUB_REPO
-    )}/contents/${encodedPath}?ref=${encodeURIComponent(
-      GITHUB_BRANCH
-    )}`
-  );
+  return data;
 }
 
 async function readRepositoryTree() {
-  return githubRequest(
+  const data = await githubRequest(
     `/repos/${encodeURIComponent(
       GITHUB_OWNER
     )}/${encodeURIComponent(
@@ -169,74 +155,267 @@ async function readRepositoryTree() {
       GITHUB_BRANCH
     )}?recursive=1`
   );
+
+  const tree = Array.isArray(data?.tree)
+    ? data.tree
+    : [];
+
+  const files = tree
+    .filter(
+      (item) =>
+        item.type === "blob" &&
+        typeof item.path === "string" &&
+        isSafeFilePath(item.path)
+    )
+    .slice(0, 500)
+    .map((item) => ({
+      path: item.path,
+      type: item.type,
+      size: item.size || 0,
+      sha: item.sha || null,
+      url: item.url || null,
+    }));
+
+  return {
+    repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
+    branch: GITHUB_BRANCH,
+    total_files: files.length,
+    truncated: tree.length > 500,
+    files,
+  };
 }
 
-function decodeGitHubContent(content) {
-  if (!content) return "";
+async function readRepositoryFile(path) {
+  const normalizedPath = normalizePath(path);
 
-  return Buffer.from(
-    content.replace(/\n/g, ""),
+  if (!normalizedPath) {
+    return readRepositoryTree();
+  }
+
+  if (!isSafeFilePath(normalizedPath)) {
+    throw new Error(
+      "لا يمكن قراءة هذا الملف لأسباب أمنية"
+    );
+  }
+
+  const data = await githubRequest(
+    `/repos/${encodeURIComponent(
+      GITHUB_OWNER
+    )}/${encodeURIComponent(
+      GITHUB_REPO
+    )}/contents/${normalizedPath}?ref=${encodeURIComponent(
+      GITHUB_BRANCH
+    )}`
+  );
+
+  if (Array.isArray(data)) {
+    throw new Error(
+      "المسار المطلوب مجلد وليس ملفاً"
+    );
+  }
+
+  if (data?.type !== "file") {
+    throw new Error(
+      "المسار المطلوب ليس ملفاً قابلاً للقراءة"
+    );
+  }
+
+  const size = Number(data.size || 0);
+
+  if (size > 500000) {
+    throw new Error(
+      "الملف أكبر من الحد المسموح للقراءة"
+    );
+  }
+
+  if (!data.content) {
+    throw new Error(
+      "GitHub لم يرجع محتوى الملف"
+    );
+  }
+
+  const content = Buffer.from(
+    data.content.replace(/\n/g, ""),
     "base64"
   ).toString("utf8");
+
+  return {
+    repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
+    branch: GITHUB_BRANCH,
+    path: normalizedPath,
+    size,
+    sha: data.sha || null,
+    content,
+  };
+}
+
+async function getAuthenticatedSupabase() {
+  const cookieStore = await cookies();
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(
+              ({
+                name,
+                value,
+                options,
+              }) => {
+                cookieStore.set(
+                  name,
+                  value,
+                  options
+                );
+              }
+            );
+          } catch {
+            // لا نحتاج تعديل الكوكيز هنا
+          }
+        },
+      },
+    }
+  );
+}
+
+function createAdminSupabase() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+}
+
+async function appendExecutionLog(
+  supabaseAdmin,
+  commandId,
+  event,
+  details = {}
+) {
+  try {
+    const { data: command } =
+      await supabaseAdmin
+        .from("ai_employee_commands")
+        .select("execution_log")
+        .eq("id", commandId)
+        .maybeSingle();
+
+    if (!command) return;
+
+    const currentLog = Array.isArray(
+      command.execution_log
+    )
+      ? command.execution_log
+      : [];
+
+    const nextLog = [
+      ...currentLog,
+      {
+        event,
+        at: new Date().toISOString(),
+        ...details,
+      },
+    ];
+
+    await supabaseAdmin
+      .from("ai_employee_commands")
+      .update({
+        execution_log: nextLog,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", commandId);
+  } catch {
+    // سجل التنفيذ لا يجب أن يمنع العملية الأساسية
+  }
 }
 
 export async function POST(request) {
   let commandId = null;
 
-  try {
-    const user = await getCurrentUser();
+  const supabaseAdmin = createAdminSupabase();
 
-    if (!user) {
+  try {
+    const supabaseAuth =
+      await getAuthenticatedSupabase();
+
+    const {
+      data: {
+        user,
+      },
+      error: userError,
+    } = await supabaseAuth.auth.getUser();
+
+    if (
+      userError ||
+      !user
+    ) {
       return NextResponse.json(
         {
           success: false,
           error: "يجب تسجيل الدخول أولاً",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
-    const profileResult = await supabaseAdmin
-      .from("profiles")
-      .select("id, is_super_admin, account_status")
-      .eq("id", user.id)
-      .maybeSingle();
+    const { data: profile, error: profileError } =
+      await supabaseAdmin
+        .from("profiles")
+        .select(
+          "id, is_super_admin, account_status"
+        )
+        .eq("id", user.id)
+        .maybeSingle();
 
-    if (profileResult.error) {
+    if (
+      profileError ||
+      !profile?.is_super_admin
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: profileResult.error.message,
+          error:
+            "غير مصرح. هذه العملية متاحة للـ Super Admin فقط",
         },
-        { status: 500 }
+        {
+          status: 403,
+        }
       );
     }
 
-    const profile = profileResult.data;
-
-    if (!profile?.is_super_admin) {
+    if (
+      profile.account_status &&
+      profile.account_status !== "active"
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: "غير مصرح. هذه العملية متاحة للـ Super Admin فقط.",
+          error: "حساب Super Admin غير نشط",
         },
-        { status: 403 }
-      );
-    }
-
-    if (profile.account_status !== "active") {
-      return NextResponse.json(
         {
-          success: false,
-          error: "حساب Super Admin غير نشط.",
-        },
-        { status: 403 }
+          status: 403,
+        }
       );
     }
 
     const body = await request.json();
 
-    commandId = body?.command_id;
+    commandId =
+      body?.command_id || null;
 
     if (!commandId) {
       return NextResponse.json(
@@ -244,50 +423,70 @@ export async function POST(request) {
           success: false,
           error: "command_id مطلوب",
         },
-        { status: 400 }
-      );
-    }
-
-    const { data: command, error: commandError } =
-      await supabaseAdmin
-        .from("ai_employee_commands")
-        .select("*")
-        .eq("id", commandId)
-        .maybeSingle();
-
-    if (commandError) {
-      return NextResponse.json(
         {
-          success: false,
-          error: commandError.message,
-        },
-        { status: 500 }
+          status: 400,
+        }
       );
     }
 
-    if (!command) {
+    const {
+      data: command,
+      error: commandError,
+    } = await supabaseAdmin
+      .from("ai_employee_commands")
+      .select("*")
+      .eq("id", commandId)
+      .maybeSingle();
+
+    if (
+      commandError ||
+      !command
+    ) {
       return NextResponse.json(
         {
           success: false,
           error: "الأمر غير موجود",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    if (command.command_type !== "read_project_files") {
+    if (
+      command.command_type !==
+      "read_project_files"
+    ) {
       return NextResponse.json(
         {
           success: false,
           error:
-            "بوابة التنفيذ الحالية تسمح فقط بصلاحية قراءة ملفات المشروع.",
+            "هذا النوع من الأوامر غير مربوط بطبقة التنفيذ الحالية",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (command.status !== "running") {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "الأمر يجب أن يكون في حالة قيد التنفيذ",
+          status: command.status,
+        },
+        {
+          status: 409,
+        }
       );
     }
 
     const requestedCapabilities =
-      Array.isArray(command.requested_capabilities)
+      Array.isArray(
+        command.requested_capabilities
+      )
         ? command.requested_capabilities
         : [];
 
@@ -300,65 +499,87 @@ export async function POST(request) {
         {
           success: false,
           error:
-            "الأمر لا يملك صلاحية read_project_files.",
+            "الأمر لا يطلب صلاحية قراءة الملفات",
         },
-        { status: 403 }
-      );
-    }
-
-    /*
-     * المرحلة الأولى:
-     * لا نقرأ أي ملف قبل المرور من authorize_ai_employee_command.
-     */
-    const { data: authorization, error: authorizationError } =
-      await supabaseAdmin.rpc(
-        "authorize_ai_employee_command",
         {
-          p_command_id: commandId,
+          status: 403,
         }
       );
+    }
 
-    if (authorizationError) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: authorizationError.message,
-        },
-        { status: 500 }
+    const {
+      data: employee,
+      error: employeeError,
+    } = await supabaseAdmin
+      .from("ai_employees")
+      .select(
+        "id, name, status"
+      )
+      .eq(
+        "id",
+        command.ai_employee_id
+      )
+      .maybeSingle();
+
+    if (
+      employeeError ||
+      !employee
+    ) {
+      throw new Error(
+        "موظف AI غير موجود"
       );
     }
 
-    if (!authorization?.authorized) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            authorization?.message ||
-            "الأمر غير مصرح له.",
-          authorization,
-        },
-        { status: 403 }
+    if (employee.status !== "active") {
+      throw new Error(
+        "موظف AI غير نشط"
       );
     }
 
     /*
-     * لا نسمح بتشغيل الأمر من هذه البوابة
-     * إلا إذا كان في حالة running.
-     *
-     * start_ai_employee_command هو المسؤول
-     * عن الانتقال إلى running.
-     */
-    if (command.status !== "running") {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "يجب بدء الأمر من بوابة التنفيذ أولاً.",
-          status: command.status,
-        },
-        { status: 409 }
+      مهم:
+      هنا نستخدم supabaseAuth وليس supabaseAdmin.
+      السبب أن authorize_ai_employee_command
+      يعتمد على auth.uid().
+    */
+    const {
+      data: authorization,
+      error: authorizationError,
+    } = await supabaseAuth.rpc(
+      "authorize_ai_employee_command",
+      {
+        p_command_id: commandId,
+      }
+    );
+
+    if (authorizationError) {
+      throw new Error(
+        `فشل التحقق من بوابة الصلاحيات: ${
+          authorizationError.message
+        }`
       );
     }
+
+    if (
+      !authorization?.authorized
+    ) {
+      throw new Error(
+        authorization?.message ||
+          "الأمر غير مصرح له بالتنفيذ"
+      );
+    }
+
+    await appendExecutionLog(
+      supabaseAdmin,
+      commandId,
+      "execution_authorized",
+      {
+        capability:
+          "read_project_files",
+        risk_level:
+          command.risk_level || "low",
+      }
+    );
 
     const inputData =
       command.input_data &&
@@ -366,170 +587,105 @@ export async function POST(request) {
         ? command.input_data
         : {};
 
-    const requestedPath = normalizePath(
-      inputData.path || ""
-    );
-
-    if (!isSafeReadablePath(requestedPath)) {
-      throw new Error(
-        "هذا المسار محمي ولا يسمح لـ«والم» بقراءته."
+    const requestedPath =
+      normalizePath(
+        inputData.path || ""
       );
-    }
 
-    /*
-     * الحالة 1:
-     * path فارغ = عرض هيكل المشروع فقط.
-     *
-     * لا نقرأ محتوى الملفات.
-     */
-    if (!requestedPath) {
-      const tree = await readRepositoryTree();
-
-      const files = Array.isArray(tree?.tree)
-        ? tree.tree
-            .filter((item) => {
-              if (item.type !== "blob") {
-                return false;
-              }
-
-              return isSafeReadablePath(
-                item.path || ""
-              );
-            })
-            .slice(0, 500)
-            .map((item) => ({
-              path: item.path,
-              size: item.size || 0,
-              type: item.type,
-            }))
-        : [];
-
-      const outputData = {
+    await appendExecutionLog(
+      supabaseAdmin,
+      commandId,
+      "github_read_started",
+      {
         repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
         branch: GITHUB_BRANCH,
-        mode: "tree",
-        files,
-        total_visible_files: files.length,
-      };
-
-      const resultText =
-        `تمت قراءة هيكل المشروع بنجاح.\n` +
-        `المستودع: ${GITHUB_OWNER}/${GITHUB_REPO}\n` +
-        `الفرع: ${GITHUB_BRANCH}\n` +
-        `عدد الملفات الظاهرة: ${files.length}`;
-
-      const { data: completed, error: completeError } =
-        await supabaseAdmin.rpc(
-          "complete_ai_employee_command",
-          {
-            p_command_id: commandId,
-            p_result: resultText,
-            p_output_data: outputData,
-          }
-        );
-
-      if (completeError) {
-        throw completeError;
+        path:
+          requestedPath || "/",
       }
-
-      return NextResponse.json({
-        success: true,
-        mode: "tree",
-        command_id: commandId,
-        result: resultText,
-        output_data: outputData,
-        completion: completed,
-      });
-    }
-
-    /*
-     * الحالة 2:
-     * path محدد = قراءة ملف واحد فقط.
-     */
-    const file = await readFile(requestedPath);
-
-    if (Array.isArray(file)) {
-      throw new Error(
-        "المسار المطلوب مجلد. في هذه المرحلة نقرأ ملفًا واحدًا فقط."
-      );
-    }
-
-    if (file.type !== "file") {
-      throw new Error(
-        "العنصر المطلوب ليس ملفًا قابلًا للقراءة."
-      );
-    }
-
-    if (!isSafeReadablePath(file.path || requestedPath)) {
-      throw new Error(
-        "هذا الملف محمي ولا يسمح بقراءته."
-      );
-    }
-
-    if (
-      typeof file.size === "number" &&
-      file.size > 500000
-    ) {
-      throw new Error(
-        "الملف أكبر من الحد المسموح به للقراءة في المرحلة الحالية."
-      );
-    }
-
-    const content = decodeGitHubContent(
-      file.content
     );
 
-    const outputData = {
-      repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
-      branch: GITHUB_BRANCH,
-      mode: "file",
-      path: file.path || requestedPath,
-      size: file.size || content.length,
-      sha: file.sha || null,
-      content,
-    };
+    const result =
+      requestedPath
+        ? await readRepositoryFile(
+            requestedPath
+          )
+        : await readRepositoryTree();
 
-    const resultText =
-      `تمت قراءة الملف بنجاح: ${
-        file.path || requestedPath
-      }\n` +
-      `الحجم: ${file.size || content.length} بايت`;
+    await appendExecutionLog(
+      supabaseAdmin,
+      commandId,
+      "github_read_completed",
+      {
+        repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
+        branch: GITHUB_BRANCH,
+        path:
+          requestedPath || "/",
+        total_files:
+          result.total_files ||
+          undefined,
+      }
+    );
 
-    const { data: completed, error: completeError } =
-      await supabaseAdmin.rpc(
-        "complete_ai_employee_command",
-        {
-          p_command_id: commandId,
-          p_result: resultText,
-          p_output_data: outputData,
-        }
-      );
+    /*
+      أيضاً نستخدم supabaseAuth هنا
+      لأن complete_ai_employee_command
+      يعتمد على auth.uid().
+    */
+    const {
+      data: completed,
+      error: completeError,
+    } = await supabaseAuth.rpc(
+      "complete_ai_employee_command",
+      {
+        p_command_id: commandId,
+        p_result: requestedPath
+          ? `تمت قراءة الملف ${requestedPath} بنجاح.`
+          : `تمت قراءة هيكل مشروع ${GITHUB_OWNER}/${GITHUB_REPO} بنجاح.`,
+        p_output_data: result,
+      }
+    );
 
     if (completeError) {
-      throw completeError;
+      throw new Error(
+        `تمت قراءة GitHub لكن تعذر إكمال الأمر: ${
+          completeError.message
+        }`
+      );
     }
 
     return NextResponse.json({
       success: true,
-      mode: "file",
+      message:
+        "تمت قراءة مشروع سوق AI بنجاح",
       command_id: commandId,
-      result: resultText,
-      output_data: outputData,
-      completion: completed,
+      completed: true,
+      result,
+      execution: completed || null,
     });
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "حدث خطأ غير معروف";
+      error?.message ||
+      "حدث خطأ غير متوقع أثناء تنفيذ الأمر";
 
-    /*
-     * إذا كان الأمر بدأ فعليًا،
-     * نسجل الفشل داخل نظام الأوامر.
-     */
     if (commandId) {
+      await appendExecutionLog(
+        supabaseAdmin,
+        commandId,
+        "execution_failed",
+        {
+          error: message,
+        }
+      );
+
+      /*
+        نستخدم اتصال المستخدم لاحقاً إذا أمكن
+        حتى تعمل auth.uid() داخل RPC.
+      */
       try {
-        await supabaseAdmin.rpc(
+        const supabaseAuth =
+          await getAuthenticatedSupabase();
+
+        await supabaseAuth.rpc(
           "fail_ai_employee_command",
           {
             p_command_id: commandId,
@@ -537,7 +693,82 @@ export async function POST(request) {
           }
         );
       } catch {
-        // لا نخفي الخطأ الأصلي.
+        /*
+          إذا فشل RPC أيضاً، نضمن على الأقل
+          تسجيل الخطأ مباشرة عبر service role.
+        */
+
+        try {
+          const {
+            data: currentCommand,
+          } = await supabaseAdmin
+            .from(
+              "ai_employee_commands"
+            )
+            .select(
+              "execution_log, started_at"
+            )
+            .eq(
+              "id",
+              commandId
+            )
+            .maybeSingle();
+
+          const log = Array.isArray(
+            currentCommand?.execution_log
+          )
+            ? currentCommand.execution_log
+            : [];
+
+          const startedAt =
+            currentCommand?.started_at
+              ? new Date(
+                  currentCommand.started_at
+                ).getTime()
+              : null;
+
+          const durationSeconds =
+            startedAt
+              ? Math.max(
+                  0,
+                  (
+                    Date.now() -
+                    startedAt
+                  ) / 1000
+                )
+              : 0;
+
+          await supabaseAdmin
+            .from(
+              "ai_employee_commands"
+            )
+            .update({
+              status: "failed",
+              error_message: message,
+              completed_at:
+                new Date().toISOString(),
+              duration_seconds:
+                durationSeconds,
+              execution_log: [
+                ...log,
+                {
+                  event:
+                    "execution_failed",
+                  at: new Date().toISOString(),
+                  error: message,
+                  fallback: true,
+                },
+              ],
+              updated_at:
+                new Date().toISOString(),
+            })
+            .eq(
+              "id",
+              commandId
+            );
+        } catch {
+          // لا شيء إضافي
+        }
       }
     }
 
@@ -547,7 +778,9 @@ export async function POST(request) {
         error: message,
         command_id: commandId,
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
