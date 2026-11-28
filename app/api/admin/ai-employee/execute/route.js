@@ -445,6 +445,160 @@ function buildEditPreview(
   };
 }
 
+/*
+ * ---------------------------------------------------------
+ * BUILD PREFLIGHT
+ * ---------------------------------------------------------
+ *
+ * ملاحظة:
+ * هذا فحص Build آمن من GitHub.
+ * لا يشغّل npm build داخل Vercel Serverless،
+ * ولا يكتب أي شيء، ولا ينشر أي شيء.
+ */
+
+function analyzePackageJson(content) {
+  let packageJson;
+
+  try {
+    packageJson = JSON.parse(content);
+  } catch {
+    throw new Error(
+      "ملف package.json غير صالح JSON."
+    );
+  }
+
+  const scripts =
+    packageJson?.scripts &&
+    typeof packageJson.scripts === "object"
+      ? packageJson.scripts
+      : {};
+
+  const dependencies =
+    packageJson?.dependencies &&
+    typeof packageJson.dependencies === "object"
+      ? packageJson.dependencies
+      : {};
+
+  const devDependencies =
+    packageJson?.devDependencies &&
+    typeof packageJson.devDependencies === "object"
+      ? packageJson.devDependencies
+      : {};
+
+  return {
+    name: packageJson.name || null,
+    version: packageJson.version || null,
+    private: packageJson.private === true,
+    package_manager:
+      packageJson.packageManager || null,
+    build_script:
+      typeof scripts.build === "string"
+        ? scripts.build
+        : null,
+    dev_script:
+      typeof scripts.dev === "string"
+        ? scripts.dev
+        : null,
+    start_script:
+      typeof scripts.start === "string"
+        ? scripts.start
+        : null,
+    scripts: Object.keys(scripts),
+    dependency_count:
+      Object.keys(dependencies).length,
+    dev_dependency_count:
+      Object.keys(devDependencies).length,
+    has_next_dependency:
+      Boolean(dependencies.next),
+    has_react_dependency:
+      Boolean(dependencies.react),
+    has_react_dom_dependency:
+      Boolean(dependencies["react-dom"]),
+  };
+}
+
+async function runBuildPreflight() {
+  const packageFile =
+    await readGithubFile("package.json");
+
+  const packageInfo =
+    analyzePackageJson(
+      packageFile.content
+    );
+
+  const checks = [];
+
+  checks.push({
+    name: "package.json",
+    passed: true,
+    message: "تم العثور على package.json وقراءته بنجاح.",
+  });
+
+  checks.push({
+    name: "build script",
+    passed: Boolean(packageInfo.build_script),
+    message: packageInfo.build_script
+      ? `Build script موجود: ${packageInfo.build_script}`
+      : "لا يوجد script باسم build داخل package.json.",
+  });
+
+  checks.push({
+    name: "Next.js",
+    passed: packageInfo.has_next_dependency,
+    message: packageInfo.has_next_dependency
+      ? "اعتماد Next.js موجود."
+      : "اعتماد Next.js غير موجود في dependencies.",
+  });
+
+  checks.push({
+    name: "React",
+    passed: packageInfo.has_react_dependency,
+    message: packageInfo.has_react_dependency
+      ? "اعتماد React موجود."
+      : "اعتماد React غير موجود في dependencies.",
+  });
+
+  checks.push({
+    name: "React DOM",
+    passed: packageInfo.has_react_dom_dependency,
+    message: packageInfo.has_react_dom_dependency
+      ? "اعتماد react-dom موجود."
+      : "اعتماد react-dom غير موجود في dependencies.",
+  });
+
+  const failedChecks =
+    checks.filter(
+      (check) => !check.passed
+    );
+
+  return {
+    build_mode: "preflight",
+    build_executed: false,
+    build_environment:
+      "Vercel Serverless API",
+    branch: GITHUB_BRANCH,
+    repository: `${GITHUB_OWNER}/${GITHUB_REPO}`,
+    package: packageInfo,
+    checks,
+    passed:
+      failedChecks.length === 0,
+    failed_checks:
+      failedChecks.length,
+    safety: {
+      files_modified: false,
+      files_created: false,
+      github_write_used: false,
+      deployment_triggered: false,
+      openai_used: false,
+      runway_used: false,
+      points_charged: 0,
+      estimated_cost_usd: 0,
+    },
+    note:
+      "تم إجراء فحص Build Preflight آمن من GitHub. لم يتم تشغيل npm build داخل Vercel Serverless ولم يتم النشر.",
+  };
+}
+
 function appendExecutionLog(
   existing,
   event,
@@ -491,6 +645,8 @@ async function safeLog(
   event,
   data = {}
 ) {
+  if (!commandId) return;
+
   try {
     const { data: currentCommand, error } =
       await serviceClient
@@ -604,12 +760,6 @@ export async function POST(request) {
         }
       );
 
-    await safeLog(
-      serviceClient,
-      null,
-      "ignored"
-    ).catch(() => {});
-
     authenticatedClient =
       await getAuthenticatedClient();
 
@@ -664,7 +814,10 @@ export async function POST(request) {
         .json()
         .catch(() => ({}));
 
-    commandId = body?.command_id;
+    commandId =
+      body?.command_id ||
+      body?.commandId ||
+      null;
 
     if (!commandId) {
       return json(
@@ -730,6 +883,8 @@ export async function POST(request) {
         "suggest_changes",
       edit_files:
         "edit_files",
+      run_build:
+        "run_build",
     };
 
     const requiredCapability =
@@ -818,6 +973,101 @@ export async function POST(request) {
         "object"
         ? command.input_data
         : {};
+
+    /*
+     * ---------------------------------------------------------
+     * RUN BUILD
+     * ---------------------------------------------------------
+     */
+
+    if (
+      commandType ===
+      "run_build"
+    ) {
+      await safeLog(
+        serviceClient,
+        commandId,
+        "build_preflight_started",
+        {
+          repository:
+            `${GITHUB_OWNER}/${GITHUB_REPO}`,
+          branch:
+            GITHUB_BRANCH,
+        }
+      );
+
+      const buildResult =
+        await runBuildPreflight();
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "build_preflight_completed",
+        {
+          passed:
+            buildResult.passed,
+          failed_checks:
+            buildResult.failed_checks,
+          build_executed:
+            false,
+        }
+      );
+
+      const resultMessage =
+        buildResult.passed
+          ? "تم فحص جاهزية Build بنجاح بدون تشغيل Build فعلي أو تعديل المشروع."
+          : "اكتمل فحص Build وظهرت ملاحظات تحتاج معالجة قبل اعتبار المشروع جاهزًا.";
+
+      const {
+        error: completeError,
+      } =
+        await authenticatedClient.rpc(
+          "complete_ai_employee_command",
+          {
+            p_command_id:
+              commandId,
+            p_result:
+              resultMessage,
+            p_output_data:
+              buildResult,
+          }
+        );
+
+      if (completeError) {
+        throw new Error(
+          completeError.message ||
+            "تعذر إكمال فحص Build."
+        );
+      }
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "execution_completed",
+        {
+          build_executed:
+            false,
+          preflight: true,
+        }
+      );
+
+      return json({
+        success: true,
+        command_id: commandId,
+        command_type:
+          commandType,
+        result:
+          resultMessage,
+        output_data:
+          buildResult,
+      });
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * INPUT PATH
+     * ---------------------------------------------------------
+     */
 
     const path =
       normalizePath(
