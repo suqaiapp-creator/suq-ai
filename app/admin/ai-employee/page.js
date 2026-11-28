@@ -57,6 +57,7 @@ const executableCommandTypes = [
   "analyze_code",
   "suggest_changes",
   "edit_files",
+  "run_build",
 ];
 
 function formatDate(value) {
@@ -511,6 +512,21 @@ export default function AiEmployeePage() {
           commandNotes.trim() || null,
       };
 
+      if (
+        commandType === "read_project_files" ||
+        commandType === "analyze_code" ||
+        commandType === "suggest_changes"
+      ) {
+        if (!commandPath.trim()) {
+          throw new Error(
+            "يجب تحديد مسار الملف."
+          );
+        }
+
+        inputData.path =
+          commandPath.trim();
+      }
+
       if (commandType === "edit_files") {
         if (!commandPath.trim()) {
           throw new Error(
@@ -518,8 +534,19 @@ export default function AiEmployeePage() {
           );
         }
 
+        inputData.path =
+          commandPath.trim();
+
         inputData.dry_run = true;
         inputData.new_content = newContent;
+      }
+
+      if (commandType === "run_build") {
+        inputData.path = null;
+        inputData.mode = "preflight";
+        inputData.notes =
+          commandNotes.trim() ||
+          "فحص جاهزية Build للمشروع بدون تشغيل npm build فعليًا.";
       }
 
       const {
@@ -806,9 +833,13 @@ export default function AiEmployeePage() {
     }
 
     setExecutingId(command.id);
+
     setExecutionMessage(
-      "جارٍ الاتصال بمحرك تنفيذ والم..."
+      command.command_type === "run_build"
+        ? "جارٍ فحص جاهزية Build بواسطة والم..."
+        : "جارٍ الاتصال بمحرك تنفيذ والم..."
     );
+
     setActionError("");
     setActionMessage("");
 
@@ -864,7 +895,9 @@ export default function AiEmployeePage() {
       }
 
       setExecutionMessage(
-        "تم الاتصال بمحرك التنفيذ. جارٍ انتظار نتيجة والم..."
+        command.command_type === "run_build"
+          ? "تم الاتصال بمحرك التنفيذ. جارٍ انتظار نتيجة فحص Build..."
+          : "تم الاتصال بمحرك التنفيذ. جارٍ انتظار نتيجة والم..."
       );
 
       const finishedCommand =
@@ -885,8 +918,11 @@ export default function AiEmployeePage() {
         "completed"
       ) {
         setActionMessage(
-          "اكتمل تنفيذ الأمر بنجاح."
+          command.command_type === "run_build"
+            ? "اكتمل فحص جاهزية Build بنجاح."
+            : "اكتمل تنفيذ الأمر بنجاح."
         );
+
         setExecutionMessage("");
       } else if (
         finishedCommand.status ===
@@ -896,6 +932,7 @@ export default function AiEmployeePage() {
           finishedCommand.error_message ||
             "محرك التنفيذ أنهى الأمر بحالة فشل."
         );
+
         setExecutionMessage("");
       } else {
         setActionMessage(
@@ -906,6 +943,7 @@ export default function AiEmployeePage() {
             finishedCommand.status
           }`
         );
+
         setExecutionMessage("");
       }
 
@@ -2183,6 +2221,9 @@ export default function AiEmployeePage() {
                                       : command.command_type ===
                                         "edit_files"
                                       ? "✏️ تنفيذ"
+                                      : command.command_type ===
+                                        "run_build"
+                                      ? "🛠️ فحص Build"
                                       : "▶ تنفيذ"}
                                   </button>
                                 )}
@@ -2640,50 +2681,93 @@ export default function AiEmployeePage() {
                   }
                   style={inputStyle}
                 >
-                  {executableCommandTypes.map(
-                    (type) => {
-                      const capability =
-                        capabilityMap[
-                          type
-                        ];
+                  {[
+                    ...executableCommandTypes,
+                  ].map((type) => {
+                    const capability =
+                      capabilityMap[
+                        type
+                      ];
 
-                      return (
-                        <option
-                          key={type}
-                          value={type}
-                          disabled={
-                            !capability?.enabled
-                          }
-                        >
-                          {commandTypeLabels[
-                            type
-                          ] || type}
-                          {!capability?.enabled
-                            ? " — متوقف"
-                            : ""}
-                        </option>
-                      );
-                    }
-                  )}
+                    return (
+                      <option
+                        key={type}
+                        value={type}
+                        disabled={
+                          !capability?.enabled
+                        }
+                      >
+                        {commandTypeLabels[
+                          type
+                        ] || type}
+                        {!capability?.enabled
+                          ? " — متوقف"
+                          : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
 
-              <label>
-                <div style={labelStyle}>
-                  مسار الملف
-                </div>
+              {(
+                commandType ===
+                  "read_project_files" ||
+                commandType ===
+                  "analyze_code" ||
+                commandType ===
+                  "suggest_changes" ||
+                commandType ===
+                  "edit_files"
+              ) && (
+                <label>
+                  <div style={labelStyle}>
+                    مسار الملف
+                  </div>
 
-                <input
-                  value={commandPath}
-                  onChange={(e) =>
-                    setCommandPath(
-                      e.target.value
-                    )
-                  }
-                  placeholder="مثال: app/admin/ai-employee/page.js"
-                  style={inputStyle}
-                />
-              </label>
+                  <input
+                    value={commandPath}
+                    onChange={(e) =>
+                      setCommandPath(
+                        e.target.value
+                      )
+                    }
+                    placeholder="مثال: app/admin/ai-employee/page.js"
+                    style={inputStyle}
+                  />
+                </label>
+              )}
+
+              {commandType ===
+                "run_build" && (
+                <div
+                  style={{
+                    padding: 14,
+                    background:
+                      "#eff6ff",
+                    border:
+                      "1px solid #bfdbfe",
+                    borderRadius: 12,
+                    color: "#1e40af",
+                    lineHeight: 1.8,
+                  }}
+                >
+                  <strong>
+                    فحص Build آمن
+                  </strong>
+                  <br />
+                  سيتم فحص package.json
+                  وإعدادات المشروع والتأكد
+                  من وجود Build Script
+                  ومتطلبات Next.js وReact.
+                  <br />
+                  <strong>
+                    لا يتم تشغيل npm build
+                    فعليًا في هذه المرحلة،
+                    ولا يتم تعديل المشروع أو
+                    النشر.
+                  </strong>
+                </div>
+              )}
 
               {commandType ===
                 "edit_files" && (
@@ -2741,7 +2825,12 @@ export default function AiEmployeePage() {
                     )
                   }
                   rows={4}
-                  placeholder="ملاحظات تنفيذ الأمر..."
+                  placeholder={
+                    commandType ===
+                    "run_build"
+                      ? "مثال: فحص جاهزية المشروع قبل الانتقال للمرحلة التالية."
+                      : "ملاحظات تنفيذ الأمر..."
+                  }
                   style={{
                     ...inputStyle,
                     resize:
