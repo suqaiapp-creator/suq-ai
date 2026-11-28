@@ -190,32 +190,205 @@ function getExecutionButton(command) {
 
 export default function SuperAdminAIEmployeePage() {
   const [loading, setLoading] = useState(true);
-
   const [saving, setSaving] = useState(false);
-
   const [executingCommandId, setExecutingCommandId] = useState(null);
 
   const [employee, setEmployee] = useState(null);
-
   const [capabilities, setCapabilities] = useState([]);
-
   const [commands, setCommands] = useState([]);
-
   const [approvals, setApprovals] = useState([]);
 
   const [activeTab, setActiveTab] = useState("overview");
 
   const [message, setMessage] = useState("");
-
   const [error, setError] = useState("");
 
   const [commandSearch, setCommandSearch] = useState("");
-
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [decisionModal, setDecisionModal] = useState(null);
-
   const [decisionReason, setDecisionReason] = useState("");
+
+  /*
+   * ---------------------------------------------------------
+   * NEW COMMAND FORM
+   * ---------------------------------------------------------
+   */
+
+  const [newCommandModal, setNewCommandModal] = useState(false);
+
+  const [newCommand, setNewCommand] = useState({
+    command: "",
+    command_type: "read_project_files",
+    risk_level: "low",
+    path: "",
+    content: "",
+  });
+
+  function resetNewCommandForm() {
+    setNewCommand({
+      command: "",
+      command_type: "read_project_files",
+      risk_level: "low",
+      path: "",
+      content: "",
+    });
+  }
+
+  function openNewCommandModal() {
+    setMessage("");
+    setError("");
+    resetNewCommandForm();
+    setNewCommandModal(true);
+  }
+
+  function closeNewCommandModal() {
+    if (saving) return;
+
+    setNewCommandModal(false);
+    resetNewCommandForm();
+  }
+
+  function getCommandCapability(commandType) {
+    return commandType;
+  }
+
+  function commandNeedsApproval(commandType, riskLevel) {
+    const approvalCapabilities = [
+      "create_files",
+      "edit_files",
+      "run_build",
+      "run_tests",
+      "database_modify",
+      "prepare_git_commit",
+      "deploy_vercel",
+      "rollback",
+    ];
+
+    return (
+      approvalCapabilities.includes(commandType) ||
+      riskLevel === "critical"
+    );
+  }
+
+  async function createCommand() {
+    setSaving(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const commandText =
+        newCommand.command.trim();
+
+      const path = newCommand.path.trim();
+
+      if (!commandText) {
+        throw new Error("اكتب وصف الأمر أولاً.");
+      }
+
+      if (
+        [
+          "read_project_files",
+          "analyze_code",
+          "suggest_changes",
+          "edit_files",
+        ].includes(newCommand.command_type) &&
+        !path
+      ) {
+        throw new Error(
+          "يجب تحديد مسار الملف المطلوب."
+        );
+      }
+
+      const capability =
+        getCommandCapability(
+          newCommand.command_type
+        );
+
+      const needsApproval =
+        commandNeedsApproval(
+          newCommand.command_type,
+          newCommand.risk_level
+        );
+
+      let inputData = {};
+
+      if (path) {
+        inputData.path = path;
+      }
+
+      /*
+       * التعديل الآمن حالياً Dry Run فقط.
+       */
+      if (
+        newCommand.command_type ===
+        "edit_files"
+      ) {
+        if (!newCommand.content.trim()) {
+          throw new Error(
+            "في أمر تعديل الملفات يجب إدخال المحتوى المقترح."
+          );
+        }
+
+        inputData.dry_run = true;
+        inputData.new_content =
+          newCommand.content;
+      }
+
+      const response = await fetch(
+        "/api/admin/ai-employee/create-command",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            command: commandText,
+            command_type:
+              newCommand.command_type,
+            risk_level:
+              newCommand.risk_level,
+            requires_approval: needsApproval,
+            requested_capabilities: [
+              capability,
+            ],
+            input_data: inputData,
+            points_cost: 0,
+            estimated_cost: 0,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.error ||
+            "تعذر إنشاء الأمر."
+        );
+      }
+
+      setNewCommandModal(false);
+      resetNewCommandForm();
+
+      setMessage(
+        data.requires_approval
+          ? "🟢 تم إنشاء الأمر وإنشاء طلب الموافقة تلقائياً."
+          : "🟢 تم إنشاء الأمر بنجاح."
+      );
+
+      setActiveTab("commands");
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err?.message ||
+          "تعذر إنشاء الأمر."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function loadData() {
     setLoading(true);
@@ -236,7 +409,9 @@ export default function SuperAdminAIEmployeePage() {
         error: profileError,
       } = await supabase
         .from("profiles")
-        .select("id, is_super_admin, account_status")
+        .select(
+          "id, is_super_admin, account_status"
+        )
         .eq("id", user.id)
         .maybeSingle();
 
@@ -245,7 +420,9 @@ export default function SuperAdminAIEmployeePage() {
       }
 
       if (!profile?.is_super_admin) {
-        throw new Error("هذه الصفحة متاحة للـ Super Admin فقط");
+        throw new Error(
+          "هذه الصفحة متاحة للـ Super Admin فقط"
+        );
       }
 
       const {
@@ -275,7 +452,10 @@ export default function SuperAdminAIEmployeePage() {
         supabase
           .from("ai_employee_capabilities")
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
           .order("risk_level", {
             ascending: true,
           }),
@@ -283,7 +463,10 @@ export default function SuperAdminAIEmployeePage() {
         supabase
           .from("ai_employee_commands")
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
           .order("created_at", {
             ascending: false,
           }),
@@ -291,7 +474,10 @@ export default function SuperAdminAIEmployeePage() {
         supabase
           .from("ai_employee_approvals")
           .select("*")
-          .eq("ai_employee_id", employeeData.id)
+          .eq(
+            "ai_employee_id",
+            employeeData.id
+          )
           .order("created_at", {
             ascending: false,
           }),
@@ -309,14 +495,21 @@ export default function SuperAdminAIEmployeePage() {
         throw approvalsResult.error;
       }
 
-      setCapabilities(capabilitiesResult.data || []);
+      setCapabilities(
+        capabilitiesResult.data || []
+      );
 
-      setCommands(commandsResult.data || []);
+      setCommands(
+        commandsResult.data || []
+      );
 
-      setApprovals(approvalsResult.data || []);
+      setApprovals(
+        approvalsResult.data || []
+      );
     } catch (err) {
       setError(
-        err?.message || "حدث خطأ أثناء تحميل البيانات"
+        err?.message ||
+          "حدث خطأ أثناء تحميل البيانات"
       );
     } finally {
       setLoading(false);
@@ -346,7 +539,8 @@ export default function SuperAdminAIEmployeePage() {
         .from("ai_employees")
         .update({
           status: nextStatus,
-          updated_at: new Date().toISOString(),
+          updated_at:
+            new Date().toISOString(),
         })
         .eq("id", employee.id);
 
@@ -366,7 +560,8 @@ export default function SuperAdminAIEmployeePage() {
       );
     } catch (err) {
       setError(
-        err?.message || "تعذر تغيير حالة الموظف"
+        err?.message ||
+          "تعذر تغيير حالة الموظف"
       );
     } finally {
       setSaving(false);
@@ -385,7 +580,8 @@ export default function SuperAdminAIEmployeePage() {
         .from("ai_employee_capabilities")
         .update({
           enabled: !capability.enabled,
-          updated_at: new Date().toISOString(),
+          updated_at:
+            new Date().toISOString(),
         })
         .eq("id", capability.id);
 
@@ -398,7 +594,8 @@ export default function SuperAdminAIEmployeePage() {
           item.id === capability.id
             ? {
                 ...item,
-                enabled: !item.enabled,
+                enabled:
+                  !item.enabled,
               }
             : item
         )
@@ -409,7 +606,8 @@ export default function SuperAdminAIEmployeePage() {
       );
     } catch (err) {
       setError(
-        err?.message || "تعذر تحديث الصلاحية"
+        err?.message ||
+          "تعذر تحديث الصلاحية"
       );
     } finally {
       setSaving(false);
@@ -417,7 +615,10 @@ export default function SuperAdminAIEmployeePage() {
   }
 
   async function startCommand(command) {
-    if (!command || command.status !== "pending") {
+    if (
+      !command ||
+      command.status !== "pending"
+    ) {
       return;
     }
 
@@ -452,7 +653,8 @@ export default function SuperAdminAIEmployeePage() {
 
       if (!data?.success) {
         throw new Error(
-          data?.message || "تعذر بدء الأمر"
+          data?.message ||
+            "تعذر بدء الأمر"
         );
       }
 
@@ -462,14 +664,19 @@ export default function SuperAdminAIEmployeePage() {
             ? {
                 ...item,
                 status: "running",
-                started_at: new Date().toISOString(),
+                started_at:
+                  new Date().toISOString(),
                 execution_log: [
-                  ...(Array.isArray(item.execution_log)
+                  ...(Array.isArray(
+                    item.execution_log
+                  )
                     ? item.execution_log
                     : []),
                   {
-                    event: "execution_started",
-                    at: new Date().toISOString(),
+                    event:
+                      "execution_started",
+                    at:
+                      new Date().toISOString(),
                   },
                 ],
               }
@@ -482,7 +689,8 @@ export default function SuperAdminAIEmployeePage() {
       );
     } catch (err) {
       setError(
-        err?.message || "تعذر بدء الأمر"
+        err?.message ||
+          "تعذر بدء الأمر"
       );
     } finally {
       setSaving(false);
@@ -514,7 +722,8 @@ export default function SuperAdminAIEmployeePage() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
           body: JSON.stringify({
             command_id: command.id,
@@ -524,24 +733,33 @@ export default function SuperAdminAIEmployeePage() {
 
       const data = await response.json();
 
-      if (!response.ok || !data?.success) {
+      if (
+        !response.ok ||
+        !data?.success
+      ) {
         throw new Error(
-          data?.error || "فشل تنفيذ الأمر"
+          data?.error ||
+            "فشل تنفيذ الأمر"
         );
       }
 
-      if (command.command_type === "analyze_code") {
+      if (
+        command.command_type ===
+        "analyze_code"
+      ) {
         setMessage(
           "🟢 تم تحليل كود مشروع سوق AI بنجاح."
         );
       } else if (
-        command.command_type === "suggest_changes"
+        command.command_type ===
+        "suggest_changes"
       ) {
         setMessage(
           "🟢 تم إعداد اقتراحات تحسين كود مشروع سوق AI بدون تعديل الملفات."
         );
       } else if (
-        command.command_type === "edit_files"
+        command.command_type ===
+        "edit_files"
       ) {
         setMessage(
           "🟢 تم تنفيذ التعديل الآمن بنجاح. لم يتم تعديل أي ملف فعلياً."
@@ -555,7 +773,8 @@ export default function SuperAdminAIEmployeePage() {
       await loadData();
     } catch (err) {
       setError(
-        err?.message || "فشل تنفيذ الأمر"
+        err?.message ||
+          "فشل تنفيذ الأمر"
       );
 
       await loadData();
@@ -588,7 +807,8 @@ export default function SuperAdminAIEmployeePage() {
           p_approval_id:
             decisionModal.approval.id,
           p_reason:
-            decisionReason.trim() || null,
+            decisionReason.trim() ||
+            null,
         }
       );
 
@@ -596,14 +816,17 @@ export default function SuperAdminAIEmployeePage() {
         throw rpcError;
       }
 
-      if (data && data.success === false) {
+      if (
+        data &&
+        data.success === false
+      ) {
         throw new Error(
-          data.message || "تعذر تنفيذ القرار"
+          data.message ||
+            "تعذر تنفيذ القرار"
         );
       }
 
       setDecisionModal(null);
-
       setDecisionReason("");
 
       setMessage(
@@ -615,55 +838,73 @@ export default function SuperAdminAIEmployeePage() {
       await loadData();
     } catch (err) {
       setError(
-        err?.message || "تعذر حفظ القرار"
+        err?.message ||
+          "تعذر حفظ القرار"
       );
     } finally {
       setSaving(false);
     }
   }
 
-  const enabledCapabilities = useMemo(
-    () =>
-      capabilities.filter(
-        (item) => item.enabled
-      ).length,
-    [capabilities]
-  );
+  const enabledCapabilities =
+    useMemo(
+      () =>
+        capabilities.filter(
+          (item) => item.enabled
+        ).length,
+      [capabilities]
+    );
 
-  const pendingApprovals = useMemo(
-    () =>
-      approvals.filter(
-        (item) =>
-          item.status === "pending"
-      ).length,
-    [approvals]
-  );
+  const pendingApprovals =
+    useMemo(
+      () =>
+        approvals.filter(
+          (item) =>
+            item.status ===
+            "pending"
+        ).length,
+      [approvals]
+    );
 
-  const filteredCommands = useMemo(() => {
-    const query =
-      commandSearch.trim().toLowerCase();
+  const filteredCommands =
+    useMemo(() => {
+      const query =
+        commandSearch
+          .trim()
+          .toLowerCase();
 
-    return commands.filter((command) => {
-      const matchesSearch =
-        !query ||
-        String(command.command || "")
-          .toLowerCase()
-          .includes(query) ||
-        String(command.command_type || "")
-          .toLowerCase()
-          .includes(query);
+      return commands.filter(
+        (command) => {
+          const matchesSearch =
+            !query ||
+            String(
+              command.command || ""
+            )
+              .toLowerCase()
+              .includes(query) ||
+            String(
+              command.command_type ||
+                ""
+            )
+              .toLowerCase()
+              .includes(query);
 
-      const matchesStatus =
-        statusFilter === "all" ||
-        command.status === statusFilter;
+          const matchesStatus =
+            statusFilter === "all" ||
+            command.status ===
+              statusFilter;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [
-    commands,
-    commandSearch,
-    statusFilter,
-  ]);
+          return (
+            matchesSearch &&
+            matchesStatus
+          );
+        }
+      );
+    }, [
+      commands,
+      commandSearch,
+      statusFilter,
+    ]);
 
   if (loading) {
     return (
@@ -675,7 +916,8 @@ export default function SuperAdminAIEmployeePage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: "Arial, sans-serif",
+          fontFamily:
+            "Arial, sans-serif",
           color: "#166534",
         }}
       >
@@ -691,7 +933,8 @@ export default function SuperAdminAIEmployeePage() {
         minHeight: "100vh",
         background: "#f7faf8",
         color: "#17221b",
-        fontFamily: "Arial, sans-serif",
+        fontFamily:
+          "Arial, sans-serif",
         padding: "24px",
       }}
     >
@@ -704,7 +947,8 @@ export default function SuperAdminAIEmployeePage() {
         <section
           style={{
             background: "#ffffff",
-            border: "1px solid #e5ebe7",
+            border:
+              "1px solid #e5ebe7",
             borderRadius: "24px",
             padding: "24px",
             marginBottom: "18px",
@@ -715,8 +959,10 @@ export default function SuperAdminAIEmployeePage() {
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
+              justifyContent:
+                "space-between",
+              alignItems:
+                "flex-start",
               gap: "20px",
               flexWrap: "wrap",
             }}
@@ -725,25 +971,31 @@ export default function SuperAdminAIEmployeePage() {
               <div
                 style={{
                   display: "flex",
-                  alignItems: "center",
+                  alignItems:
+                    "center",
                   gap: "10px",
-                  marginBottom: "8px",
+                  marginBottom:
+                    "8px",
                 }}
               >
                 <span
                   style={{
                     width: "12px",
                     height: "12px",
-                    borderRadius: "50%",
+                    borderRadius:
+                      "50%",
                     background: GREEN,
-                    display: "inline-block",
+                    display:
+                      "inline-block",
                   }}
                 />
 
                 <span
                   style={{
-                    color: "#64748b",
-                    fontSize: "14px",
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "14px",
                   }}
                 >
                   Super Admin AI Employee
@@ -752,9 +1004,12 @@ export default function SuperAdminAIEmployeePage() {
 
               <h1
                 style={{
-                  margin: "0 0 8px",
-                  fontSize: "34px",
-                  lineHeight: 1.2,
+                  margin:
+                    "0 0 8px",
+                  fontSize:
+                    "34px",
+                  lineHeight:
+                    1.2,
                 }}
               >
                 والم
@@ -763,8 +1018,10 @@ export default function SuperAdminAIEmployeePage() {
               <p
                 style={{
                   margin: 0,
-                  color: "#64748b",
-                  fontSize: "16px",
+                  color:
+                    "#64748b",
+                  fontSize:
+                    "16px",
                 }}
               >
                 الموظف الذكي المسؤول عن مساعدة إدارة وتشغيل سوق AI.
@@ -774,48 +1031,64 @@ export default function SuperAdminAIEmployeePage() {
             <div
               style={{
                 display: "flex",
-                alignItems: "center",
+                alignItems:
+                  "center",
                 gap: "10px",
-                flexWrap: "wrap",
+                flexWrap:
+                  "wrap",
               }}
             >
               <span
                 style={{
                   background:
-                    employee?.status === "active"
+                    employee?.status ===
+                    "active"
                       ? "#dcfce7"
                       : "#f3f4f6",
                   color:
-                    employee?.status === "active"
+                    employee?.status ===
+                    "active"
                       ? "#166534"
                       : "#475569",
-                  padding: "8px 14px",
-                  borderRadius: "999px",
+                  padding:
+                    "8px 14px",
+                  borderRadius:
+                    "999px",
                   fontWeight: 700,
-                  fontSize: "13px",
+                  fontSize:
+                    "13px",
                 }}
               >
-                {employee?.status === "active"
+                {employee?.status ===
+                "active"
                   ? "نشط"
                   : "متوقف"}
               </span>
 
               <button
-                onClick={toggleEmployeeStatus}
+                onClick={
+                  toggleEmployeeStatus
+                }
                 disabled={saving}
                 style={{
-                  border: "1px solid #dbe5de",
-                  background: "#fff",
-                  color: "#166534",
-                  borderRadius: "12px",
-                  padding: "10px 14px",
+                  border:
+                    "1px solid #dbe5de",
+                  background:
+                    "#fff",
+                  color:
+                    "#166534",
+                  borderRadius:
+                    "12px",
+                  padding:
+                    "10px 14px",
                   cursor: saving
                     ? "not-allowed"
                     : "pointer",
                   fontWeight: 700,
                 }}
               >
-                {employee?.status === "active"
+                {employee?.status ===
+                "active"
                   ? "إيقاف الموظف"
                   : "تفعيل الموظف"}
               </button>
@@ -826,12 +1099,18 @@ export default function SuperAdminAIEmployeePage() {
         {message && (
           <div
             style={{
-              background: "#ecfdf5",
-              border: "1px solid #bbf7d0",
-              color: "#166534",
-              borderRadius: "14px",
-              padding: "13px 16px",
-              marginBottom: "14px",
+              background:
+                "#ecfdf5",
+              border:
+                "1px solid #bbf7d0",
+              color:
+                "#166534",
+              borderRadius:
+                "14px",
+              padding:
+                "13px 16px",
+              marginBottom:
+                "14px",
               fontWeight: 700,
             }}
           >
@@ -842,12 +1121,18 @@ export default function SuperAdminAIEmployeePage() {
         {error && (
           <div
             style={{
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              color: "#991b1b",
-              borderRadius: "14px",
-              padding: "13px 16px",
-              marginBottom: "14px",
+              background:
+                "#fef2f2",
+              border:
+                "1px solid #fecaca",
+              color:
+                "#991b1b",
+              borderRadius:
+                "14px",
+              padding:
+                "13px 16px",
+              marginBottom:
+                "14px",
               fontWeight: 700,
             }}
           >
@@ -861,100 +1146,143 @@ export default function SuperAdminAIEmployeePage() {
             gridTemplateColumns:
               "repeat(4, minmax(0, 1fr))",
             gap: "12px",
-            marginBottom: "18px",
+            marginBottom:
+              "18px",
           }}
         >
           {[
-            ["الصلاحيات المفعلة", enabledCapabilities],
+            [
+              "الصلاحيات المفعلة",
+              enabledCapabilities,
+            ],
             ["الأوامر", commands.length],
             [
               "مكتملة",
               commands.filter(
-                (c) => c.status === "completed"
+                (c) =>
+                  c.status ===
+                  "completed"
               ).length,
             ],
             [
               "قيد التنفيذ",
               commands.filter(
-                (c) => c.status === "running"
+                (c) =>
+                  c.status ===
+                  "running"
               ).length,
             ],
-          ].map(([label, value]) => (
-            <div
-              key={label}
-              style={{
-                background: "#fff",
-                border: "1px solid #e5ebe7",
-                borderRadius: "18px",
-                padding: "18px",
-              }}
-            >
+          ].map(
+            ([label, value]) => (
               <div
+                key={label}
                 style={{
-                  color: "#64748b",
-                  fontSize: "13px",
-                  marginBottom: "7px",
+                  background:
+                    "#fff",
+                  border:
+                    "1px solid #e5ebe7",
+                  borderRadius:
+                    "18px",
+                  padding:
+                    "18px",
                 }}
               >
-                {label}
-              </div>
+                <div
+                  style={{
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "13px",
+                    marginBottom:
+                      "7px",
+                  }}
+                >
+                  {label}
+                </div>
 
-              <strong
-                style={{
-                  fontSize: "27px",
-                }}
-              >
-                {value}
-              </strong>
-            </div>
-          ))}
+                <strong
+                  style={{
+                    fontSize:
+                      "27px",
+                  }}
+                >
+                  {value}
+                </strong>
+              </div>
+            )
+          )}
         </section>
 
         <section
           style={{
-            background: "#fff",
-            border: "1px solid #e5ebe7",
-            borderRadius: "20px",
+            background:
+              "#fff",
+            border:
+              "1px solid #e5ebe7",
+            borderRadius:
+              "20px",
             padding: "8px",
-            marginBottom: "18px",
+            marginBottom:
+              "18px",
             display: "flex",
             gap: "6px",
-            overflowX: "auto",
+            overflowX:
+              "auto",
           }}
         >
           {[
             ["overview", "نظرة عامة"],
-            ["capabilities", "الصلاحيات"],
+            [
+              "capabilities",
+              "الصلاحيات",
+            ],
             ["commands", "الأوامر"],
-            ["approvals", "الموافقات"],
-            ["instructions", "الشخصية والتعليمات"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              style={{
-                border: "none",
-                background:
-                  activeTab === key
-                    ? "#dcfce7"
-                    : "transparent",
-                color:
-                  activeTab === key
-                    ? "#166534"
-                    : "#64748b",
-                padding: "11px 16px",
-                borderRadius: "12px",
-                cursor: "pointer",
-                fontWeight: 700,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {label}
-            </button>
-          ))}
+            [
+              "approvals",
+              "الموافقات",
+            ],
+            [
+              "instructions",
+              "الشخصية والتعليمات",
+            ],
+          ].map(
+            ([key, label]) => (
+              <button
+                key={key}
+                onClick={() =>
+                  setActiveTab(key)
+                }
+                style={{
+                  border: "none",
+                  background:
+                    activeTab ===
+                    key
+                      ? "#dcfce7"
+                      : "transparent",
+                  color:
+                    activeTab ===
+                    key
+                      ? "#166534"
+                      : "#64748b",
+                  padding:
+                    "11px 16px",
+                  borderRadius:
+                    "12px",
+                  cursor:
+                    "pointer",
+                  fontWeight: 700,
+                  whiteSpace:
+                    "nowrap",
+                }}
+              >
+                {label}
+              </button>
+            )
+          )}
         </section>
 
-        {activeTab === "overview" && (
+        {activeTab ===
+          "overview" && (
           <section
             style={{
               display: "grid",
@@ -965,16 +1293,22 @@ export default function SuperAdminAIEmployeePage() {
           >
             <div
               style={{
-                background: "#fff",
-                border: "1px solid #e5ebe7",
-                borderRadius: "20px",
-                padding: "22px",
+                background:
+                  "#fff",
+                border:
+                  "1px solid #e5ebe7",
+                borderRadius:
+                  "20px",
+                padding:
+                  "22px",
               }}
             >
               <h2
                 style={{
-                  margin: "0 0 18px",
-                  fontSize: "21px",
+                  margin:
+                    "0 0 18px",
+                  fontSize:
+                    "21px",
                 }}
               >
                 ملف الموظف
@@ -982,20 +1316,30 @@ export default function SuperAdminAIEmployeePage() {
 
               <div
                 style={{
-                  display: "grid",
+                  display:
+                    "grid",
                   gridTemplateColumns:
                     "repeat(2, minmax(0, 1fr))",
-                  gap: "14px",
+                  gap:
+                    "14px",
                 }}
               >
                 {[
-                  ["الاسم", employee?.name || "والم"],
+                  [
+                    "الاسم",
+                    employee?.name ||
+                      "والم",
+                  ],
                   [
                     "التخصص",
                     employee?.specialization ||
                       "مساعد إدارة وتشغيل سوق AI",
                   ],
-                  ["المستوى", employee?.level || "lead"],
+                  [
+                    "المستوى",
+                    employee?.level ||
+                      "lead",
+                  ],
                   [
                     "النبرة",
                     employee?.tone ||
@@ -1009,46 +1353,67 @@ export default function SuperAdminAIEmployeePage() {
                   ],
                   [
                     "المهام المكتملة",
-                    employee?.tasks_completed || 0,
+                    employee?.tasks_completed ||
+                      0,
                   ],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    style={{
-                      border: "1px solid #edf1ee",
-                      borderRadius: "14px",
-                      padding: "14px",
-                    }}
-                  >
+                ].map(
+                  ([
+                    label,
+                    value,
+                  ]) => (
                     <div
+                      key={
+                        label
+                      }
                       style={{
-                        color: "#64748b",
-                        fontSize: "12px",
-                        marginBottom: "6px",
+                        border:
+                          "1px solid #edf1ee",
+                        borderRadius:
+                          "14px",
+                        padding:
+                          "14px",
                       }}
                     >
-                      {label}
-                    </div>
+                      <div
+                        style={{
+                          color:
+                            "#64748b",
+                          fontSize:
+                            "12px",
+                          marginBottom:
+                            "6px",
+                        }}
+                      >
+                        {label}
+                      </div>
 
-                    <div
-                      style={{
-                        fontWeight: 700,
-                      }}
-                    >
-                      {value}
+                      <div
+                        style={{
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {value}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                )}
               </div>
 
               <div
                 style={{
-                  marginTop: "16px",
-                  padding: "16px",
-                  background: "#f8faf9",
-                  borderRadius: "14px",
-                  lineHeight: 1.8,
-                  color: "#475569",
+                  marginTop:
+                    "16px",
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
+                  lineHeight:
+                    1.8,
+                  color:
+                    "#475569",
                 }}
               >
                 {employee?.description ||
@@ -1058,16 +1423,22 @@ export default function SuperAdminAIEmployeePage() {
 
             <div
               style={{
-                background: "#fff",
-                border: "1px solid #e5ebe7",
-                borderRadius: "20px",
-                padding: "22px",
+                background:
+                  "#fff",
+                border:
+                  "1px solid #e5ebe7",
+                borderRadius:
+                  "20px",
+                padding:
+                  "22px",
               }}
             >
               <h2
                 style={{
-                  margin: "0 0 18px",
-                  fontSize: "21px",
+                  margin:
+                    "0 0 18px",
+                  fontSize:
+                    "21px",
                 }}
               >
                 حالة الأمان
@@ -1075,12 +1446,18 @@ export default function SuperAdminAIEmployeePage() {
 
               <div
                 style={{
-                  background: "#ecfdf5",
-                  border: "1px solid #bbf7d0",
-                  borderRadius: "16px",
-                  padding: "18px",
-                  color: "#166534",
-                  lineHeight: 1.8,
+                  background:
+                    "#ecfdf5",
+                  border:
+                    "1px solid #bbf7d0",
+                  borderRadius:
+                    "16px",
+                  padding:
+                    "18px",
+                  color:
+                    "#166534",
+                  lineHeight:
+                    1.8,
                 }}
               >
                 <strong>
@@ -1089,8 +1466,10 @@ export default function SuperAdminAIEmployeePage() {
 
                 <div
                   style={{
-                    marginTop: "8px",
-                    fontSize: "14px",
+                    marginTop:
+                      "8px",
+                    fontSize:
+                      "14px",
                   }}
                 >
                   كل أمر يمر عبر الصلاحيات والموافقة قبل الوصول إلى طبقة التنفيذ.
@@ -1099,60 +1478,100 @@ export default function SuperAdminAIEmployeePage() {
 
               <div
                 style={{
-                  marginTop: "14px",
-                  display: "grid",
+                  marginTop:
+                    "14px",
+                  display:
+                    "grid",
                   gap: "8px",
                 }}
               >
                 {[
-                  ["قراءة الملفات", true],
-                  ["تعديل الملفات", false],
-                  ["قاعدة البيانات", false],
-                  ["Deploy", false],
-                  ["Rollback", false],
-                ].map(([label, enabled]) => (
-                  <div
-                    key={label}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "10px 12px",
-                      borderBottom:
-                        "1px solid #f1f5f2",
-                    }}
-                  >
-                    <span>{label}</span>
-
-                    <span
+                  [
+                    "قراءة الملفات",
+                    true,
+                  ],
+                  [
+                    "تعديل الملفات",
+                    false,
+                  ],
+                  [
+                    "قاعدة البيانات",
+                    false,
+                  ],
+                  [
+                    "Deploy",
+                    false,
+                  ],
+                  [
+                    "Rollback",
+                    false,
+                  ],
+                ].map(
+                  ([
+                    label,
+                    enabled,
+                  ]) => (
+                    <div
+                      key={
+                        label
+                      }
                       style={{
-                        color: enabled
-                          ? "#16a34a"
-                          : "#64748b",
-                        fontWeight: 700,
+                        display:
+                          "flex",
+                        justifyContent:
+                          "space-between",
+                        alignItems:
+                          "center",
+                        padding:
+                          "10px 12px",
+                        borderBottom:
+                          "1px solid #f1f5f2",
                       }}
                     >
-                      {enabled ? "مسموح" : "مقيد"}
-                    </span>
-                  </div>
-                ))}
+                      <span>
+                        {label}
+                      </span>
+
+                      <span
+                        style={{
+                          color:
+                            enabled
+                              ? "#16a34a"
+                              : "#64748b",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {enabled
+                          ? "مسموح"
+                          : "مقيد"}
+                      </span>
+                    </div>
+                  )
+                )}
               </div>
             </div>
           </section>
         )}
 
-        {activeTab === "capabilities" && (
+        {activeTab ===
+          "capabilities" && (
           <section
             style={{
-              background: "#fff",
-              border: "1px solid #e5ebe7",
-              borderRadius: "20px",
-              padding: "22px",
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
             }}
           >
             <h2
               style={{
-                margin: "0 0 8px",
+                margin:
+                  "0 0 8px",
               }}
             >
               صلاحيات والم
@@ -1160,8 +1579,10 @@ export default function SuperAdminAIEmployeePage() {
 
             <p
               style={{
-                margin: "0 0 20px",
-                color: "#64748b",
+                margin:
+                  "0 0 20px",
+                color:
+                  "#64748b",
               }}
             >
               كل صلاحية مستقلة ويمكن تعطيلها بدون تعطيل الموظف بالكامل.
@@ -1169,141 +1590,191 @@ export default function SuperAdminAIEmployeePage() {
 
             <div
               style={{
-                display: "grid",
+                display:
+                  "grid",
                 gap: "10px",
               }}
             >
-              {capabilities.map((capability) => (
-                <div
-                  key={capability.id}
-                  style={{
-                    border: "1px solid #e5ebe7",
-                    borderRadius: "16px",
-                    padding: "16px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "16px",
-                    flexWrap: "wrap",
-                  }}
-                >
+              {capabilities.map(
+                (capability) => (
                   <div
+                    key={
+                      capability.id
+                    }
                     style={{
-                      flex: 1,
-                      minWidth: "240px",
+                      border:
+                        "1px solid #e5ebe7",
+                      borderRadius:
+                        "16px",
+                      padding:
+                        "16px",
+                      display:
+                        "flex",
+                      alignItems:
+                        "center",
+                      justifyContent:
+                        "space-between",
+                      gap:
+                        "16px",
+                      flexWrap:
+                        "wrap",
                     }}
                   >
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        marginBottom: "5px",
+                        flex: 1,
+                        minWidth:
+                          "240px",
                       }}
                     >
-                      <strong>
-                        {capability.capability_name ||
-                          capabilityLabels[
-                            capability.capability_key
-                          ] ||
-                          capability.capability_key}
-                      </strong>
-
-                      <span
+                      <div
                         style={{
-                          ...riskClass(
-                            capability.risk_level
-                          ),
-                          padding: "4px 8px",
-                          borderRadius: "999px",
-                          fontSize: "11px",
-                          fontWeight: 700,
+                          display:
+                            "flex",
+                          alignItems:
+                            "center",
+                          gap: "8px",
+                          marginBottom:
+                            "5px",
                         }}
                       >
-                        {riskLabels[
-                          capability.risk_level
-                        ] || capability.risk_level}
-                      </span>
+                        <strong>
+                          {capability.capability_name ||
+                            capabilityLabels[
+                              capability
+                                .capability_key
+                            ] ||
+                            capability.capability_key}
+                        </strong>
+
+                        <span
+                          style={{
+                            ...riskClass(
+                              capability.risk_level
+                            ),
+                            padding:
+                              "4px 8px",
+                            borderRadius:
+                              "999px",
+                            fontSize:
+                              "11px",
+                            fontWeight:
+                              700,
+                          }}
+                        >
+                          {riskLabels[
+                            capability
+                              .risk_level
+                          ] ||
+                            capability.risk_level}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          color:
+                            "#64748b",
+                          fontSize:
+                            "13px",
+                        }}
+                      >
+                        {capability.description ||
+                          ""}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop:
+                            "7px",
+                          color:
+                            capability.requires_approval
+                              ? "#92400e"
+                              : "#166534",
+                          fontSize:
+                            "12px",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        {capability.requires_approval
+                          ? "تحتاج موافقة قبل التنفيذ"
+                          : "لا تحتاج موافقة"}
+                      </div>
                     </div>
 
-                    <div
+                    <button
+                      onClick={() =>
+                        toggleCapability(
+                          capability
+                        )
+                      }
+                      disabled={
+                        saving
+                      }
                       style={{
-                        color: "#64748b",
-                        fontSize: "13px",
-                      }}
-                    >
-                      {capability.description || ""}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: "7px",
+                        border:
+                          "none",
+                        background:
+                          capability.enabled
+                            ? "#16a34a"
+                            : "#cbd5e1",
                         color:
-                          capability.requires_approval
-                            ? "#92400e"
-                            : "#166534",
-                        fontSize: "12px",
-                        fontWeight: 700,
+                          "#fff",
+                        borderRadius:
+                          "999px",
+                        padding:
+                          "9px 16px",
+                        cursor:
+                          saving
+                            ? "not-allowed"
+                            : "pointer",
+                        fontWeight:
+                          700,
                       }}
                     >
-                      {capability.requires_approval
-                        ? "تحتاج موافقة قبل التنفيذ"
-                        : "لا تحتاج موافقة"}
-                    </div>
+                      {capability.enabled
+                        ? "مفعلة"
+                        : "معطلة"}
+                    </button>
                   </div>
-
-                  <button
-                    onClick={() =>
-                      toggleCapability(capability)
-                    }
-                    disabled={saving}
-                    style={{
-                      border: "none",
-                      background:
-                        capability.enabled
-                          ? "#16a34a"
-                          : "#cbd5e1",
-                      color: "#fff",
-                      borderRadius: "999px",
-                      padding: "9px 16px",
-                      cursor: saving
-                        ? "not-allowed"
-                        : "pointer",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {capability.enabled
-                      ? "مفعلة"
-                      : "معطلة"}
-                  </button>
-                </div>
-              ))}
+                )
+              )}
             </div>
           </section>
         )}
 
-        {activeTab === "commands" && (
+        {activeTab ===
+          "commands" && (
           <section
             style={{
-              background: "#fff",
-              border: "1px solid #e5ebe7",
-              borderRadius: "20px",
-              padding: "22px",
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
             }}
           >
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
                 gap: "12px",
-                flexWrap: "wrap",
-                marginBottom: "18px",
+                flexWrap:
+                  "wrap",
+                marginBottom:
+                  "18px",
               }}
             >
               <div>
                 <h2
                   style={{
-                    margin: "0 0 6px",
+                    margin:
+                      "0 0 6px",
                   }}
                 >
                   أوامر والم
@@ -1312,7 +1783,8 @@ export default function SuperAdminAIEmployeePage() {
                 <p
                   style={{
                     margin: 0,
-                    color: "#64748b",
+                    color:
+                      "#64748b",
                   }}
                 >
                   سجل الأوامر وحالات تنفيذها.
@@ -1321,36 +1793,81 @@ export default function SuperAdminAIEmployeePage() {
 
               <div
                 style={{
-                  display: "flex",
+                  display:
+                    "flex",
                   gap: "8px",
-                  flexWrap: "wrap",
+                  flexWrap:
+                    "wrap",
                 }}
               >
+                <button
+                  onClick={
+                    openNewCommandModal
+                  }
+                  style={{
+                    border:
+                      "none",
+                    background:
+                      GREEN,
+                    color:
+                      "#fff",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "10px 16px",
+                    cursor:
+                      "pointer",
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  ＋ أمر جديد
+                </button>
+
                 <input
-                  value={commandSearch}
+                  value={
+                    commandSearch
+                  }
                   onChange={(e) =>
-                    setCommandSearch(e.target.value)
+                    setCommandSearch(
+                      e.target
+                        .value
+                    )
                   }
                   placeholder="بحث في الأوامر..."
                   style={{
-                    border: "1px solid #dbe5de",
-                    borderRadius: "12px",
-                    padding: "10px 12px",
-                    outline: "none",
-                    minWidth: "220px",
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    outline:
+                      "none",
+                    minWidth:
+                      "220px",
                   }}
                 />
 
                 <select
-                  value={statusFilter}
+                  value={
+                    statusFilter
+                  }
                   onChange={(e) =>
-                    setStatusFilter(e.target.value)
+                    setStatusFilter(
+                      e.target
+                        .value
+                    )
                   }
                   style={{
-                    border: "1px solid #dbe5de",
-                    borderRadius: "12px",
-                    padding: "10px 12px",
-                    background: "#fff",
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "10px 12px",
+                    background:
+                      "#fff",
                   }}
                 >
                   <option value="all">
@@ -1377,506 +1894,583 @@ export default function SuperAdminAIEmployeePage() {
 
             <div
               style={{
-                display: "grid",
+                display:
+                  "grid",
                 gap: "14px",
               }}
             >
-              {filteredCommands.length === 0 && (
+              {filteredCommands.length ===
+                0 && (
                 <div
                   style={{
-                    padding: "30px",
-                    textAlign: "center",
-                    color: "#64748b",
-                    background: "#f8faf9",
-                    borderRadius: "16px",
+                    padding:
+                      "30px",
+                    textAlign:
+                      "center",
+                    color:
+                      "#64748b",
+                    background:
+                      "#f8faf9",
+                    borderRadius:
+                      "16px",
                   }}
                 >
                   لا توجد أوامر.
                 </div>
               )}
 
-              {filteredCommands.map((command) => {
-                const button =
-                  getExecutionButton(command);
+              {filteredCommands.map(
+                (command) => {
+                  const button =
+                    getExecutionButton(
+                      command
+                    );
 
-                const isExecuting =
-                  executingCommandId === command.id;
+                  const isExecuting =
+                    executingCommandId ===
+                    command.id;
 
-                const requiresApproval =
-                  command.requires_approval === true;
+                  const requiresApproval =
+                    command.requires_approval ===
+                    true;
 
-                const approvalApproved =
-                  command.approval_status === "approved";
+                  const approvalApproved =
+                    command.approval_status ===
+                    "approved";
 
-                const canStart =
-                  command.status === "pending" &&
-                  (!requiresApproval ||
-                    approvalApproved);
+                  const canStart =
+                    command.status ===
+                      "pending" &&
+                    (!requiresApproval ||
+                      approvalApproved);
 
-                const waitingForApproval =
-                  command.status === "pending" &&
-                  requiresApproval &&
-                  !approvalApproved;
+                  const waitingForApproval =
+                    command.status ===
+                      "pending" &&
+                    requiresApproval &&
+                    !approvalApproved;
 
-                return (
-                  <article
-                    key={command.id}
-                    style={{
-                      border: "1px solid #e5ebe7",
-                      borderRadius: "18px",
-                      padding: "18px",
-                    }}
-                  >
-                    <div
+                  return (
+                    <article
+                      key={
+                        command.id
+                      }
                       style={{
-                        display: "flex",
-                        justifyContent:
-                          "space-between",
-                        gap: "15px",
-                        flexWrap: "wrap",
+                        border:
+                          "1px solid #e5ebe7",
+                        borderRadius:
+                          "18px",
+                        padding:
+                          "18px",
                       }}
                     >
                       <div
                         style={{
-                          flex: 1,
-                          minWidth: "260px",
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          gap:
+                            "15px",
+                          flexWrap:
+                            "wrap",
                         }}
                       >
                         <div
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            flexWrap: "wrap",
-                            marginBottom: "8px",
+                            flex: 1,
+                            minWidth:
+                              "260px",
                           }}
                         >
-                          <strong
+                          <div
                             style={{
-                              fontSize: "18px",
+                              display:
+                                "flex",
+                              alignItems:
+                                "center",
+                              gap:
+                                "8px",
+                              flexWrap:
+                                "wrap",
+                              marginBottom:
+                                "8px",
                             }}
                           >
-                            {command.command}
-                          </strong>
+                            <strong
+                              style={{
+                                fontSize:
+                                  "18px",
+                              }}
+                            >
+                              {
+                                command.command
+                              }
+                            </strong>
 
-                          <span
-                            style={{
-                              ...statusClass(
-                                command.status
-                              ),
-                              padding: "5px 9px",
-                              borderRadius: "999px",
-                              fontSize: "11px",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {statusLabels[
-                              command.status
-                            ] || command.status}
-                          </span>
-
-                          <span
-                            style={{
-                              ...riskClass(
-                                command.risk_level
-                              ),
-                              padding: "5px 9px",
-                              borderRadius: "999px",
-                              fontSize: "11px",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {riskLabels[
-                              command.risk_level
-                            ] || command.risk_level}
-                          </span>
-
-                          {requiresApproval && (
                             <span
                               style={{
-                                background:
-                                  approvalApproved
-                                    ? "#dcfce7"
-                                    : "#fef3c7",
-                                color:
-                                  approvalApproved
-                                    ? "#166534"
-                                    : "#92400e",
-                                padding: "5px 9px",
-                                borderRadius: "999px",
-                                fontSize: "11px",
-                                fontWeight: 700,
+                                ...statusClass(
+                                  command.status
+                                ),
+                                padding:
+                                  "5px 9px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
                               }}
                             >
-                              {approvalApproved
-                                ? "تمت الموافقة"
-                                : "تحتاج موافقة"}
-                            </span>
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            color: "#64748b",
-                            fontSize: "13px",
-                          }}
-                        >
-                          {formatDate(
-                            command.created_at
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "14px",
-                            flexWrap: "wrap",
-                            marginTop: "12px",
-                            fontSize: "13px",
-                            color: "#475569",
-                          }}
-                        >
-                          <span>
-                            النوع:{" "}
-                            <strong>
-                              {commandTypeLabels[
-                                command.command_type
+                              {statusLabels[
+                                command.status
                               ] ||
-                                command.command_type}
-                            </strong>
-                          </span>
+                                command.status}
+                            </span>
 
-                          <span>
-                            النقاط{" "}
-                            <strong>
-                              {command.points_cost || 0}
-                            </strong>
-                          </span>
-
-                          <span>
-                            التكلفة{" "}
-                            <strong>
-                              $
-                              {Number(
-                                command.actual_cost ||
-                                  command.estimated_cost ||
-                                  0
-                              ).toFixed(4)}
-                            </strong>
-                          </span>
-
-                          <span>
-                            المدة{" "}
-                            <strong>
-                              {formatDuration(
-                                command.duration_seconds
-                              )}
-                            </strong>
-                          </span>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        {canStart && (
-                          <button
-                            onClick={() =>
-                              startCommand(command)
-                            }
-                            disabled={
-                              saving ||
-                              employee?.status !==
-                                "active"
-                            }
-                            style={{
-                              border: "none",
-                              background: GREEN,
-                              color: "#fff",
-                              borderRadius: "12px",
-                              padding: "11px 16px",
-                              cursor: saving
-                                ? "not-allowed"
-                                : "pointer",
-                              fontWeight: 700,
-                            }}
-                          >
-                            ▶ بدء التنفيذ
-                          </button>
-                        )}
-
-                        {waitingForApproval && (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "7px",
-                              background: "#fffbeb",
-                              border:
-                                "1px solid #fde68a",
-                              color: "#92400e",
-                              borderRadius: "12px",
-                              padding: "11px 14px",
-                              fontWeight: 700,
-                              fontSize: "13px",
-                            }}
-                          >
-                            ⏳ بانتظار موافقة Super Admin
-                          </span>
-                        )}
-
-                        {button && (
-                          <button
-                            onClick={() =>
-                              executeCommand(command)
-                            }
-                            disabled={
-                              isExecuting ||
-                              executingCommandId !==
-                                null
-                            }
-                            style={{
-                              border: "none",
-                              background: "#166534",
-                              color: "#fff",
-                              borderRadius: "12px",
-                              padding: "11px 16px",
-                              cursor: isExecuting
-                                ? "not-allowed"
-                                : "pointer",
-                              fontWeight: 700,
-                            }}
-                          >
-                            {isExecuting
-                              ? button.loadingLabel
-                              : button.label}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {command.command_type ===
-                      "edit_files" &&
-                      command.status ===
-                        "running" && (
-                        <div
-                          style={{
-                            marginTop: "14px",
-                            padding: "12px 14px",
-                            background: "#eff6ff",
-                            border:
-                              "1px solid #bfdbfe",
-                            color: "#1e40af",
-                            borderRadius: "12px",
-                            fontSize: "13px",
-                            lineHeight: 1.7,
-                          }}
-                        >
-                          🛡️ هذا اختبار تعديل آمن.
-                          <br />
-                          سيتم إعداد ومعاينة التعديل فقط،
-                          ولن يتم الكتابة على GitHub في هذه المرحلة.
-                        </div>
-                      )}
-
-                    {command.result && (
-                      <div
-                        style={{
-                          marginTop: "15px",
-                          padding: "14px",
-                          background: "#f0fdf4",
-                          border:
-                            "1px solid #dcfce7",
-                          borderRadius: "14px",
-                          color: "#166534",
-                        }}
-                      >
-                        <strong>النتيجة</strong>
-
-                        <div
-                          style={{
-                            marginTop: "7px",
-                            whiteSpace: "pre-wrap",
-                            lineHeight: 1.7,
-                          }}
-                        >
-                          {command.result}
-                        </div>
-
-                        {command.command_type ===
-                          "suggest_changes" &&
-                          command.output_data?.suggestions &&
-                          Array.isArray(
-                            command.output_data
-                              .suggestions
-                          ) && (
-                            <div
+                            <span
                               style={{
-                                marginTop: "14px",
-                                display: "grid",
-                                gap: "8px",
+                                ...riskClass(
+                                  command.risk_level
+                                ),
+                                padding:
+                                  "5px 9px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
                               }}
                             >
-                              {command.output_data.suggestions.map(
-                                (suggestion, index) => (
-                                  <div
-                                    key={`${command.id}-suggestion-${index}`}
-                                    style={{
-                                      background: "#fff",
-                                      border:
-                                        "1px solid #dcfce7",
-                                      borderRadius: "12px",
-                                      padding: "12px",
-                                    }}
-                                  >
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        gap: "8px",
-                                        alignItems:
-                                          "center",
-                                        flexWrap: "wrap",
-                                      }}
-                                    >
-                                      <strong>
-                                        {index + 1}.{" "}
-                                        {suggestion.title ||
-                                          "اقتراح تحسين"}
-                                      </strong>
+                              {riskLabels[
+                                command.risk_level
+                              ] ||
+                                command.risk_level}
+                            </span>
 
-                                      {suggestion.priority && (
-                                        <span
-                                          style={{
-                                            fontSize:
-                                              "11px",
-                                            background:
-                                              suggestion.priority ===
-                                              "high"
-                                                ? "#fee2e2"
-                                                : suggestion.priority ===
-                                                  "medium"
-                                                ? "#fef3c7"
-                                                : "#dcfce7",
-                                            color:
-                                              suggestion.priority ===
-                                              "high"
-                                                ? "#991b1b"
-                                                : suggestion.priority ===
-                                                  "medium"
-                                                ? "#92400e"
-                                                : "#166534",
-                                            padding:
-                                              "4px 8px",
-                                            borderRadius:
-                                              "999px",
-                                            fontWeight: 700,
-                                          }}
-                                        >
-                                          {suggestion.priority ===
-                                          "high"
-                                            ? "مرتفع"
-                                            : suggestion.priority ===
-                                              "medium"
-                                            ? "متوسط"
-                                            : "منخفض"}
-                                        </span>
-                                      )}
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        marginTop: "6px",
-                                        color: "#475569",
-                                        lineHeight: 1.7,
-                                      }}
-                                    >
-                                      {suggestion.description ||
-                                        ""}
-                                    </div>
-                                  </div>
-                                )
-                              )}
-                            </div>
-                          )}
-
-                        {command.command_type ===
-                          "edit_files" &&
-                          command.output_data && (
-                            <div
-                              style={{
-                                marginTop: "14px",
-                                display: "grid",
-                                gap: "10px",
-                              }}
-                            >
-                              <div
+                            {requiresApproval && (
+                              <span
                                 style={{
-                                  background: "#fff",
-                                  border:
-                                    "1px solid #dcfce7",
-                                  borderRadius: "12px",
-                                  padding: "12px",
+                                  background:
+                                    approvalApproved
+                                      ? "#dcfce7"
+                                      : "#fef3c7",
+                                  color:
+                                    approvalApproved
+                                      ? "#166534"
+                                      : "#92400e",
+                                  padding:
+                                    "5px 9px",
+                                  borderRadius:
+                                    "999px",
+                                  fontSize:
+                                    "11px",
+                                  fontWeight:
+                                    700,
                                 }}
                               >
-                                <strong>
-                                  حالة الأمان
-                                </strong>
+                                {approvalApproved
+                                  ? "تمت الموافقة"
+                                  : "تحتاج موافقة"}
+                              </span>
+                            )}
+                          </div>
 
-                                <div
-                                  style={{
-                                    marginTop: "8px",
-                                    color: "#475569",
-                                    lineHeight: 1.7,
-                                  }}
-                                >
-                                  الملفات المعدلة:{" "}
-                                  {command.output_data
-                                    .safety
-                                    ?.files_modified
-                                    ? "نعم"
-                                    : "لا"}
-                                  <br />
-                                  ملفات منشأة:{" "}
-                                  {command.output_data
-                                    .safety
-                                    ?.files_created
-                                    ? "نعم"
-                                    : "لا"}
-                                  <br />
-                                  كتابة GitHub:{" "}
-                                  {command.output_data
-                                    .safety
-                                    ?.github_write_used
-                                    ? "نعم"
-                                    : "لا"}
-                                  <br />
-                                  Dry Run:{" "}
-                                  {command.output_data
-                                    .safety?.dry_run
-                                    ? "نعم"
-                                    : "لا"}
-                                </div>
+                          <div
+                            style={{
+                              color:
+                                "#64748b",
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            {formatDate(
+                              command.created_at
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              gap:
+                                "14px",
+                              flexWrap:
+                                "wrap",
+                              marginTop:
+                                "12px",
+                              fontSize:
+                                "13px",
+                              color:
+                                "#475569",
+                            }}
+                          >
+                            <span>
+                              النوع:{" "}
+                              <strong>
+                                {commandTypeLabels[
+                                  command.command_type
+                                ] ||
+                                  command.command_type}
+                              </strong>
+                            </span>
+
+                            <span>
+                              النقاط{" "}
+                              <strong>
+                                {command.points_cost ||
+                                  0}
+                              </strong>
+                            </span>
+
+                            <span>
+                              التكلفة{" "}
+                              <strong>
+                                $
+                                {Number(
+                                  command.actual_cost ||
+                                    command.estimated_cost ||
+                                    0
+                                ).toFixed(
+                                  4
+                                )}
+                              </strong>
+                            </span>
+
+                            <span>
+                              المدة{" "}
+                              <strong>
+                                {formatDuration(
+                                  command.duration_seconds
+                                )}
+                              </strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap:
+                              "8px",
+                          }}
+                        >
+                          {canStart && (
+                            <button
+                              onClick={() =>
+                                startCommand(
+                                  command
+                                )
+                              }
+                              disabled={
+                                saving ||
+                                employee?.status !==
+                                  "active"
+                              }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  GREEN,
+                                color:
+                                  "#fff",
+                                borderRadius:
+                                  "12px",
+                                padding:
+                                  "11px 16px",
+                                cursor:
+                                  saving
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              ▶ بدء التنفيذ
+                            </button>
+                          )}
+
+                          {waitingForApproval && (
+                            <span
+                              style={{
+                                display:
+                                  "inline-flex",
+                                alignItems:
+                                  "center",
+                                gap:
+                                  "7px",
+                                background:
+                                  "#fffbeb",
+                                border:
+                                  "1px solid #fde68a",
+                                color:
+                                  "#92400e",
+                                borderRadius:
+                                  "12px",
+                                padding:
+                                  "11px 14px",
+                                fontWeight:
+                                  700,
+                                fontSize:
+                                  "13px",
+                              }}
+                            >
+                              ⏳ بانتظار موافقة Super Admin
+                            </span>
+                          )}
+
+                          {button && (
+                            <button
+                              onClick={() =>
+                                executeCommand(
+                                  command
+                                )
+                              }
+                              disabled={
+                                isExecuting ||
+                                executingCommandId !==
+                                  null
+                              }
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  "#166534",
+                                color:
+                                  "#fff",
+                                borderRadius:
+                                  "12px",
+                                padding:
+                                  "11px 16px",
+                                cursor:
+                                  isExecuting
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {isExecuting
+                                ? button.loadingLabel
+                                : button.label}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {command.command_type ===
+                        "edit_files" &&
+                        command.status ===
+                          "running" && (
+                          <div
+                            style={{
+                              marginTop:
+                                "14px",
+                              padding:
+                                "12px 14px",
+                              background:
+                                "#eff6ff",
+                              border:
+                                "1px solid #bfdbfe",
+                              color:
+                                "#1e40af",
+                              borderRadius:
+                                "12px",
+                              fontSize:
+                                "13px",
+                              lineHeight:
+                                1.7,
+                            }}
+                          >
+                            🛡️ هذا اختبار تعديل آمن.
+                            <br />
+                            سيتم إعداد ومعاينة التعديل فقط،
+                            ولن يتم الكتابة على GitHub في هذه المرحلة.
+                          </div>
+                        )}
+
+                      {command.result && (
+                        <div
+                          style={{
+                            marginTop:
+                              "15px",
+                            padding:
+                              "14px",
+                            background:
+                              "#f0fdf4",
+                            border:
+                              "1px solid #dcfce7",
+                            borderRadius:
+                              "14px",
+                            color:
+                              "#166534",
+                          }}
+                        >
+                          <strong>
+                            النتيجة
+                          </strong>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "7px",
+                              whiteSpace:
+                                "pre-wrap",
+                              lineHeight:
+                                1.7,
+                            }}
+                          >
+                            {
+                              command.result
+                            }
+                          </div>
+
+                          {command.command_type ===
+                            "suggest_changes" &&
+                            command.output_data?.suggestions &&
+                            Array.isArray(
+                              command
+                                .output_data
+                                .suggestions
+                            ) && (
+                              <div
+                                style={{
+                                  marginTop:
+                                    "14px",
+                                  display:
+                                    "grid",
+                                  gap:
+                                    "8px",
+                                }}
+                              >
+                                {command.output_data.suggestions.map(
+                                  (
+                                    suggestion,
+                                    index
+                                  ) => (
+                                    <div
+                                      key={`${command.id}-suggestion-${index}`}
+                                      style={{
+                                        background:
+                                          "#fff",
+                                        border:
+                                          "1px solid #dcfce7",
+                                        borderRadius:
+                                          "12px",
+                                        padding:
+                                          "12px",
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          display:
+                                            "flex",
+                                          gap:
+                                            "8px",
+                                          alignItems:
+                                            "center",
+                                          flexWrap:
+                                            "wrap",
+                                        }}
+                                      >
+                                        <strong>
+                                          {index +
+                                            1}.{" "}
+                                          {suggestion.title ||
+                                            "اقتراح تحسين"}
+                                        </strong>
+
+                                        {suggestion.priority && (
+                                          <span
+                                            style={{
+                                              fontSize:
+                                                "11px",
+                                              background:
+                                                suggestion.priority ===
+                                                "high"
+                                                  ? "#fee2e2"
+                                                  : suggestion.priority ===
+                                                    "medium"
+                                                  ? "#fef3c7"
+                                                  : "#dcfce7",
+                                              color:
+                                                suggestion.priority ===
+                                                "high"
+                                                  ? "#991b1b"
+                                                  : suggestion.priority ===
+                                                    "medium"
+                                                  ? "#92400e"
+                                                  : "#166534",
+                                              padding:
+                                                "4px 8px",
+                                              borderRadius:
+                                                "999px",
+                                              fontWeight:
+                                                700,
+                                            }}
+                                          >
+                                            {suggestion.priority ===
+                                            "high"
+                                              ? "مرتفع"
+                                              : suggestion.priority ===
+                                                "medium"
+                                              ? "متوسط"
+                                              : "منخفض"}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div
+                                        style={{
+                                          marginTop:
+                                            "6px",
+                                          color:
+                                            "#475569",
+                                          lineHeight:
+                                            1.7,
+                                        }}
+                                      >
+                                        {suggestion.description ||
+                                          ""}
+                                      </div>
+                                    </div>
+                                  )
+                                )}
                               </div>
+                            )}
 
-                              {command.output_data
-                                .preview && (
+                          {command.command_type ===
+                            "edit_files" &&
+                            command.output_data && (
+                              <div
+                                style={{
+                                  marginTop:
+                                    "14px",
+                                  display:
+                                    "grid",
+                                  gap:
+                                    "10px",
+                                }}
+                              >
                                 <div
                                   style={{
                                     background:
                                       "#fff",
                                     border:
-                                      "1px solid #e5e7eb",
+                                      "1px solid #dcfce7",
                                     borderRadius:
                                       "12px",
-                                    padding: "12px",
+                                    padding:
+                                      "12px",
                                   }}
                                 >
                                   <strong>
-                                    معاينة التعديل
+                                    حالة الأمان
                                   </strong>
 
                                   <div
@@ -1889,174 +2483,267 @@ export default function SuperAdminAIEmployeePage() {
                                         1.7,
                                     }}
                                   >
-                                    الملف:{" "}
-                                    {
-                                      command
-                                        .output_data
-                                        .preview
-                                        .path
-                                    }
+                                    الملفات المعدلة:{" "}
+                                    {command.output_data
+                                      .safety
+                                      ?.files_modified
+                                      ? "نعم"
+                                      : "لا"}
                                     <br />
-                                    عدد أسطر الملف الحالي:{" "}
-                                    {
-                                      command
-                                        .output_data
-                                        .preview
-                                        .oldLineCount
-                                    }
+                                    ملفات منشأة:{" "}
+                                    {command.output_data
+                                      .safety
+                                      ?.files_created
+                                      ? "نعم"
+                                      : "لا"}
                                     <br />
-                                    عدد أسطر المحتوى الجديد:{" "}
-                                    {
-                                      command
-                                        .output_data
-                                        .preview
-                                        .newLineCount
-                                    }
+                                    كتابة GitHub:{" "}
+                                    {command.output_data
+                                      .safety
+                                      ?.github_write_used
+                                      ? "نعم"
+                                      : "لا"}
                                     <br />
-                                    أول سطر مختلف:{" "}
-                                    {
-                                      command
-                                        .output_data
-                                        .preview
-                                        .firstDifferenceLine
-                                    }
+                                    Dry Run:{" "}
+                                    {command.output_data
+                                      .safety
+                                      ?.dry_run
+                                      ? "نعم"
+                                      : "لا"}
                                   </div>
                                 </div>
-                              )}
-                            </div>
-                          )}
-                      </div>
-                    )}
 
-                    {command.error_message && (
-                      <div
-                        style={{
-                          marginTop: "15px",
-                          padding: "14px",
-                          background: "#fef2f2",
-                          border:
-                            "1px solid #fecaca",
-                          borderRadius: "14px",
-                          color: "#991b1b",
-                        }}
-                      >
-                        <strong>الخطأ</strong>
+                                {command.output_data
+                                  .preview && (
+                                  <div
+                                    style={{
+                                      background:
+                                        "#fff",
+                                      border:
+                                        "1px solid #e5e7eb",
+                                      borderRadius:
+                                        "12px",
+                                      padding:
+                                        "12px",
+                                    }}
+                                  >
+                                    <strong>
+                                      معاينة التعديل
+                                    </strong>
 
-                        <div
-                          style={{
-                            marginTop: "7px",
-                          }}
-                        >
-                          {command.error_message}
-                        </div>
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        marginTop: "15px",
-                        paddingTop: "14px",
-                        borderTop:
-                          "1px solid #eef2ef",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          marginBottom: "8px",
-                        }}
-                      >
-                        سجل التنفيذ
-                      </div>
-
-                      {Array.isArray(
-                        command.execution_log
-                      ) &&
-                      command.execution_log.length >
-                        0 ? (
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: "6px",
-                          }}
-                        >
-                          {command.execution_log.map(
-                            (item, index) => (
-                              <div
-                                key={`${command.id}-${index}`}
-                                style={{
-                                  display: "flex",
-                                  justifyContent:
-                                    "space-between",
-                                  gap: "10px",
-                                  background:
-                                    "#f8faf9",
-                                  padding:
-                                    "9px 11px",
-                                  borderRadius:
-                                    "10px",
-                                  fontSize: "12px",
-                                }}
-                              >
-                                <strong>
-                                  {item.event}
-                                </strong>
-
-                                <span
-                                  style={{
-                                    color:
-                                      "#64748b",
-                                  }}
-                                >
-                                  {formatDate(
-                                    item.at
-                                  )}
-                                </span>
+                                    <div
+                                      style={{
+                                        marginTop:
+                                          "8px",
+                                        color:
+                                          "#475569",
+                                        lineHeight:
+                                          1.7,
+                                      }}
+                                    >
+                                      الملف:{" "}
+                                      {
+                                        command
+                                          .output_data
+                                          .path
+                                      }
+                                      <br />
+                                      عدد أسطر الملف الحالي:{" "}
+                                      {
+                                        command
+                                          .output_data
+                                          .current_lines
+                                      }
+                                      <br />
+                                      عدد أسطر المحتوى الجديد:{" "}
+                                      {
+                                        command
+                                          .output_data
+                                          .proposed_lines
+                                      }
+                                      <br />
+                                      أول سطر مختلف:{" "}
+                                      {
+                                        command
+                                          .output_data
+                                          .first_difference_line ??
+                                        "لا يوجد"
+                                      }
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                            )
-                          )}
-                        </div>
-                      ) : (
-                        <div
-                          style={{
-                            color: "#94a3b8",
-                            fontSize: "13px",
-                          }}
-                        >
-                          لا يوجد سجل حتى الآن
+                            )}
                         </div>
                       )}
-                    </div>
-                  </article>
-                );
-              })}
+
+                      {command.error_message && (
+                        <div
+                          style={{
+                            marginTop:
+                              "15px",
+                            padding:
+                              "14px",
+                            background:
+                              "#fef2f2",
+                            border:
+                              "1px solid #fecaca",
+                            borderRadius:
+                              "14px",
+                            color:
+                              "#991b1b",
+                          }}
+                        >
+                          <strong>
+                            الخطأ
+                          </strong>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "7px",
+                            }}
+                          >
+                            {
+                              command.error_message
+                            }
+                          </div>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          marginTop:
+                            "15px",
+                          paddingTop:
+                            "14px",
+                          borderTop:
+                            "1px solid #eef2ef",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontWeight:
+                              700,
+                            marginBottom:
+                              "8px",
+                          }}
+                        >
+                          سجل التنفيذ
+                        </div>
+
+                        {Array.isArray(
+                          command.execution_log
+                        ) &&
+                        command
+                          .execution_log
+                          .length > 0 ? (
+                          <div
+                            style={{
+                              display:
+                                "grid",
+                              gap:
+                                "6px",
+                            }}
+                          >
+                            {command.execution_log.map(
+                              (
+                                item,
+                                index
+                              ) => (
+                                <div
+                                  key={`${command.id}-${index}`}
+                                  style={{
+                                    display:
+                                      "flex",
+                                    justifyContent:
+                                      "space-between",
+                                    gap:
+                                      "10px",
+                                    background:
+                                      "#f8faf9",
+                                    padding:
+                                      "9px 11px",
+                                    borderRadius:
+                                      "10px",
+                                    fontSize:
+                                      "12px",
+                                  }}
+                                >
+                                  <strong>
+                                    {
+                                      item.event
+                                    }
+                                  </strong>
+
+                                  <span
+                                    style={{
+                                      color:
+                                        "#64748b",
+                                    }}
+                                  >
+                                    {formatDate(
+                                      item.at
+                                    )}
+                                  </span>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              color:
+                                "#94a3b8",
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            لا يوجد سجل حتى الآن
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
             </div>
           </section>
         )}
 
-        {activeTab === "approvals" && (
+        {activeTab ===
+          "approvals" && (
           <section
             style={{
-              background: "#fff",
-              border: "1px solid #e5ebe7",
-              borderRadius: "20px",
-              padding: "22px",
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
             }}
           >
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
                 gap: "12px",
-                flexWrap: "wrap",
-                marginBottom: "18px",
+                flexWrap:
+                  "wrap",
+                marginBottom:
+                  "18px",
               }}
             >
               <div>
                 <h2
                   style={{
-                    margin: "0 0 6px",
+                    margin:
+                      "0 0 6px",
                   }}
                 >
                   الموافقات
@@ -2065,7 +2752,8 @@ export default function SuperAdminAIEmployeePage() {
                 <p
                   style={{
                     margin: 0,
-                    color: "#64748b",
+                    color:
+                      "#64748b",
                   }}
                 >
                   الأوامر التي تحتاج قرار Super Admin قبل التنفيذ.
@@ -2075,16 +2763,21 @@ export default function SuperAdminAIEmployeePage() {
               <span
                 style={{
                   background:
-                    pendingApprovals > 0
+                    pendingApprovals >
+                    0
                       ? "#fef3c7"
                       : "#dcfce7",
                   color:
-                    pendingApprovals > 0
+                    pendingApprovals >
+                    0
                       ? "#92400e"
                       : "#166534",
-                  padding: "8px 12px",
-                  borderRadius: "999px",
-                  fontWeight: 700,
+                  padding:
+                    "8px 12px",
+                  borderRadius:
+                    "999px",
+                  fontWeight:
+                    700,
                 }}
               >
                 {pendingApprovals} موافقات معلقة
@@ -2093,132 +2786,293 @@ export default function SuperAdminAIEmployeePage() {
 
             <div
               style={{
-                display: "grid",
+                display:
+                  "grid",
                 gap: "12px",
               }}
             >
-              {approvals.length === 0 && (
+              {approvals.length ===
+                0 && (
                 <div
                   style={{
-                    padding: "30px",
-                    textAlign: "center",
-                    color: "#64748b",
-                    background: "#f8faf9",
-                    borderRadius: "16px",
+                    padding:
+                      "30px",
+                    textAlign:
+                      "center",
+                    color:
+                      "#64748b",
+                    background:
+                      "#f8faf9",
+                    borderRadius:
+                      "16px",
                   }}
                 >
                   لا توجد موافقات حالياً.
                 </div>
               )}
 
-              {approvals.map((approval) => (
-                <div
-                  key={approval.id}
-                  style={{
-                    border:
-                      "1px solid #e5ebe7",
-                    borderRadius: "16px",
-                    padding: "16px",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      gap: "12px",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <strong>
-                        طلب موافقة
-                      </strong>
+              {approvals.map(
+                (approval) => {
+                  const relatedCommand =
+                    commands.find(
+                      (command) =>
+                        command.id ===
+                        approval.command_id
+                    );
 
+                  return (
+                    <div
+                      key={
+                        approval.id
+                      }
+                      style={{
+                        border:
+                          "1px solid #e5ebe7",
+                        borderRadius:
+                          "16px",
+                        padding:
+                          "16px",
+                      }}
+                    >
                       <div
                         style={{
-                          marginTop: "7px",
-                          color: "#64748b",
-                          fontSize: "13px",
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          gap:
+                            "12px",
+                          flexWrap:
+                            "wrap",
                         }}
                       >
-                        الحالة: {approval.status}
+                        <div
+                          style={{
+                            flex: 1,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              gap:
+                                "8px",
+                              alignItems:
+                                "center",
+                              flexWrap:
+                                "wrap",
+                            }}
+                          >
+                            <strong
+                              style={{
+                                fontSize:
+                                  "17px",
+                              }}
+                            >
+                              {relatedCommand?.command ||
+                                "طلب موافقة"}
+                            </strong>
+
+                            <span
+                              style={{
+                                ...riskClass(
+                                  approval.risk_level
+                                ),
+                                padding:
+                                  "4px 8px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {riskLabels[
+                                approval.risk_level
+                              ] ||
+                                approval.risk_level}
+                            </span>
+
+                            <span
+                              style={{
+                                background:
+                                  approval.status ===
+                                  "approved"
+                                    ? "#dcfce7"
+                                    : approval.status ===
+                                      "rejected"
+                                    ? "#fee2e2"
+                                    : "#fef3c7",
+                                color:
+                                  approval.status ===
+                                  "approved"
+                                    ? "#166534"
+                                    : approval.status ===
+                                      "rejected"
+                                    ? "#991b1b"
+                                    : "#92400e",
+                                padding:
+                                  "4px 8px",
+                                borderRadius:
+                                  "999px",
+                                fontSize:
+                                  "11px",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              {approval.status ===
+                              "approved"
+                                ? "تمت الموافقة"
+                                : approval.status ===
+                                  "rejected"
+                                ? "مرفوض"
+                                : "معلق"}
+                            </span>
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "8px",
+                              color:
+                                "#64748b",
+                              fontSize:
+                                "13px",
+                            }}
+                          >
+                            النوع:{" "}
+                            {relatedCommand
+                              ? commandTypeLabels[
+                                  relatedCommand
+                                    .command_type
+                                ] ||
+                                relatedCommand.command_type
+                              : "—"}
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop:
+                                "5px",
+                              color:
+                                "#64748b",
+                              fontSize:
+                                "12px",
+                            }}
+                          >
+                            تاريخ الطلب:{" "}
+                            {formatDate(
+                              approval.created_at
+                            )}
+                          </div>
+                        </div>
+
+                        {approval.status ===
+                          "pending" && (
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              gap:
+                                "8px",
+                            }}
+                          >
+                            <button
+                              onClick={() => {
+                                setDecisionModal(
+                                  {
+                                    approval,
+                                    decision:
+                                      "approve",
+                                  }
+                                );
+                                setDecisionReason(
+                                  ""
+                                );
+                              }}
+                              style={{
+                                border:
+                                  "none",
+                                background:
+                                  GREEN,
+                                color:
+                                  "#fff",
+                                borderRadius:
+                                  "10px",
+                                padding:
+                                  "9px 14px",
+                                cursor:
+                                  "pointer",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              موافقة
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setDecisionModal(
+                                  {
+                                    approval,
+                                    decision:
+                                      "reject",
+                                  }
+                                );
+                                setDecisionReason(
+                                  ""
+                                );
+                              }}
+                              style={{
+                                border:
+                                  "1px solid #fecaca",
+                                background:
+                                  "#fff",
+                                color:
+                                  "#b91c1c",
+                                borderRadius:
+                                  "10px",
+                                padding:
+                                  "9px 14px",
+                                cursor:
+                                  "pointer",
+                                fontWeight:
+                                  700,
+                              }}
+                            >
+                              رفض
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
-
-                    {approval.status ===
-                      "pending" && (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                        }}
-                      >
-                        <button
-                          onClick={() => {
-                            setDecisionModal({
-                              approval,
-                              decision:
-                                "approve",
-                            });
-                            setDecisionReason("");
-                          }}
-                          style={{
-                            border: "none",
-                            background: GREEN,
-                            color: "#fff",
-                            borderRadius: "10px",
-                            padding: "9px 14px",
-                            cursor: "pointer",
-                            fontWeight: 700,
-                          }}
-                        >
-                          موافقة
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setDecisionModal({
-                              approval,
-                              decision:
-                                "reject",
-                            });
-                            setDecisionReason("");
-                          }}
-                          style={{
-                            border:
-                              "1px solid #fecaca",
-                            background: "#fff",
-                            color: "#b91c1c",
-                            borderRadius: "10px",
-                            padding: "9px 14px",
-                            cursor: "pointer",
-                            fontWeight: 700,
-                          }}
-                        >
-                          رفض
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                  );
+                }
+              )}
             </div>
           </section>
         )}
 
-        {activeTab === "instructions" && (
+        {activeTab ===
+          "instructions" && (
           <section
             style={{
-              background: "#fff",
-              border: "1px solid #e5ebe7",
-              borderRadius: "20px",
-              padding: "22px",
+              background:
+                "#fff",
+              border:
+                "1px solid #e5ebe7",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
             }}
           >
             <h2
               style={{
-                margin: "0 0 14px",
+                margin:
+                  "0 0 14px",
               }}
             >
               الشخصية والتعليمات
@@ -2226,24 +3080,34 @@ export default function SuperAdminAIEmployeePage() {
 
             <div
               style={{
-                display: "grid",
-                gap: "14px",
+                display:
+                  "grid",
+                gap:
+                  "14px",
               }}
             >
               <div
                 style={{
-                  padding: "16px",
-                  background: "#f8faf9",
-                  borderRadius: "14px",
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
                 }}
               >
-                <strong>الشخصية</strong>
+                <strong>
+                  الشخصية
+                </strong>
 
                 <p
                   style={{
-                    margin: "8px 0 0",
-                    color: "#475569",
-                    lineHeight: 1.8,
+                    margin:
+                      "8px 0 0",
+                    color:
+                      "#475569",
+                    lineHeight:
+                      1.8,
                   }}
                 >
                   {employee?.personality ||
@@ -2253,19 +3117,28 @@ export default function SuperAdminAIEmployeePage() {
 
               <div
                 style={{
-                  padding: "16px",
-                  background: "#f8faf9",
-                  borderRadius: "14px",
+                  padding:
+                    "16px",
+                  background:
+                    "#f8faf9",
+                  borderRadius:
+                    "14px",
                 }}
               >
-                <strong>التعليمات</strong>
+                <strong>
+                  التعليمات
+                </strong>
 
                 <p
                   style={{
-                    margin: "8px 0 0",
-                    color: "#475569",
-                    lineHeight: 1.8,
-                    whiteSpace: "pre-wrap",
+                    margin:
+                      "8px 0 0",
+                    color:
+                      "#475569",
+                    lineHeight:
+                      1.8,
+                    whiteSpace:
+                      "pre-wrap",
                   }}
                 >
                   {employee?.instructions ||
@@ -2277,31 +3150,601 @@ export default function SuperAdminAIEmployeePage() {
         )}
       </div>
 
-      {decisionModal && (
+      {/* =====================================================
+          NEW COMMAND MODAL
+          ===================================================== */}
+
+      {newCommandModal && (
         <div
           style={{
-            position: "fixed",
+            position:
+              "fixed",
             inset: 0,
-            background: "rgba(15,23,42,.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 1000,
+            background:
+              "rgba(15,23,42,.45)",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            padding:
+              "20px",
+            zIndex:
+              1000,
           }}
         >
           <div
             style={{
-              width: "100%",
-              maxWidth: "520px",
-              background: "#fff",
-              borderRadius: "20px",
-              padding: "22px",
+              width:
+                "100%",
+              maxWidth:
+                "620px",
+              maxHeight:
+                "90vh",
+              overflowY:
+                "auto",
+              background:
+                "#fff",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
+            }}
+          >
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+                gap:
+                  "10px",
+                marginBottom:
+                  "18px",
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin:
+                      "0 0 6px",
+                  }}
+                >
+                  ＋ أمر جديد
+                </h3>
+
+                <p
+                  style={{
+                    margin: 0,
+                    color:
+                      "#64748b",
+                    fontSize:
+                      "13px",
+                  }}
+                >
+                  أنشئ مهمة جديدة لـ والم. الأوامر الحساسة ستنشئ طلب موافقة تلقائياً.
+                </p>
+              </div>
+
+              <button
+                onClick={
+                  closeNewCommandModal
+                }
+                disabled={
+                  saving
+                }
+                style={{
+                  border:
+                    "none",
+                  background:
+                    "#f1f5f2",
+                  color:
+                    "#475569",
+                  width:
+                    "36px",
+                  height:
+                    "36px",
+                  borderRadius:
+                    "10px",
+                  cursor:
+                    "pointer",
+                  fontSize:
+                    "18px",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div
+              style={{
+                display:
+                  "grid",
+                gap:
+                  "14px",
+              }}
+            >
+              <div>
+                <label
+                  style={{
+                    display:
+                      "block",
+                    marginBottom:
+                      "7px",
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  وصف الأمر
+                </label>
+
+                <input
+                  value={
+                    newCommand.command
+                  }
+                  onChange={(e) =>
+                    setNewCommand(
+                      (current) => ({
+                        ...current,
+                        command:
+                          e.target
+                            .value,
+                      })
+                    )
+                  }
+                  placeholder="مثال: تحليل ملف والم الحالي"
+                  style={{
+                    width:
+                      "100%",
+                    boxSizing:
+                      "border-box",
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "12px",
+                    outline:
+                      "none",
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  display:
+                    "grid",
+                  gridTemplateColumns:
+                    "1fr 1fr",
+                  gap:
+                    "12px",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display:
+                        "block",
+                      marginBottom:
+                        "7px",
+                      fontWeight:
+                        700,
+                    }}
+                  >
+                    نوع الأمر
+                  </label>
+
+                  <select
+                    value={
+                      newCommand.command_type
+                    }
+                    onChange={(e) =>
+                      setNewCommand(
+                        (current) => ({
+                          ...current,
+                          command_type:
+                            e.target
+                              .value,
+                          risk_level:
+                            [
+                              "edit_files",
+                              "create_files",
+                              "prepare_git_commit",
+                            ].includes(
+                              e.target
+                                .value
+                            )
+                              ? "high"
+                              : [
+                                  "database_modify",
+                                  "deploy_vercel",
+                                  "rollback",
+                                ].includes(
+                                  e.target
+                                    .value
+                                )
+                              ? "critical"
+                              : "low",
+                        })
+                      )
+                    }
+                    style={{
+                      width:
+                        "100%",
+                      border:
+                        "1px solid #dbe5de",
+                      borderRadius:
+                        "12px",
+                      padding:
+                        "12px",
+                      background:
+                        "#fff",
+                    }}
+                  >
+                    {Object.entries(
+                      commandTypeLabels
+                    ).map(
+                      ([
+                        value,
+                        label,
+                      ]) => (
+                        <option
+                          key={
+                            value
+                          }
+                          value={
+                            value
+                          }
+                        >
+                          {label}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display:
+                        "block",
+                      marginBottom:
+                        "7px",
+                      fontWeight:
+                        700,
+                    }}
+                  >
+                    مستوى الخطورة
+                  </label>
+
+                  <select
+                    value={
+                      newCommand.risk_level
+                    }
+                    onChange={(e) =>
+                      setNewCommand(
+                        (current) => ({
+                          ...current,
+                          risk_level:
+                            e.target
+                              .value,
+                        })
+                      )
+                    }
+                    style={{
+                      width:
+                        "100%",
+                      border:
+                        "1px solid #dbe5de",
+                      borderRadius:
+                        "12px",
+                      padding:
+                        "12px",
+                      background:
+                        "#fff",
+                    }}
+                  >
+                    {Object.entries(
+                      riskLabels
+                    ).map(
+                      ([
+                        value,
+                        label,
+                      ]) => (
+                        <option
+                          key={
+                            value
+                          }
+                          value={
+                            value
+                          }
+                        >
+                          {label}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display:
+                      "block",
+                    marginBottom:
+                      "7px",
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  مسار الملف
+                </label>
+
+                <input
+                  value={
+                    newCommand.path
+                  }
+                  onChange={(e) =>
+                    setNewCommand(
+                      (current) => ({
+                        ...current,
+                        path:
+                          e.target
+                            .value,
+                      })
+                    )
+                  }
+                  placeholder="مثال: app/admin/ai-employee/page.js"
+                  style={{
+                    width:
+                      "100%",
+                    boxSizing:
+                      "border-box",
+                    border:
+                      "1px solid #dbe5de",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "12px",
+                    outline:
+                      "none",
+                  }}
+                />
+              </div>
+
+              {newCommand.command_type ===
+                "edit_files" && (
+                <div>
+                  <label
+                    style={{
+                      display:
+                        "block",
+                      marginBottom:
+                        "7px",
+                      fontWeight:
+                        700,
+                    }}
+                  >
+                    المحتوى المقترح
+                  </label>
+
+                  <textarea
+                    value={
+                      newCommand.content
+                    }
+                    onChange={(e) =>
+                      setNewCommand(
+                        (current) => ({
+                          ...current,
+                          content:
+                            e.target
+                              .value,
+                        })
+                      )
+                    }
+                    placeholder="أدخل المحتوى المقترح. سيتم استخدام Dry Run فقط ولن يتم تعديل GitHub فعلياً."
+                    rows={
+                      8
+                    }
+                    style={{
+                      width:
+                        "100%",
+                      boxSizing:
+                        "border-box",
+                      border:
+                        "1px solid #dbe5de",
+                      borderRadius:
+                        "12px",
+                      padding:
+                        "12px",
+                      resize:
+                        "vertical",
+                      outline:
+                        "none",
+                      fontFamily:
+                        "monospace",
+                      direction:
+                        "ltr",
+                      textAlign:
+                        "left",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      marginTop:
+                        "8px",
+                      padding:
+                        "10px 12px",
+                      background:
+                        "#eff6ff",
+                      border:
+                        "1px solid #bfdbfe",
+                      color:
+                        "#1e40af",
+                      borderRadius:
+                        "10px",
+                      fontSize:
+                        "12px",
+                      lineHeight:
+                        1.7,
+                    }}
+                  >
+                    🛡️ التعديل الآمن حالياً يعمل Dry Run فقط.
+                    لن تتم الكتابة على GitHub.
+                  </div>
+                </div>
+              )}
+
+              {commandNeedsApproval(
+                newCommand.command_type,
+                newCommand.risk_level
+              ) && (
+                <div
+                  style={{
+                    background:
+                      "#fffbeb",
+                    border:
+                      "1px solid #fde68a",
+                    color:
+                      "#92400e",
+                    borderRadius:
+                      "12px",
+                    padding:
+                      "12px",
+                    fontSize:
+                      "13px",
+                    lineHeight:
+                      1.7,
+                  }}
+                >
+                  🔐 هذا الأمر يحتاج موافقة Super Admin.
+                  <br />
+                  سيتم إنشاء طلب الموافقة تلقائياً بعد إنشاء الأمر.
+                </div>
+              )}
+
+              <div
+                style={{
+                  display:
+                    "flex",
+                  justifyContent:
+                    "flex-start",
+                  gap:
+                    "8px",
+                  marginTop:
+                    "4px",
+                }}
+              >
+                <button
+                  onClick={
+                    createCommand
+                  }
+                  disabled={
+                    saving
+                  }
+                  style={{
+                    border:
+                      "none",
+                    background:
+                      GREEN,
+                    color:
+                      "#fff",
+                    borderRadius:
+                      "10px",
+                    padding:
+                      "11px 18px",
+                    cursor:
+                      saving
+                        ? "not-allowed"
+                        : "pointer",
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  {saving
+                    ? "جارٍ إنشاء الأمر..."
+                    : "إنشاء الأمر"}
+                </button>
+
+                <button
+                  onClick={
+                    closeNewCommandModal
+                  }
+                  disabled={
+                    saving
+                  }
+                  style={{
+                    border:
+                      "1px solid #dbe5de",
+                    background:
+                      "#fff",
+                    color:
+                      "#475569",
+                    borderRadius:
+                      "10px",
+                    padding:
+                      "11px 18px",
+                    cursor:
+                      "pointer",
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================
+          APPROVAL DECISION MODAL
+          ===================================================== */}
+
+      {decisionModal && (
+        <div
+          style={{
+            position:
+              "fixed",
+            inset: 0,
+            background:
+              "rgba(15,23,42,.45)",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            padding:
+              "20px",
+            zIndex:
+              1100,
+          }}
+        >
+          <div
+            style={{
+              width:
+                "100%",
+              maxWidth:
+                "520px",
+              background:
+                "#fff",
+              borderRadius:
+                "20px",
+              padding:
+                "22px",
             }}
           >
             <h3
               style={{
-                margin: "0 0 10px",
+                margin:
+                  "0 0 10px",
               }}
             >
               {decisionModal.decision ===
@@ -2312,39 +3755,73 @@ export default function SuperAdminAIEmployeePage() {
 
             <p
               style={{
-                color: "#64748b",
-                lineHeight: 1.7,
+                color:
+                  "#64748b",
+                lineHeight:
+                  1.7,
+              }}
+            >
+              {commands.find(
+                (command) =>
+                  command.id ===
+                  decisionModal
+                    .approval
+                    .command_id
+              )?.command ||
+                "هذا الأمر"}
+            </p>
+
+            <p
+              style={{
+                color:
+                  "#64748b",
+                lineHeight:
+                  1.7,
               }}
             >
               القرار سيُسجل في سجل الموافقات. الموافقة لا تعني تنفيذ الأمر تلقائياً.
             </p>
 
             <textarea
-              value={decisionReason}
+              value={
+                decisionReason
+              }
               onChange={(e) =>
                 setDecisionReason(
-                  e.target.value
+                  e.target
+                    .value
                 )
               }
               placeholder="سبب القرار (اختياري)"
               rows={4}
               style={{
-                width: "100%",
-                boxSizing: "border-box",
-                border: "1px solid #dbe5de",
-                borderRadius: "12px",
-                padding: "12px",
-                resize: "vertical",
-                outline: "none",
+                width:
+                  "100%",
+                boxSizing:
+                  "border-box",
+                border:
+                  "1px solid #dbe5de",
+                borderRadius:
+                  "12px",
+                padding:
+                  "12px",
+                resize:
+                  "vertical",
+                outline:
+                  "none",
               }}
             />
 
             <div
               style={{
-                display: "flex",
-                justifyContent: "flex-start",
-                gap: "8px",
-                marginTop: "14px",
+                display:
+                  "flex",
+                justifyContent:
+                  "flex-start",
+                gap:
+                  "8px",
+                marginTop:
+                  "14px",
               }}
             >
               <button
@@ -2353,21 +3830,29 @@ export default function SuperAdminAIEmployeePage() {
                     decisionModal.decision
                   )
                 }
-                disabled={saving}
+                disabled={
+                  saving
+                }
                 style={{
-                  border: "none",
+                  border:
+                    "none",
                   background:
                     decisionModal.decision ===
                     "approve"
                       ? GREEN
                       : "#dc2626",
-                  color: "#fff",
-                  borderRadius: "10px",
-                  padding: "10px 16px",
-                  cursor: saving
-                    ? "not-allowed"
-                    : "pointer",
-                  fontWeight: 700,
+                  color:
+                    "#fff",
+                  borderRadius:
+                    "10px",
+                  padding:
+                    "10px 16px",
+                  cursor:
+                    saving
+                      ? "not-allowed"
+                      : "pointer",
+                  fontWeight:
+                    700,
                 }}
               >
                 تأكيد
@@ -2375,18 +3860,28 @@ export default function SuperAdminAIEmployeePage() {
 
               <button
                 onClick={() => {
-                  setDecisionModal(null);
-                  setDecisionReason("");
+                  setDecisionModal(
+                    null
+                  );
+                  setDecisionReason(
+                    ""
+                  );
                 }}
                 style={{
                   border:
                     "1px solid #dbe5de",
-                  background: "#fff",
-                  color: "#475569",
-                  borderRadius: "10px",
-                  padding: "10px 16px",
-                  cursor: "pointer",
-                  fontWeight: 700,
+                  background:
+                    "#fff",
+                  color:
+                    "#475569",
+                  borderRadius:
+                    "10px",
+                  padding:
+                    "10px 16px",
+                  cursor:
+                    "pointer",
+                  fontWeight:
+                    700,
                 }}
               >
                 إلغاء
