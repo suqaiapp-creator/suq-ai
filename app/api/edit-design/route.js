@@ -15,121 +15,240 @@ export const runtime = "nodejs";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  }
 );
+
+// =========================================================
+// Constants
+// =========================================================
+
+const EDIT_OPERATION_KEY = "edit_design";
 
 // =========================================================
 // Helpers
 // =========================================================
 
-async function getAuthenticatedClient() {
-  const cookieStore = await cookies();
+function isProductUnclear(product) {
+  if (!product) {
+    return true;
+  }
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // Ignore cookie write errors in route handlers.
-          }
-        },
-      },
-    }
-  );
-}
+  if (
+    product.verification_status === "review" ||
+    product.verification_status === "unverified"
+  ) {
+    return true;
+  }
 
-function clean(value) {
-  if (value === undefined || value === null) return null;
-
-  const text = String(value).trim();
-
-  return text || null;
-}
-
-function isBlockedProduct(product) {
-  const safetyStatus = String(product?.safety_status || "").toLowerCase();
-  const safetyLevel = String(product?.safety_level || "").toLowerCase();
-
-  return (
-    safetyStatus === "locked" ||
-    safetyStatus === "violation" ||
-    safetyStatus === "blocked" ||
-    safetyLevel === "critical"
-  );
-}
-
-function needsResponsibilityAcceptance(product) {
-  const safetyStatus = String(
-    product?.safety_status || ""
+  const confidence = String(
+    product.confidence || ""
   ).toLowerCase();
 
-  const verificationStatus = String(
-    product?.verification_status || ""
-  ).toLowerCase();
+  if (
+    confidence === "low" ||
+    confidence === "medium" ||
+    confidence === "منخفض" ||
+    confidence === "متوسط"
+  ) {
+    return true;
+  }
 
-  const aiStatus = String(
-    product?.ai_status || ""
-  ).toLowerCase();
+  if (
+    product.name &&
+    (
+      !product.brand ||
+      !product.category ||
+      !product.description
+    )
+  ) {
+    return true;
+  }
 
-  return (
-    safetyStatus === "review" ||
-    safetyStatus === "unclear" ||
-    verificationStatus === "unverified" ||
-    verificationStatus === "review" ||
-    aiStatus === "pending" ||
-    aiStatus === "review"
-  );
+  return false;
 }
 
-async function refundPoints(
+// =========================================================
+// Refund
+// =========================================================
+
+async function refundPoints({
   supabaseAuth,
   transactionId,
+  userId,
+  shopId,
+  productId,
+  designId,
   reason,
-  metadata = {}
-) {
+  stage,
+  errorMessage,
+}) {
   if (!transactionId) {
     return {
       success: false,
-      skipped: true,
-      reason: "missing_transaction_id",
+      refunded: false,
+      error:
+        "لا توجد عملية نقاط لاسترجاعها.",
     };
   }
 
   try {
-    const { data, error } = await supabaseAuth.rpc(
+    const {
+      data,
+      error,
+    } = await supabaseAuth.rpc(
       "refund_operation_points",
       {
-        p_transaction_id: transactionId,
-        p_reason: reason,
-        p_metadata: metadata,
+        p_transaction_id:
+          transactionId,
+
+        p_reason:
+          reason ||
+          "استرجاع نقطة بسبب فشل تعديل التصميم.",
+
+        p_metadata: {
+          source:
+            "edit-design",
+
+          stage:
+            stage || "unknown",
+
+          user_id:
+            userId,
+
+          shop_id:
+            shopId,
+
+          product_id:
+            productId,
+
+          design_id:
+            designId,
+
+          error:
+            errorMessage || null,
+        },
       }
     );
 
     if (error) {
+      console.error(
+        "EDIT DESIGN REFUND ERROR:",
+        error
+      );
+
       return {
         success: false,
+        refunded: false,
         error: error.message,
       };
     }
 
     return {
       success: true,
-      data,
+      ...(data || {}),
     };
   } catch (error) {
+    console.error(
+      "EDIT DESIGN REFUND UNEXPECTED ERROR:",
+      error
+    );
+
     return {
       success: false,
-      error: error?.message || "Refund failed",
+      refunded: false,
+      error:
+        error?.message ||
+        "تعذر استرجاع النقطة.",
     };
+  }
+}
+
+// =========================================================
+// Resolve transaction
+// =========================================================
+
+async function resolvePointsTransaction({
+  userId,
+  referenceType,
+  referenceId,
+}) {
+  if (
+    !userId ||
+    !referenceType ||
+    !referenceId
+  ) {
+    return null;
+  }
+
+  try {
+    const {
+      data,
+      error,
+    } = await supabaseAdmin
+      .from("point_transactions")
+      .select(
+        `
+        id,
+        user_id,
+        amount,
+        type,
+        reference_type,
+        reference_id,
+        provider
+        `
+      )
+      .eq(
+        "user_id",
+        userId
+      )
+      .eq(
+        "reference_type",
+        referenceType
+      )
+      .eq(
+        "reference_id",
+        referenceId
+      )
+      .eq(
+        "type",
+        "debit"
+      )
+      .eq(
+        "provider",
+        "suq_ai_points"
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false,
+        }
+      )
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "RESOLVE EDIT DESIGN TRANSACTION ERROR:",
+        error
+      );
+
+      return null;
+    }
+
+    return data || null;
+  } catch (error) {
+    console.error(
+      "RESOLVE EDIT DESIGN TRANSACTION UNEXPECTED ERROR:",
+      error
+    );
+
+    return null;
   }
 }
 
@@ -138,751 +257,1647 @@ async function refundPoints(
 // =========================================================
 
 export async function POST(request) {
-  const supabaseAuth = await getAuthenticatedClient();
+  let userId = null;
+  let shopId = null;
+  let productId = null;
+  let designId = null;
 
-  let chargedTransactionId = null;
+  let supabaseAuth = null;
+
+  let pointsTransactionId = null;
+  let pointsCharged = 0;
+  let balanceAfter = null;
+
   let operationReferenceId = null;
 
   try {
-    // -------------------------------------------------------
-    // Authentication
-    // -------------------------------------------------------
+    // =====================================================
+    // 1. Authentication
+    // =====================================================
+
+    const cookieStore =
+      await cookies();
+
+    supabaseAuth =
+      createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
+
+            setAll(cookiesToSet) {
+              try {
+                cookiesToSet.forEach(
+                  ({
+                    name,
+                    value,
+                    options,
+                  }) => {
+                    cookieStore.set(
+                      name,
+                      value,
+                      options
+                    );
+                  }
+                );
+              } catch {}
+            },
+          },
+        }
+      );
 
     const {
-      data: { user },
-      error: authError,
-    } = await supabaseAuth.auth.getUser();
+      data: {
+        user,
+      },
+      error: userError,
+    } =
+      await supabaseAuth.auth.getUser();
 
-    if (authError || !user) {
+    if (
+      userError ||
+      !user
+    ) {
       return NextResponse.json(
         {
-          success: false,
-          error: "يجب تسجيل الدخول أولاً",
+          error:
+            "يجب تسجيل الدخول أولاً.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Body
-    // -------------------------------------------------------
+    userId = user.id;
 
-    const body = await request.json();
+    // =====================================================
+    // 2. Request
+    // =====================================================
+
+    const body =
+      await request.json();
+
+    designId =
+      body?.designId ||
+      body?.id ||
+      null;
+
+    if (!designId) {
+      return NextResponse.json(
+        {
+          error:
+            "معرف التصميم غير موجود.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // =====================================================
+    // 3. Load design
+    // =====================================================
 
     const {
-      design_id,
-      product_id,
-
-      template,
-      template_id,
-
-      mode,
-      style,
-      background,
-      format,
-
-      title,
-      price,
-      discount,
-      cta,
-      custom_text,
-    } = body;
-
-    if (!design_id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "معرّف التصميم مطلوب",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!product_id) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "معرّف المنتج مطلوب",
-        },
-        { status: 400 }
-      );
-    }
-
-    // -------------------------------------------------------
-    // Load design
-    // -------------------------------------------------------
-
-    const { data: design, error: designError } =
+      data: design,
+      error: designError,
+    } =
       await supabaseAdmin
         .from("ad_images")
         .select("*")
-        .eq("id", design_id)
+        .eq(
+          "id",
+          designId
+        )
         .maybeSingle();
 
     if (designError) {
-      throw new Error(
-        `تعذر قراءة التصميم: ${designError.message}`
+      console.error(
+        "DESIGN LOAD ERROR:",
+        designError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر قراءة التصميم.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     if (!design) {
       return NextResponse.json(
         {
-          success: false,
-          error: "التصميم غير موجود",
+          error:
+            "التصميم غير موجود.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Load shop
-    // -------------------------------------------------------
+    shopId =
+      design.shop_id ||
+      null;
 
-    if (!design.shop_id) {
+    productId =
+      design.product_id ||
+      null;
+
+    // =====================================================
+    // 4. Validate shop
+    // =====================================================
+
+    if (!shopId) {
       return NextResponse.json(
         {
-          success: false,
-          error: "التصميم غير مرتبط بمحل",
+          error:
+            "التصميم غير مرتبط بمحل.",
         },
-        { status: 400 }
+        {
+          status: 403,
+        }
       );
     }
 
-    const { data: shop, error: shopError } =
+    const {
+      data: shop,
+      error: shopError,
+    } =
       await supabaseAdmin
         .from("shops")
-        .select("*")
-        .eq("id", design.shop_id)
+        .select(
+          `
+          id,
+          owner_id
+          `
+        )
+        .eq(
+          "id",
+          shopId
+        )
         .maybeSingle();
 
     if (shopError) {
-      throw new Error(
-        `تعذر قراءة المحل: ${shopError.message}`
+      console.error(
+        "SHOP LOAD ERROR:",
+        shopError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر التحقق من المحل.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     if (!shop) {
       return NextResponse.json(
         {
-          success: false,
-          error: "المحل غير موجود",
+          error:
+            "المحل غير موجود.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Ownership
-    // -------------------------------------------------------
+    // =====================================================
+    // 5. Ownership
+    // =====================================================
 
-    if (shop.owner_id !== user.id) {
+    if (
+      shop.owner_id !==
+      user.id
+    ) {
       return NextResponse.json(
         {
-          success: false,
-          error: "غير مصرح لك بتعديل هذا التصميم",
+          error:
+            "ليس لديك صلاحية تعديل هذا التصميم.",
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Load product
-    // -------------------------------------------------------
+    // =====================================================
+    // 6. Product
+    // =====================================================
 
-    const { data: product, error: productError } =
+    if (!productId) {
+      return NextResponse.json(
+        {
+          error:
+            "التصميم غير مرتبط بمنتج.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const {
+      data: product,
+      error: productError,
+    } =
       await supabaseAdmin
         .from("products")
         .select("*")
-        .eq("id", product_id)
-        .eq("shop_id", design.shop_id)
+        .eq(
+          "id",
+          productId
+        )
+        .eq(
+          "shop_id",
+          shopId
+        )
         .maybeSingle();
 
     if (productError) {
-      throw new Error(
-        `تعذر قراءة المنتج: ${productError.message}`
+      console.error(
+        "PRODUCT LOAD ERROR:",
+        productError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر قراءة بيانات المنتج.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     if (!product) {
       return NextResponse.json(
         {
-          success: false,
-          error: "المنتج غير موجود أو غير مرتبط بالمحل",
+          error:
+            "المنتج غير موجود أو غير تابع لمحل المستخدم.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Product safety
-    // -------------------------------------------------------
+    // =====================================================
+    // 7. Product safety
+    // =====================================================
 
-    if (isBlockedProduct(product)) {
+    if (
+      product.safety_status ===
+        "locked" ||
+      product.safety_status ===
+        "violation" ||
+      product.verification_status ===
+        "locked"
+    ) {
       return NextResponse.json(
         {
-          success: false,
           error:
-            "لا يمكن تعديل تصميم هذا المنتج لأنه مقفل أو مخالف.",
+            "لا يمكن تعديل تصميم هذا المنتج لأنه مقفل للمراجعة.",
         },
-        { status: 403 }
+        {
+          status: 403,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Responsibility acceptance
-    // -------------------------------------------------------
+    // =====================================================
+    // 8. Responsibility
+    // =====================================================
 
-    if (needsResponsibilityAcceptance(product)) {
-      const { data: acceptance, error: acceptanceError } =
+    const unclear =
+      isProductUnclear(
+        product
+      );
+
+    if (unclear) {
+      const {
+        data: acceptance,
+        error: acceptanceError,
+      } =
         await supabaseAdmin
-          .from("product_responsibility_acceptances")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("product_id", product.id)
+          .from(
+            "product_responsibility_acceptances"
+          )
+          .select(
+            `
+            id,
+            user_id,
+            shop_id,
+            product_id,
+            policy_version,
+            accepted_at
+            `
+          )
+          .eq(
+            "user_id",
+            user.id
+          )
+          .eq(
+            "shop_id",
+            shopId
+          )
+          .eq(
+            "product_id",
+            product.id
+          )
           .maybeSingle();
 
       if (acceptanceError) {
-        throw new Error(
-          `تعذر التحقق من إقرار المسؤولية: ${acceptanceError.message}`
+        console.error(
+          "RESPONSIBILITY CHECK ERROR:",
+          acceptanceError
+        );
+
+        return NextResponse.json(
+          {
+            error:
+              "تعذر التحقق من موافقة مسؤولية المنتج.",
+          },
+          {
+            status: 500,
+          }
         );
       }
 
       if (!acceptance) {
         return NextResponse.json(
           {
-            success: false,
             error:
-              "يجب تأكيد مسؤولية المنتج قبل تعديل التصميم.",
-            requires_responsibility_acceptance: true,
+              "هذا المنتج يحتاج إلى تأكيد مسؤولية التاجر قبل تعديل التصميم.",
+
+            code:
+              "RESPONSIBILITY_REQUIRED",
           },
-          { status: 400 }
+          {
+            status: 403,
+          }
         );
       }
     }
 
-    // -------------------------------------------------------
-    // Product image
-    // -------------------------------------------------------
-
-    const productImage =
-      product.image_url ||
-      product.image ||
-      null;
-
-    if (!productImage) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "المنتج لا يحتوي على صورة.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // -------------------------------------------------------
-    // Existing design status
-    // -------------------------------------------------------
-
-    const designStatus = String(
-      design.status || ""
-    ).toLowerCase();
+    // =====================================================
+    // 9. Image
+    // =====================================================
 
     if (
-      designStatus === "generating" ||
-      designStatus === "processing"
+      !product.image_url
     ) {
       return NextResponse.json(
         {
-          success: false,
-          error: "التصميم قيد الإنشاء حالياً.",
+          error:
+            "المنتج لا يحتوي على صورة يمكن استخدامها في التصميم.",
         },
-        { status: 409 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Settings
-    // -------------------------------------------------------
+    // =====================================================
+    // 10. Settings
+    // =====================================================
 
-    const settings = {
-      template:
-        clean(template) ||
-        clean(template_id) ||
-        "product",
+    const incomingSettings =
+      body?.settings ||
+      body?.designSettings ||
+      {};
 
-      template_id:
-        clean(template_id) ||
-        clean(template) ||
-        "product",
+    const existingSettings =
+      design.design_settings ||
+      {};
 
-      mode:
-        clean(mode) ||
-        "simple",
-
-      style:
-        clean(style) ||
-        "professional",
-
-      background:
-        clean(background) ||
-        "clean",
-
-      format:
-        clean(format) ||
-        "1:1",
-
-      title:
-        clean(title) ||
-        product.name ||
-        "",
-
-      price:
-        price === ""
-          ? null
-          : price === undefined
-            ? null
-            : price === null
-              ? null
-              : Number(price),
-
-      discount:
-        clean(discount),
-
-      cta:
-        clean(cta),
-
-      custom_text:
-        clean(custom_text),
+    const designSettings = {
+      ...existingSettings,
+      ...incomingSettings,
     };
 
-    // -------------------------------------------------------
-    // Operation reference
-    // -------------------------------------------------------
+    // =====================================================
+    // 11. Build prompt
+    // =====================================================
 
-    operationReferenceId = crypto.randomUUID();
+    const prompt =
+      buildDesignPrompt({
+        product,
+        settings:
+          designSettings,
+        mode:
+          body?.mode ||
+          design.mode ||
+          "simple",
+        template:
+          body?.template ||
+          design.template ||
+          null,
+        style:
+          body?.style ||
+          design.style ||
+          null,
+        background:
+          body?.background ||
+          design.background ||
+          null,
+        format:
+          body?.format ||
+          design.format ||
+          "1:1",
+        title:
+          body?.title ??
+          design.title ??
+          null,
+        price:
+          body?.price ??
+          design.price ??
+          null,
+        discount:
+          body?.discount ??
+          design.discount ??
+          null,
+        callToAction:
+          body?.callToAction ??
+          design.call_to_action ??
+          null,
+        customText:
+          body?.customText ??
+          null,
+      });
 
-    // -------------------------------------------------------
-    // Charge 1 point
-    // -------------------------------------------------------
+    // =====================================================
+    // 12. New operation reference
+    // =====================================================
 
-    const { data: chargeData, error: chargeError } =
+    operationReferenceId =
+      crypto.randomUUID();
+
+    // =====================================================
+    // 13. Charge 1 point
+    // =====================================================
+
+    const {
+      data: pointsResult,
+      error: pointsError,
+    } =
       await supabaseAuth.rpc(
         "charge_operation_points",
         {
-          p_operation: "edit_design",
-          p_shop_id: design.shop_id,
-          p_reference_type: "design_edit",
-          p_reference_id: operationReferenceId,
+          p_operation_key:
+            EDIT_OPERATION_KEY,
+
+          p_user_id:
+            user.id,
+
+          p_shop_id:
+            shopId,
+
+          p_reference_type:
+            "design_edit",
+
+          p_reference_id:
+            operationReferenceId,
+
+          p_description:
+            `تعديل التصميم: ${
+              product.name ||
+              "منتج"
+            }`,
+
           p_metadata: {
-            design_id: design.id,
-            product_id: product.id,
-            mode: settings.mode,
-            template: settings.template,
-            format: settings.format,
+            source:
+              "edit-design",
+
+            design_id:
+              designId,
+
+            product_id:
+              productId,
+
+            product_name:
+              product.name ||
+              null,
           },
         }
       );
 
-    if (chargeError) {
+    if (pointsError) {
+      console.error(
+        "EDIT DESIGN POINTS CHARGE ERROR:",
+        pointsError
+      );
+
+      const message =
+        pointsError?.message ||
+        "تعذر خصم نقطة تعديل التصميم.";
+
+      const insufficient =
+        message.includes(
+          "غير كاف"
+        ) ||
+        message.includes(
+          "رصيد"
+        ) ||
+        message.includes(
+          "تحتاج"
+        );
+
       return NextResponse.json(
         {
-          success: false,
           error:
-            chargeError.message ||
-            "تعذر خصم نقطة التعديل.",
+            insufficient
+              ? message
+              : "تعذر تجهيز رصيد النقاط لتعديل التصميم.",
+
+          code:
+            insufficient
+              ? "INSUFFICIENT_POINTS"
+              : "POINTS_CHARGE_FAILED",
         },
-        { status: 400 }
+        {
+          status:
+            insufficient
+              ? 402
+              : 500,
+        }
       );
     }
 
-    if (!chargeData?.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            chargeData?.message ||
-            "تعذر خصم نقطة التعديل.",
-        },
-        { status: 400 }
+    // =====================================================
+    // 14. Validate points response
+    // =====================================================
+
+    if (
+      !pointsResult ||
+      pointsResult.success !== true
+    ) {
+      console.error(
+        "EDIT DESIGN INVALID POINTS RESULT:",
+        pointsResult
       );
-    }
 
-    chargedTransactionId =
-      chargeData.transaction_id || null;
+      const recovered =
+        await resolvePointsTransaction({
+          userId:
+            user.id,
 
-    // -------------------------------------------------------
-    // Mark design as generating
-    // -------------------------------------------------------
+          referenceType:
+            "design_edit",
 
-    const generationStartedAt =
-      new Date().toISOString();
-
-    const { error: generatingError } =
-      await supabaseAdmin
-        .from("ad_images")
-        .update({
-          status: "generating",
-          generation_started_at:
-            generationStartedAt,
-          error_message: null,
-          error_code: null,
-        })
-        .eq("id", design.id);
-
-    if (generatingError) {
-      const refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "فشل تحديث حالة التصميم قبل التعديل",
-        {
-          design_id: design.id,
-          operation_reference_id:
+          referenceId:
             operationReferenceId,
+        });
+
+      if (recovered?.id) {
+        pointsTransactionId =
+          recovered.id;
+
+        pointsCharged =
+          Number(
+            recovered.amount ||
+              0
+          );
+
+        const refundResult =
+          await refundPoints({
+            supabaseAuth,
+            transactionId:
+              pointsTransactionId,
+            userId,
+            shopId,
+            productId,
+            designId,
+            reason:
+              "استرجاع نقطة بسبب نتيجة غير صالحة من عملية خصم تعديل التصميم.",
+            stage:
+              "invalid_charge_result",
+            errorMessage:
+              "Invalid charge result after debit was detected.",
+          });
+
+        return NextResponse.json(
+          {
+            error:
+              "تعذر تأكيد عملية النقاط وتمت محاولة استرجاع النقطة.",
+
+            code:
+              "POINTS_CHARGE_INVALID_RESULT",
+
+            pointsRefunded:
+              !!refundResult?.refunded,
+
+            refundTransactionId:
+              refundResult?.refund_transaction_id ||
+              null,
+          },
+          {
+            status: 500,
+          }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تأكيد خصم نقطة تعديل التصميم.",
+
+          code:
+            "POINTS_CHARGE_FAILED",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 15. Resolve transaction ID
+    // =====================================================
+
+    pointsTransactionId =
+      pointsResult.transaction_id ||
+      null;
+
+    if (
+      !pointsTransactionId
+    ) {
+      const recovered =
+        await resolvePointsTransaction({
+          userId:
+            user.id,
+
+          referenceType:
+            "design_edit",
+
+          referenceId:
+            operationReferenceId,
+        });
+
+      if (recovered?.id) {
+        pointsTransactionId =
+          recovered.id;
+
+        pointsCharged =
+          Number(
+            recovered.amount ||
+              0
+          );
+      }
+    }
+
+    if (
+      !pointsTransactionId
+    ) {
+      console.error(
+        "EDIT DESIGN TRANSACTION ID MISSING:",
+        {
+          pointsResult,
+          operationReferenceId,
+          userId,
+          shopId,
+          productId,
+          designId,
         }
       );
 
       return NextResponse.json(
         {
-          success: false,
           error:
-            generatingError.message ||
-            "تعذر بدء تعديل التصميم.",
-          refunded: refund.success,
+            "تعذر تأكيد مرجع النقاط، لذلك لم يتم تشغيل تعديل التصميم.",
+
+          code:
+            "POINTS_TRANSACTION_REFERENCE_MISSING",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Build prompt
-    // -------------------------------------------------------
+    pointsCharged =
+      Number(
+        pointsResult.points_charged ??
+          pointsCharged ??
+          0
+      );
 
-    const prompt = await buildDesignPrompt({
-      product,
-      shop,
-      template: settings.template,
-      template_id: settings.template_id,
-      mode: settings.mode,
-      style: settings.style,
-      background: settings.background,
-      format: settings.format,
-      title: settings.title,
-      price: settings.price,
-      discount: settings.discount,
-      cta: settings.cta,
-      custom_text: settings.custom_text,
-    });
+    balanceAfter =
+      Number(
+        pointsResult.balance_after ??
+          0
+      );
 
-    // -------------------------------------------------------
-    // Generate image
-    // -------------------------------------------------------
+    // =====================================================
+    // 16. Set generating
+    // =====================================================
+
+    const {
+      error: generatingError,
+    } =
+      await supabaseAdmin
+        .from("ad_images")
+        .update({
+          status:
+            "generating",
+
+          generation_started_at:
+            new Date().toISOString(),
+
+          error_message:
+            null,
+
+          error_code:
+            null,
+
+          design_settings:
+            designSettings,
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+    if (generatingError) {
+      console.error(
+        "SET GENERATING ERROR:",
+        generatingError
+      );
+
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب تعذر تجهيز التصميم للتعديل.",
+          stage:
+            "set_generating",
+          errorMessage:
+            generatingError.message,
+        });
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تجهيز التصميم للتعديل.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 17. Generate
+    // =====================================================
 
     let generated;
 
     try {
-      generated = await generateDesignImage({
-        prompt,
-        imageUrl: productImage,
-        productImage,
-        product,
-        shop,
-        design,
-        settings,
-      });
+      generated =
+        await generateDesignImage({
+          prompt,
+
+          productImageUrl:
+            product.image_url,
+
+          product,
+
+          settings:
+            designSettings,
+
+          mode:
+            body?.mode ||
+            design.mode ||
+            "simple",
+
+          template:
+            body?.template ||
+            design.template ||
+            null,
+
+          style:
+            body?.style ||
+            design.style ||
+            null,
+
+          background:
+            body?.background ||
+            design.background ||
+            null,
+
+          format:
+            body?.format ||
+            design.format ||
+            "1:1",
+        });
     } catch (generationError) {
-      const refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "فشل توليد التصميم المعدل",
-        {
-          design_id: design.id,
-          operation_reference_id:
-            operationReferenceId,
-          error:
-            generationError?.message || null,
-        }
+      console.error(
+        "EDIT DESIGN GENERATION ERROR:",
+        generationError
       );
+
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب فشل إنشاء التصميم.",
+          stage:
+            "generation",
+          errorMessage:
+            generationError?.message ||
+            "Design generation failed",
+        });
 
       await supabaseAdmin
         .from("ad_images")
         .update({
-          status: "failed",
+          status:
+            "failed",
+
           error_message:
             generationError?.message ||
-            "فشل توليد التصميم.",
-          error_code: "EDIT_GENERATION_FAILED",
+            "فشل إنشاء التصميم.",
+
+          error_code:
+            "GENERATION_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
         })
-        .eq("id", design.id);
+        .eq(
+          "id",
+          designId
+        );
+
+      try {
+        await logAIUsage({
+          userId,
+          shopId,
+          productId,
+
+          operation:
+            "design_edit",
+
+          status:
+            "failed",
+
+          metadata: {
+            source:
+              "edit-design",
+
+            design_id:
+              designId,
+
+            stage:
+              "generation",
+
+            points_transaction_id:
+              pointsTransactionId,
+
+            points_charged:
+              pointsCharged,
+
+            points_refunded:
+              !!refundResult?.refunded,
+
+            refund_transaction_id:
+              refundResult?.refund_transaction_id ||
+              null,
+
+            operation_reference_id:
+              operationReferenceId,
+          },
+        });
+      } catch (usageError) {
+        console.error(
+          "AI USAGE LOG ERROR:",
+          usageError
+        );
+      }
 
       return NextResponse.json(
         {
-          success: false,
           error:
-            generationError?.message ||
-            "فشل توليد التصميم.",
-          refunded: refund.success,
+            "فشل إنشاء التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
         },
-        { status: 500 }
-      );
-    }
-
-    // -------------------------------------------------------
-    // Validate generated result
-    // -------------------------------------------------------
-
-    if (!generated) {
-      const refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "لم يتم الحصول على نتيجة من محرك التصميم",
         {
-          design_id: design.id,
-          operation_reference_id:
-            operationReferenceId,
+          status: 500,
         }
       );
-
-      await supabaseAdmin
-        .from("ad_images")
-        .update({
-          status: "failed",
-          error_message:
-            "لم يتم الحصول على نتيجة من محرك التصميم.",
-          error_code: "EMPTY_GENERATION_RESULT",
-        })
-        .eq("id", design.id);
-
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "لم يتم الحصول على نتيجة من محرك التصميم.",
-          refunded: refund.success,
-        },
-        { status: 500 }
-      );
     }
 
-    // -------------------------------------------------------
-    // Resolve generated URL
-    // -------------------------------------------------------
+    // =====================================================
+    // 18. Resolve generated image
+    // =====================================================
 
-    const generatedUrl =
-      generated.image_url ||
-      generated.url ||
-      generated.output_url ||
+    const generatedImageUrl =
+      generated?.image_url ||
+      generated?.url ||
+      generated?.imageUrl ||
       null;
 
-    if (!generatedUrl) {
-      const refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "نتيجة التصميم لا تحتوي على رابط صورة",
-        {
-          design_id: design.id,
-          operation_reference_id:
-            operationReferenceId,
-        }
-      );
+    if (!generatedImageUrl) {
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب عدم الحصول على صورة التصميم.",
+          stage:
+            "missing_generated_url",
+          errorMessage:
+            "Generated image URL is missing",
+        });
 
       await supabaseAdmin
         .from("ad_images")
         .update({
-          status: "failed",
+          status:
+            "failed",
+
           error_message:
-            "نتيجة التصميم لا تحتوي على رابط صورة.",
-          error_code: "MISSING_IMAGE_URL",
+            "لم يتم الحصول على رابط صورة التصميم.",
+
+          error_code:
+            "MISSING_IMAGE_URL",
+
+          updated_at:
+            new Date().toISOString(),
         })
-        .eq("id", design.id);
+        .eq(
+          "id",
+          designId
+        );
 
       return NextResponse.json(
         {
-          success: false,
           error:
-            "نتيجة التصميم لا تحتوي على رابط صورة.",
-          refunded: refund.success,
+            "لم يتم الحصول على صورة التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // Save settings + image
-    // -------------------------------------------------------
+    // =====================================================
+    // 19. Download generated image
+    // =====================================================
 
-    const completedAt =
-      new Date().toISOString();
+    let imageResponse;
 
-    const { data: updatedDesign, error: updateError } =
+    try {
+      imageResponse =
+        await fetch(
+          generatedImageUrl
+        );
+    } catch (downloadError) {
+      console.error(
+        "IMAGE DOWNLOAD ERROR:",
+        downloadError
+      );
+
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب تعذر تحميل صورة التصميم.",
+          stage:
+            "image_download",
+          errorMessage:
+            downloadError?.message ||
+            "Image download failed",
+        });
+
       await supabaseAdmin
         .from("ad_images")
         .update({
-          image_url: generatedUrl,
-          status: "completed",
-          generated_at: completedAt,
-          completed_at: completedAt,
+          status:
+            "failed",
+
+          error_message:
+            downloadError?.message ||
+            "تعذر تحميل صورة التصميم.",
+
+          error_code:
+            "IMAGE_DOWNLOAD_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر تحميل صورة التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    if (
+      !imageResponse.ok
+    ) {
+      const errorMessage =
+        `Image download failed with status ${imageResponse.status}`;
+
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب فشل تحميل صورة التصميم.",
+          stage:
+            "image_download_http",
+          errorMessage,
+        });
+
+      await supabaseAdmin
+        .from("ad_images")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            errorMessage,
+
+          error_code:
+            "IMAGE_DOWNLOAD_HTTP_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+      return NextResponse.json(
+        {
+          error:
+            "فشل تحميل صورة التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const imageBuffer =
+      Buffer.from(
+        await imageResponse.arrayBuffer()
+      );
+
+    // =====================================================
+    // 20. Upload
+    // =====================================================
+
+    const storagePath =
+      `${shopId}/${productId}/${designId}-${Date.now()}.png`;
+
+    const {
+      error: uploadError,
+    } =
+      await supabaseAdmin.storage
+        .from("ad-images")
+        .upload(
+          storagePath,
+          imageBuffer,
+          {
+            contentType:
+              "image/png",
+
+            upsert:
+              true,
+          }
+        );
+
+    if (uploadError) {
+      console.error(
+        "IMAGE STORAGE UPLOAD ERROR:",
+        uploadError
+      );
+
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب فشل حفظ التصميم.",
+          stage:
+            "storage_upload",
+          errorMessage:
+            uploadError.message,
+        });
+
+      await supabaseAdmin
+        .from("ad_images")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            uploadError.message,
+
+          error_code:
+            "STORAGE_UPLOAD_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر حفظ التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 21. Public URL
+    // =====================================================
+
+    const {
+      data: publicUrlData,
+    } =
+      supabaseAdmin.storage
+        .from("ad-images")
+        .getPublicUrl(
+          storagePath
+        );
+
+    const publicUrl =
+      publicUrlData?.publicUrl ||
+      null;
+
+    if (!publicUrl) {
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب تعذر إنشاء رابط التصميم.",
+          stage:
+            "public_url",
+          errorMessage:
+            "Public image URL missing",
+        });
+
+      await supabaseAdmin
+        .from("ad_images")
+        .update({
+          status:
+            "failed",
+
+          error_message:
+            "تعذر إنشاء رابط صورة التصميم.",
+
+          error_code:
+            "PUBLIC_URL_FAILED",
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+      return NextResponse.json(
+        {
+          error:
+            "تعذر إنشاء رابط التصميم.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =====================================================
+    // 22. Complete design
+    // =====================================================
+
+    const {
+      error: completeError,
+    } =
+      await supabaseAdmin
+        .from("ad_images")
+        .update({
+          image_url:
+            publicUrl,
+
+          status:
+            "completed",
+
+          generated_at:
+            new Date().toISOString(),
+
+          completed_at:
+            new Date().toISOString(),
+
           generation_started_at:
-            generationStartedAt,
-          error_message: null,
-          error_code: null,
-          design_settings: settings,
-        })
-        .eq("id", design.id)
-        .select("*")
-        .single();
+            design.generation_started_at ||
+            new Date().toISOString(),
 
-    if (updateError) {
-      const refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "فشل حفظ التصميم المعدل",
-        {
-          design_id: design.id,
-          operation_reference_id:
-            operationReferenceId,
-        }
+          design_settings:
+            designSettings,
+
+          updated_at:
+            new Date().toISOString(),
+
+          error_message:
+            null,
+
+          error_code:
+            null,
+        })
+        .eq(
+          "id",
+          designId
+        );
+
+    if (completeError) {
+      console.error(
+        "COMPLETE DESIGN ERROR:",
+        completeError
       );
 
-      await supabaseAdmin
-        .from("ad_images")
-        .update({
-          status: "failed",
-          error_message:
-            updateError.message ||
-            "فشل حفظ التصميم المعدل.",
-          error_code: "DESIGN_UPDATE_FAILED",
-        })
-        .eq("id", design.id);
+      const refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب فشل حفظ نتيجة تعديل التصميم.",
+          stage:
+            "complete_design",
+          errorMessage:
+            completeError.message,
+        });
 
       return NextResponse.json(
         {
-          success: false,
           error:
-            updateError.message ||
-            "فشل حفظ التصميم المعدل.",
-          refunded: refund.success,
+            "تم إنشاء التصميم لكن تعذر حفظ النتيجة.",
+
+          pointsRefunded:
+            !!refundResult?.refunded,
+
+          refundTransactionId:
+            refundResult?.refund_transaction_id ||
+            null,
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    // -------------------------------------------------------
-    // AI usage log
-    // -------------------------------------------------------
+    // =====================================================
+    // 23. Usage log
+    // =====================================================
 
     try {
       await logAIUsage({
-        userId: user.id,
-        shopId: design.shop_id,
-        productId: product.id,
-        operation: "edit_design",
-        model:
-          generated.model ||
-          "design-engine",
-        status: "success",
-        estimatedCost:
-          generated.estimatedCost ??
-          null,
+        userId,
+        shopId,
+        productId,
+
+        operation:
+          "design_edit",
+
+        status:
+          "success",
+
         metadata: {
-          design_id: design.id,
+          source:
+            "edit-design",
+
+          design_id:
+            designId,
+
+          points_operation:
+            EDIT_OPERATION_KEY,
+
+          points_charged:
+            pointsCharged,
+
+          points_balance_after:
+            balanceAfter,
+
+          points_transaction_id:
+            pointsTransactionId,
+
           operation_reference_id:
             operationReferenceId,
-          points_charged:
-            chargeData.points_charged ||
-            chargeData.cost ||
-            1,
-          settings,
         },
       });
-    } catch {
-      // Usage logging must never break a successful design.
+    } catch (usageError) {
+      console.error(
+        "AI USAGE LOG ERROR:",
+        usageError
+      );
     }
 
-    // -------------------------------------------------------
-    // Activity log
-    // -------------------------------------------------------
+    // =====================================================
+    // 24. Activity log
+    // =====================================================
 
     try {
       await supabaseAdmin
         .from("activity_logs")
         .insert({
-          user_id: user.id,
-          shop_id: design.shop_id,
-          action: "edit_design",
-          entity_type: "ad_image",
-          entity_id: design.id,
+          user_id:
+            user.id,
+
+          shop_id:
+            shopId,
+
+          action:
+            "edit_design",
+
+          entity_type:
+            "ad_image",
+
+          entity_id:
+            designId,
+
           description:
-            "تم تعديل تصميم المنتج وإعادة توليده.",
+            `تم تعديل تصميم المنتج: ${
+              product.name ||
+              "منتج"
+            }`,
+
           metadata: {
-            product_id: product.id,
+            product_id:
+              productId,
+
+            points_charged:
+              pointsCharged,
+
+            points_transaction_id:
+              pointsTransactionId,
+
             operation_reference_id:
               operationReferenceId,
-            settings,
-            points_charged:
-              chargeData.points_charged ||
-              chargeData.cost ||
-              1,
           },
         });
-    } catch {
-      // Activity logging must not fail the operation.
+    } catch (activityError) {
+      console.error(
+        "ACTIVITY LOG ERROR:",
+        activityError
+      );
     }
 
-    // -------------------------------------------------------
-    // Success
-    // -------------------------------------------------------
+    // =====================================================
+    // 25. Success
+    // =====================================================
 
     return NextResponse.json({
-      success: true,
-      design: updatedDesign,
-      image_url: generatedUrl,
-      points_charged:
-        chargeData.points_charged ||
-        chargeData.cost ||
-        1,
-      balance:
-        chargeData.balance ??
-        null,
-      transaction_id:
-        chargedTransactionId,
-      operation_reference_id:
-        operationReferenceId,
-      message:
-        "تم تعديل التصميم بنجاح.",
+      success:
+        true,
+
+      image_url:
+        publicUrl,
+
+      design_id:
+        designId,
+
+      points: {
+        charged:
+          pointsCharged,
+
+        balance_after:
+          balanceAfter,
+
+        operation:
+          EDIT_OPERATION_KEY,
+
+        transaction_id:
+          pointsTransactionId,
+      },
     });
+
   } catch (error) {
-    // -------------------------------------------------------
-    // Unexpected failure
-    // -------------------------------------------------------
+    console.error(
+      "EDIT DESIGN UNEXPECTED ERROR:",
+      error
+    );
 
-    let refund = null;
+    let refundResult =
+      null;
 
-    if (chargedTransactionId) {
-      refund = await refundPoints(
-        supabaseAuth,
-        chargedTransactionId,
-        "فشل غير متوقع أثناء تعديل التصميم",
-        {
-          design_id: null,
+    if (
+      supabaseAuth &&
+      pointsTransactionId
+    ) {
+      refundResult =
+        await refundPoints({
+          supabaseAuth,
+          transactionId:
+            pointsTransactionId,
+          userId,
+          shopId,
+          productId,
+          designId,
+          reason:
+            "استرجاع نقطة بسبب خطأ غير متوقع أثناء تعديل التصميم.",
+          stage:
+            "unexpected_error",
+          errorMessage:
+            error?.message ||
+            "Unexpected edit design error",
+        });
+    }
+
+    try {
+      await logAIUsage({
+        userId,
+        shopId,
+        productId,
+
+        operation:
+          "design_edit",
+
+        status:
+          "failed",
+
+        metadata: {
+          source:
+            "edit-design",
+
+          design_id:
+            designId,
+
+          stage:
+            "unexpected_error",
+
+          error:
+            error?.message ||
+            "unknown_error",
+
+          points_transaction_id:
+            pointsTransactionId,
+
+          points_charged:
+            pointsCharged,
+
+          points_refunded:
+            !!refundResult?.refunded,
+
+          refund_transaction_id:
+            refundResult?.refund_transaction_id ||
+            null,
+
           operation_reference_id:
             operationReferenceId,
-          error:
-            error?.message || null,
-        }
+        },
+      });
+    } catch (usageError) {
+      console.error(
+        "AI USAGE LOG ERROR:",
+        usageError
       );
     }
 
     return NextResponse.json(
       {
-        success: false,
         error:
-          error?.message ||
-          "حدث خطأ غير متوقع أثناء تعديل التصميم.",
-        refunded:
-          refund?.success || false,
+          "حدث خطأ أثناء تعديل التصميم.",
+
+        pointsRefunded:
+          !!refundResult?.refunded,
+
+        refundTransactionId:
+          refundResult?.refund_transaction_id ||
+          null,
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
