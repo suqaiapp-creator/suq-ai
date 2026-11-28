@@ -59,6 +59,7 @@ function githubHeaders() {
     Accept: "application/vnd.github+json",
     Authorization: `Bearer ${GITHUB_TOKEN}`,
     "X-GitHub-Api-Version": "2022-11-28",
+    "Content-Type": "application/json",
   };
 }
 
@@ -81,7 +82,27 @@ async function githubGet(url) {
   return data;
 }
 
-async function readGithubFile(path) {
+async function githubPut(url, body) {
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: githubHeaders(),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.message ||
+        `GitHub write failed with status ${response.status}`
+    );
+  }
+
+  return data;
+}
+
+function githubContentsUrl(path) {
   const safePath = normalizePath(path);
 
   if (!safePath) {
@@ -93,11 +114,22 @@ async function readGithubFile(path) {
     .map((part) => encodeURIComponent(part))
     .join("/");
 
-  const url =
+  return (
     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}` +
-    `/contents/${encodedPath}?ref=${encodeURIComponent(
-      GITHUB_BRANCH
-    )}`;
+    `/contents/${encodedPath}`
+  );
+}
+
+async function readGithubFile(path) {
+  const safePath = normalizePath(path);
+
+  if (!safePath) {
+    throw new Error("يجب تحديد مسار الملف.");
+  }
+
+  const url =
+    `${githubContentsUrl(safePath)}` +
+    `?ref=${encodeURIComponent(GITHUB_BRANCH)}`;
 
   const data = await githubGet(url);
 
@@ -129,6 +161,75 @@ async function readGithubFile(path) {
     sha: data.sha || null,
     size: buffer.length,
     content: buffer.toString("utf8"),
+  };
+}
+
+async function writeGithubFile({
+  path,
+  content,
+  sha,
+  message,
+}) {
+  const safePath = normalizePath(path);
+
+  if (!safePath) {
+    throw new Error("يجب تحديد مسار الملف.");
+  }
+
+  if (typeof content !== "string") {
+    throw new Error(
+      "محتوى الملف الجديد غير صالح."
+    );
+  }
+
+  const contentSize = Buffer.byteLength(
+    content,
+    "utf8"
+  );
+
+  if (contentSize > MAX_FILE_SIZE) {
+    throw new Error(
+      "المحتوى الجديد أكبر من الحد المسموح."
+    );
+  }
+
+  if (!sha) {
+    throw new Error(
+      "SHA الحالي للملف غير موجود. تم إيقاف الكتابة لحماية الملف."
+    );
+  }
+
+  const encodedContent =
+    Buffer.from(
+      content,
+      "utf8"
+    ).toString("base64");
+
+  const data = await githubPut(
+    githubContentsUrl(safePath),
+    {
+      message:
+        message ||
+        `chore(ai-employee): update ${safePath}`,
+      content: encodedContent,
+      sha,
+      branch: GITHUB_BRANCH,
+    }
+  );
+
+  return {
+    path: safePath,
+    commit_sha:
+      data?.commit?.sha || null,
+    commit_message:
+      data?.commit?.message || message || null,
+    content_sha:
+      data?.content?.sha || null,
+    github_response: {
+      committed: Boolean(
+        data?.commit?.sha
+      ),
+    },
   };
 }
 
@@ -449,11 +550,6 @@ function buildEditPreview(
  * ---------------------------------------------------------
  * BUILD PREFLIGHT
  * ---------------------------------------------------------
- *
- * ملاحظة:
- * هذا فحص Build آمن من GitHub.
- * لا يشغّل npm build داخل Vercel Serverless،
- * ولا يكتب أي شيء، ولا ينشر أي شيء.
  */
 
 function analyzePackageJson(content) {
@@ -531,7 +627,8 @@ async function runBuildPreflight() {
   checks.push({
     name: "package.json",
     passed: true,
-    message: "تم العثور على package.json وقراءته بنجاح.",
+    message:
+      "تم العثور على package.json وقراءته بنجاح.",
   });
 
   checks.push({
@@ -648,22 +745,25 @@ async function safeLog(
   if (!commandId) return;
 
   try {
-    const { data: currentCommand, error } =
-      await serviceClient
-        .from("ai_employee_commands")
-        .select("execution_log")
-        .eq("id", commandId)
-        .single();
+    const {
+      data: currentCommand,
+      error,
+    } = await serviceClient
+      .from("ai_employee_commands")
+      .select("execution_log")
+      .eq("id", commandId)
+      .single();
 
     if (error) {
       return;
     }
 
-    const nextLog = appendExecutionLog(
-      currentCommand?.execution_log,
-      event,
-      data
-    );
+    const nextLog =
+      appendExecutionLog(
+        currentCommand?.execution_log,
+        event,
+        data
+      );
 
     await serviceClient
       .from("ai_employee_commands")
@@ -695,16 +795,17 @@ async function markFailed(
       );
     }
   } catch {
-    // نكمل إلى fallback.
+    // fallback أدناه
   }
 
   try {
-    const { data: currentCommand } =
-      await serviceClient
-        .from("ai_employee_commands")
-        .select("execution_log")
-        .eq("id", commandId)
-        .single();
+    const {
+      data: currentCommand,
+    } = await serviceClient
+      .from("ai_employee_commands")
+      .select("execution_log")
+      .eq("id", commandId)
+      .single();
 
     await serviceClient
       .from("ai_employee_commands")
@@ -823,7 +924,8 @@ export async function POST(request) {
       return json(
         {
           success: false,
-          error: "command_id مطلوب.",
+          error:
+            "command_id مطلوب.",
         },
         400
       );
@@ -1053,7 +1155,8 @@ export async function POST(request) {
 
       return json({
         success: true,
-        command_id: commandId,
+        command_id:
+          commandId,
         command_type:
           commandType,
         result:
@@ -1154,7 +1257,8 @@ export async function POST(request) {
 
       return json({
         success: true,
-        command_id: commandId,
+        command_id:
+          commandId,
         command_type:
           commandType,
         result:
@@ -1240,7 +1344,8 @@ export async function POST(request) {
 
       return json({
         success: true,
-        command_id: commandId,
+        command_id:
+          commandId,
         command_type:
           commandType,
         result:
@@ -1330,7 +1435,8 @@ export async function POST(request) {
 
       return json({
         success: true,
-        command_id: commandId,
+        command_id:
+          commandId,
         command_type:
           commandType,
         result:
@@ -1342,8 +1448,11 @@ export async function POST(request) {
 
     /*
      * ---------------------------------------------------------
-     * EDIT FILES - SAFE DRY RUN ONLY
+     * EDIT FILES
      * ---------------------------------------------------------
+     *
+     * dry_run=true  -> معاينة فقط
+     * dry_run=false -> كتابة فعلية بعد الموافقة
      */
 
     if (
@@ -1351,14 +1460,7 @@ export async function POST(request) {
       "edit_files"
     ) {
       const dryRun =
-        inputData.dry_run ===
-        true;
-
-      if (!dryRun) {
-        throw new Error(
-          "التعديل الفعلي على GitHub غير مفعّل في هذه المرحلة. يجب استخدام dry_run=true أولًا."
-        );
-      }
+        inputData.dry_run === true;
 
       const newContent =
         typeof inputData.new_content ===
@@ -1371,7 +1473,7 @@ export async function POST(request) {
 
       if (newContent === null) {
         throw new Error(
-          "يجب تحديد input_data.new_content لاختبار تعديل الملف."
+          "يجب تحديد input_data.new_content."
         );
       }
 
@@ -1393,12 +1495,21 @@ export async function POST(request) {
       await safeLog(
         serviceClient,
         commandId,
-        "github_edit_preview_started",
+        dryRun
+          ? "github_edit_preview_started"
+          : "github_edit_started",
         {
           path,
-          dry_run: true,
+          dry_run:
+            dryRun,
         }
       );
+
+      /*
+       * نقرأ النسخة الحالية قبل أي شيء.
+       * الـ SHA يستخدم كقفل لمنع الكتابة فوق نسخة
+       * تغيّرت بعد إنشاء الأمر.
+       */
 
       const file =
         await readGithubFile(path);
@@ -1421,25 +1532,337 @@ export async function POST(request) {
           file.path
         );
 
+      /*
+       * إذا لم يوجد تغيير، لا نكتب شيئًا.
+       */
+
+      if (!preview.changed) {
+        const resultMessage =
+          `تمت مراجعة الملف ${file.path} ولم يتم العثور على أي تغيير.`;
+
+        const {
+          error: completeError,
+        } =
+          await authenticatedClient.rpc(
+            "complete_ai_employee_command",
+            {
+              p_command_id:
+                commandId,
+              p_result:
+                resultMessage,
+              p_output_data: {
+                ...preview,
+                safety: {
+                  ...preview.safety,
+                  dry_run:
+                    dryRun,
+                },
+              },
+            }
+          );
+
+        if (completeError) {
+          throw new Error(
+            completeError.message ||
+              "تعذر إكمال عملية التعديل."
+          );
+        }
+
+        await safeLog(
+          serviceClient,
+          commandId,
+          "execution_completed",
+          {
+            changed: false,
+            dry_run:
+              dryRun,
+          }
+        );
+
+        return json({
+          success: true,
+          command_id:
+            commandId,
+          command_type:
+            commandType,
+          result:
+            resultMessage,
+          output_data: {
+            ...preview,
+            safety: {
+              ...preview.safety,
+              dry_run:
+                dryRun,
+            },
+          },
+        });
+      }
+
+      /*
+       * -------------------------------------------------------
+       * DRY RUN
+       * -------------------------------------------------------
+       */
+
+      if (dryRun) {
+        await safeLog(
+          serviceClient,
+          commandId,
+          "edit_dry_run_completed",
+          {
+            path: file.path,
+            changed:
+              preview.changed,
+            files_modified:
+              false,
+            github_write_used:
+              false,
+          }
+        );
+
+        const resultMessage =
+          `تم اختبار تعديل الملف ${file.path} بنجاح بدون الكتابة على GitHub.`;
+
+        const {
+          error: completeError,
+        } =
+          await authenticatedClient.rpc(
+            "complete_ai_employee_command",
+            {
+              p_command_id:
+                commandId,
+              p_result:
+                resultMessage,
+              p_output_data:
+                preview,
+            }
+          );
+
+        if (completeError) {
+          throw new Error(
+            completeError.message ||
+              "تعذر إكمال اختبار تعديل الملف."
+          );
+        }
+
+        await safeLog(
+          serviceClient,
+          commandId,
+          "execution_completed",
+          {
+            dry_run: true,
+          }
+        );
+
+        return json({
+          success: true,
+          command_id:
+            commandId,
+          command_type:
+            commandType,
+          result:
+            resultMessage,
+          output_data:
+            preview,
+        });
+      }
+
+      /*
+       * -------------------------------------------------------
+       * REAL EDIT
+       * -------------------------------------------------------
+       *
+       * لا نسمح بالكتابة إلا إذا كانت حالة الموافقة
+       * للأمر approved.
+       */
+
+      if (
+        command.approval_status !==
+        "approved"
+      ) {
+        throw new Error(
+          "التعديل الفعلي يتطلب موافقة صريحة على الأمر."
+        );
+      }
+
+      if (
+        command.requires_approval === true &&
+        command.approval_status !==
+          "approved"
+      ) {
+        throw new Error(
+          "الأمر يحتاج موافقة قبل الكتابة على GitHub."
+        );
+      }
+
       await safeLog(
         serviceClient,
         commandId,
-        "edit_dry_run_completed",
+        "github_write_authorized",
         {
           path: file.path,
-          changed:
-            preview.changed,
-          files_modified:
-            false,
-          github_write_used:
-            false,
+          approval_status:
+            command.approval_status,
+          current_sha:
+            file.sha,
         }
       );
 
+      /*
+       * نحفظ النسخة القديمة داخل نتيجة العملية.
+       * هذا يوفر مادة Rollback لاحقًا.
+       */
+
+      const rollbackData = {
+        path: file.path,
+        branch:
+          GITHUB_BRANCH,
+        previous_sha:
+          file.sha,
+        previous_content:
+          file.content,
+        previous_size:
+          file.size,
+      };
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "rollback_snapshot_created",
+        {
+          path: file.path,
+          previous_sha:
+            file.sha,
+        }
+      );
+
+      /*
+       * نكتب فقط باستخدام SHA الذي قرأناه قبل العملية.
+       * إذا تغيّر الملف في GitHub، GitHub سيرفض الكتابة.
+       */
+
+      const commitMessage =
+        typeof inputData.commit_message ===
+          "string" &&
+        inputData.commit_message.trim()
+          ? inputData.commit_message.trim()
+          : `chore(ai-employee): update ${file.path}`;
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "github_write_started",
+        {
+          path: file.path,
+          branch:
+            GITHUB_BRANCH,
+          commit_message:
+            commitMessage,
+        }
+      );
+
+      const writeResult =
+        await writeGithubFile({
+          path: file.path,
+          content: newContent,
+          sha: file.sha,
+          message:
+            commitMessage,
+        });
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "github_write_completed",
+        {
+          path: file.path,
+          commit_sha:
+            writeResult.commit_sha,
+          content_sha:
+            writeResult.content_sha,
+        }
+      );
+
+      /*
+       * تحقق بعد الكتابة.
+       */
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "github_write_verification_started",
+        {
+          path: file.path,
+        }
+      );
+
+      const verifiedFile =
+        await readGithubFile(path);
+
+      const writeVerified =
+        verifiedFile.content ===
+        newContent;
+
+      if (!writeVerified) {
+        throw new Error(
+          "تمت الكتابة لكن فشل التحقق من المحتوى الجديد. تم إيقاف العملية."
+        );
+      }
+
+      await safeLog(
+        serviceClient,
+        commandId,
+        "github_write_verification_completed",
+        {
+          path: file.path,
+          verified: true,
+          new_sha:
+            verifiedFile.sha,
+        }
+      );
+
+      const realEditOutput = {
+        path: file.path,
+        branch:
+          GITHUB_BRANCH,
+        changed: true,
+        dry_run: false,
+        previous_sha:
+          file.sha,
+        new_sha:
+          verifiedFile.sha,
+        commit_sha:
+          writeResult.commit_sha,
+        commit_message:
+          commitMessage,
+        previous_content:
+          rollbackData.previous_content,
+        new_content:
+          newContent,
+        rollback: {
+          available: true,
+          path: rollbackData.path,
+          branch:
+            rollbackData.branch,
+          previous_sha:
+            rollbackData.previous_sha,
+        },
+        safety: {
+          files_modified: true,
+          files_created: false,
+          github_write_used: true,
+          github_write_verified: true,
+          deployment_triggered:
+            false,
+          openai_used: false,
+          runway_used: false,
+          points_charged: 0,
+          estimated_cost_usd: 0,
+        },
+      };
+
       const resultMessage =
-        preview.changed
-          ? `تم اختبار تعديل الملف ${file.path} بنجاح بدون الكتابة على GitHub.`
-          : `تم اختبار الملف ${file.path} ولم يتم العثور على أي تغيير.`;
+        `تم تعديل الملف ${file.path} ورفع التغيير إلى GitHub والتحقق منه بنجاح.`;
 
       const {
         error: completeError,
@@ -1452,14 +1875,14 @@ export async function POST(request) {
             p_result:
               resultMessage,
             p_output_data:
-              preview,
+              realEditOutput,
           }
         );
 
       if (completeError) {
         throw new Error(
           completeError.message ||
-            "تعذر إكمال اختبار تعديل الملف."
+            "تم تعديل الملف لكن تعذر تسجيل اكتمال الأمر."
         );
       }
 
@@ -1468,19 +1891,27 @@ export async function POST(request) {
         commandId,
         "execution_completed",
         {
-          dry_run: true,
+          dry_run: false,
+          files_modified:
+            true,
+          github_write_used:
+            true,
+          verified: true,
+          commit_sha:
+            writeResult.commit_sha,
         }
       );
 
       return json({
         success: true,
-        command_id: commandId,
+        command_id:
+          commandId,
         command_type:
           commandType,
         result:
           resultMessage,
         output_data:
-          preview,
+          realEditOutput,
       });
     }
 
