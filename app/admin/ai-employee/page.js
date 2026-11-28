@@ -651,53 +651,6 @@ export default function AiEmployeePage() {
     }
   }
 
-  async function startCommand(command) {
-    if (!command?.id) return;
-
-    setSaving(true);
-    setActionError("");
-    setActionMessage("");
-
-    try {
-      const { data, error } =
-        await supabase.rpc(
-          "start_ai_employee_command",
-          {
-            p_command_id: command.id,
-          }
-        );
-
-      if (error) {
-        throw error;
-      }
-
-      if (data?.authorized === false) {
-        throw new Error(
-          data?.message ||
-            "الأمر غير مصرح له بالبدء."
-        );
-      }
-
-      await refreshCommandData();
-
-      setActionMessage(
-        "تم بدء الأمر. أصبح الآن جاهزًا لطبقة التنفيذ."
-      );
-    } catch (error) {
-      console.error(
-        "Start command error:",
-        error
-      );
-
-      setActionError(
-        error?.message ||
-          "تعذر بدء الأمر."
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function parseApiResponse(response) {
     const contentType =
       response.headers.get(
@@ -804,21 +757,21 @@ export default function AiEmployeePage() {
       setActionError(
         "command_id مطلوب."
       );
-      return;
+      return null;
     }
 
     if (executingId) {
       setActionError(
         "يوجد أمر آخر قيد التنفيذ من الواجهة."
       );
-      return;
+      return null;
     }
 
     if (command.status !== "running") {
       setActionError(
         "يجب أن يكون الأمر في حالة «قيد التنفيذ» قبل تشغيل محرك التنفيذ."
       );
-      return;
+      return null;
     }
 
     if (
@@ -829,7 +782,7 @@ export default function AiEmployeePage() {
       setActionError(
         `نوع الأمر ${command.command_type} غير مدعوم في محرك التنفيذ الحالي.`
       );
-      return;
+      return null;
     }
 
     setExecutingId(command.id);
@@ -851,10 +804,6 @@ export default function AiEmployeePage() {
     }, 60000);
 
     try {
-      /*
-       * مهم:
-       * API ينتظر command_id وليس commandId.
-       */
       const response = await fetch(
         "/api/admin/ai-employee/execute",
         {
@@ -910,7 +859,7 @@ export default function AiEmployeePage() {
         setActionError(
           "تم الاتصال بمحرك التنفيذ، لكن الأمر بقي قيد التنفيذ لأكثر من 45 ثانية. لم يتم إيقافه تلقائيًا حفاظًا على سلامة السجل."
         );
-        return;
+        return null;
       }
 
       if (
@@ -950,6 +899,8 @@ export default function AiEmployeePage() {
       setSelectedCommand(
         finishedCommand
       );
+
+      return finishedCommand;
     } catch (error) {
       console.error(
         "Execute command error:",
@@ -973,9 +924,117 @@ export default function AiEmployeePage() {
       setExecutionMessage("");
 
       await refreshCommandData();
+
+      return null;
     } finally {
       clearTimeout(timeout);
       setExecutingId(null);
+    }
+  }
+
+  /*
+   * التعديل الأساسي:
+   * بعد نجاح start_ai_employee_command
+   * يتم جلب الأمر من قاعدة البيانات،
+   * ثم تشغيل محرك التنفيذ مباشرة.
+   *
+   * هذا يمنع بقاء الأمر في running
+   * بدون استدعاء /api/admin/ai-employee/execute.
+   */
+  async function startCommand(command) {
+    if (!command?.id) return;
+
+    if (executingId) {
+      setActionError(
+        "يوجد أمر آخر قيد التنفيذ من الواجهة."
+      );
+      return;
+    }
+
+    setSaving(true);
+    setActionError("");
+    setActionMessage("");
+    setExecutionMessage("");
+
+    try {
+      const { data, error } =
+        await supabase.rpc(
+          "start_ai_employee_command",
+          {
+            p_command_id: command.id,
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.authorized === false) {
+        throw new Error(
+          data?.message ||
+            "الأمر غير مصرح له بالبدء."
+        );
+      }
+
+      /*
+       * نعيد تحميل الأمر بعد الـ RPC
+       * حتى نتأكد أن الحالة أصبحت running.
+       */
+      const refreshed =
+        await refreshCommandData();
+
+      const runningCommand =
+        refreshed?.commands?.find(
+          (item) =>
+            item.id === command.id
+        );
+
+      if (!runningCommand) {
+        throw new Error(
+          "تم بدء الأمر، لكن تعذر قراءة حالته من قاعدة البيانات."
+        );
+      }
+
+      if (
+        runningCommand.status !==
+        "running"
+      ) {
+        throw new Error(
+          `تم بدء الأمر لكن حالته الحالية هي: ${
+            statusLabels[
+              runningCommand.status
+            ] ||
+            runningCommand.status
+          }`
+        );
+      }
+
+      setActionMessage(
+        "تم بدء الأمر. جارٍ الآن تشغيل محرك التنفيذ..."
+      );
+
+      /*
+       * التشغيل الفعلي للـ API.
+       * executeCommand يتحقق من running
+       * ثم يستدعي Route.
+       */
+      await executeCommand(
+        runningCommand
+      );
+    } catch (error) {
+      console.error(
+        "Start command error:",
+        error
+      );
+
+      setActionError(
+        error?.message ||
+          "تعذر بدء وتنفيذ الأمر."
+      );
+
+      await refreshCommandData();
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1000,6 +1059,11 @@ export default function AiEmployeePage() {
           ? "approve_ai_employee_command"
           : "reject_ai_employee_command";
 
+      /*
+       * الإصدار الصحيح من RPC يستخدم:
+       * p_command_id
+       * p_reason
+       */
       const {
         data,
         error,
@@ -2174,7 +2238,10 @@ export default function AiEmployeePage() {
                                       )
                                     }
                                     disabled={
-                                      saving
+                                      saving ||
+                                      Boolean(
+                                        executingId
+                                      )
                                     }
                                     style={{
                                       ...smallButton,
@@ -2184,7 +2251,7 @@ export default function AiEmployeePage() {
                                         "#166534",
                                     }}
                                   >
-                                    بدء
+                                    بدء وتنفيذ
                                   </button>
                                 )}
 
